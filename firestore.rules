@@ -1,0 +1,84 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function adminPath() {
+      return /databases/$(database)/documents/admins/$(request.auth.uid);
+    }
+
+    function adminDoc() {
+      return get(adminPath());
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && exists(adminPath())
+        && adminDoc().data.status == 'active';
+    }
+
+    function isSuperAdmin() {
+      return isAdmin() && adminDoc().data.role == 'super_admin';
+    }
+
+    match /users/{userId} {
+      allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      // Admins manage account flags; citizens may change profile fields only.
+      allow update: if isAdmin() || (
+        isSignedIn()
+        && request.auth.uid == userId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'firstName',
+          'lastName',
+          'contactNumber',
+          'birthday',
+          'updatedAt'
+        ])
+      );
+      allow delete: if isSuperAdmin() || (isSignedIn() && request.auth.uid == userId);
+    }
+
+    match /admins/{adminId} {
+      // Own profile can always be read (fixes login permission loop)
+      allow read: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
+
+      // Super admin can create other admins.
+      // Bootstrap: allow creating the first superadmin@gmail.com profile for yourself.
+      allow create: if isSuperAdmin() || (
+        isSignedIn()
+        && request.auth.uid == adminId
+        && request.auth.token.email == 'superadmin@gmail.com'
+        && request.resource.data.email == 'superadmin@gmail.com'
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.role == 'super_admin'
+        && request.resource.data.status == 'active'
+      );
+
+      allow update: if isSuperAdmin()
+        || (isAdmin() && request.auth.uid == adminId)
+        || (
+          isSignedIn()
+          && request.auth.uid == adminId
+          && request.auth.token.email == 'superadmin@gmail.com'
+        );
+      allow delete: if isSuperAdmin();
+    }
+
+    match /reports/{reportId} {
+      allow read: if isAdmin() || (isSignedIn() && resource.data.reportedByUid == request.auth.uid);
+      allow create: if isSignedIn() && request.resource.data.reportedByUid == request.auth.uid;
+      allow update: if isAdmin() || (isSignedIn() && resource.data.reportedByUid == request.auth.uid
+        && request.resource.data.reportedByUid == resource.data.reportedByUid);
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.reportedByUid == request.auth.uid);
+    }
+
+    match /admin_activity_logs/{logId} {
+      allow read: if isSuperAdmin() || (isAdmin() && resource.data.adminUid == request.auth.uid);
+      allow create: if isAdmin();
+    }
+  }
+}

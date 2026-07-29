@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Build / debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+*.log
+*.tsbuildinfo
+
+# OS & editors
+.DS_Store
+Thumbs.db
+.cursor/
+.claude/
+.vscode/
+
+# Native (generated)
+ios/
+android/
+.kotlin/
+
+# Firebase service account (never commit)
+serviceAccountKey.json
+*-firebase-adminsdk-*.json

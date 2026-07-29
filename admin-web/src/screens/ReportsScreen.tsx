@@ -1,0 +1,534 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  TouchableOpacity,
+  useWindowDimensions,
+  Alert,
+  Image,
+  Modal,
+} from "react-native";
+import {
+  ClipboardList,
+  Clock,
+  Check,
+  Eye,
+  Trash2,
+  Search,
+  Calendar,
+  Filter,
+  X,
+} from "lucide-react-native";
+import { router } from "expo-router";
+import AdminLayout from "../components/AdminLayout";
+import DashboardCard from "../components/DashboardCard";
+import { useAdminData } from "@/hooks/useAdminData";
+import { useAdminAuth } from "@/context/AdminAuthContext";
+import { deleteReport } from "@/services/adminDataService";
+import { resolveReportImageUrls } from "@/services/reportImageService";
+import { formatDateTime } from "@/utils/format";
+import type { Report } from "@/types/admin";
+
+const CATEGORIES = ["All Categories", "Deforestation", "Forest Fires", "Illegal Logging", "Waste Dumping", "Other"];
+const STATUSES = ["All Statuses", "Pending", "In Review", "Resolved", "Rejected"];
+
+/**
+ * Purpose: Enables administrators to search, review, inspect, and delete environmental reports.
+ * How it works:
+ * 1. Shared Firestore-backed data supplies reports and summary statistics.
+ * 2. Memoized text, category, and status filters derive the visible table.
+ * 3. Evidence thumbnails are resolved for visible records and opened in a modal.
+ * 4. Report details and audited deletion actions are available from each row.
+ * Technologies Used: React hooks, React Native Web, Expo Router, Cloud Firestore services, and image URL handling.
+ * Why this implementation: A unified workspace supports efficient report triage without duplicating backend state.
+ */
+export default function ReportsScreen() {
+  const { width, height } = useWindowDimensions();
+  const s = Math.min(width / 1920, height / 1080);
+  const { reports, stats, reload } = useAdminData();
+  const { admin } = useAdminAuth();
+
+  /*
+   * Filter state derives the visible report set, menu state controls filter dialogs,
+   * and thumbnail/viewer state manages evidence previews independently of report records.
+   */
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("All Categories");
+  const [status, setStatus] = useState("All Statuses");
+  const [showCategoryMenu, setShowCategoryMenu] = useState(false);
+  const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
+  const [viewerReport, setViewerReport] = useState<Report | null>(null);
+  const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
+
+  const filteredReports = useMemo(() => {
+    // Apply all user-selected criteria in one derived list without mutating Firestore data.
+    const queryText = search.trim().toLowerCase();
+    return reports.filter((report) => {
+      const matchesSearch =
+        !queryText ||
+        report.title.toLowerCase().includes(queryText) ||
+        report.description.toLowerCase().includes(queryText) ||
+        report.location.toLowerCase().includes(queryText) ||
+        report.reportedByName.toLowerCase().includes(queryText) ||
+        (report.reportedByEmail || "").toLowerCase().includes(queryText);
+
+      const matchesCategory = category === "All Categories" || report.category === category;
+      const matchesStatus = status === "All Statuses" || report.status === status;
+      return matchesSearch && matchesCategory && matchesStatus;
+    });
+  }, [reports, search, category, status]);
+
+  /**
+   * Purpose: Resolves and caches a representative evidence image for one report row.
+   * How it works:
+   * 1. Existing cache entries avoid repeated image-reference processing.
+   * 2. The image service selects current paths or legacy report URLs.
+   * 3. The first available reference is stored by report ID.
+   * Technologies Used: React state, asynchronous JavaScript, and Firebase Storage-derived image references.
+   * Why this implementation: Lazy row previews limit repeated work while preserving legacy evidence.
+   */
+  const ensureThumbnail = async (report: Report) => {
+    if (thumbnails[report.id]) return;
+    const urls = await resolveReportImageUrls(report);
+    if (urls[0]) {
+      setThumbnails((prev) => ({ ...prev, [report.id]: urls[0] }));
+    }
+  };
+
+  useEffect(() => {
+    // Resolve previews for only the first visible records to bound initial image work.
+    filteredReports.slice(0, 20).forEach((report) => {
+      ensureThumbnail(report);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredReports]);
+
+  /**
+   * Purpose: Confirms and executes permanent deletion of an environmental report.
+   * How it works:
+   * 1. An authenticated administrator is required before the confirmation appears.
+   * 2. The destructive alert requires an explicit confirmation.
+   * 3. Firestore deletion and audit logging complete before shared data reloads.
+   * Technologies Used: React Native alerts, Cloud Firestore services, React Context, and asynchronous JavaScript.
+   * Why this implementation: Explicit confirmation and audit attribution reduce untraceable destructive actions.
+   */
+  const handleDelete = (report: Report) => {
+    // The current administrator is required for both authorization context and audit attribution.
+    if (!admin) return;
+    Alert.alert("Delete Report", `Permanently delete "${report.title}"?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: async () => {
+          // Delete only after the user confirms the irreversible report action.
+          try {
+            await deleteReport(report.id, admin);
+            await reload();
+          // Keep the table intact and report backend or Firestore failures to the administrator.
+          } catch (err) {
+            Alert.alert("Error", err instanceof Error ? err.message : "Failed to delete report.");
+          }
+        },
+      },
+    ]);
+  };
+
+  return (
+    <AdminLayout activePage="Reports">
+      <ScrollView
+        style={styles.page}
+        contentContainerStyle={{
+          paddingHorizontal: width * 0.025,
+          paddingTop: height * 0.035,
+          paddingBottom: 30,
+        }}
+        showsVerticalScrollIndicator={false}
+      >
+        <Text style={[styles.pageTitle, { fontSize: 42 * s }]}>REPORTS</Text>
+        <Text style={[styles.subtitle, { fontSize: 18 * s }]}>
+          Manage and review all environmental reports submitted by users
+        </Text>
+
+        <View style={[styles.cards, { gap: width * 0.025, marginTop: height * 0.035 }]}>
+          <DashboardCard title="Total Reports" value={String(stats.totalReports)} color="#DDEAD3" icon={ClipboardList} iconColor="#20B83B" />
+          <DashboardCard title="In Review" value={String(stats.reportsInReview)} color="#CFE6FA" icon={Eye} iconColor="#259BEF" />
+          <DashboardCard title="Pending" value={String(stats.pendingReports)} color="#FCEFCB" icon={Clock} iconColor="#000" />
+          <DashboardCard title="Resolved" value={String(stats.resolvedReports)} color="#DDEAD3" icon={Check} iconColor="#43B64A" />
+        </View>
+
+        <View style={[styles.filterPanel, { marginTop: height * 0.025, padding: 14 * s }]}>
+          <View style={styles.searchBox}>
+            <TextInput
+              placeholder="Search reports..."
+              placeholderTextColor="#777"
+              style={[styles.searchInput, { fontSize: 15 * s }]}
+              value={search}
+              onChangeText={setSearch}
+            />
+            <Search size={20 * s} color="#000" />
+          </View>
+
+          <TouchableOpacity style={styles.filterBox} onPress={() => setShowCategoryMenu(true)}>
+            <Text style={[styles.filterLabel, { fontSize: 13 * s }]}>Category</Text>
+            <Text style={[styles.filterText, { fontSize: 15 * s }]}>{category} ⌄</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.filterBox} onPress={() => setShowStatusMenu(true)}>
+            <Text style={[styles.filterLabel, { fontSize: 13 * s }]}>Status</Text>
+            <Text style={[styles.filterText, { fontSize: 15 * s }]}>{status} ⌄</Text>
+          </TouchableOpacity>
+
+          <View style={styles.dateBox}>
+            <Text style={[styles.filterLabel, { fontSize: 13 * s }]}>Results</Text>
+            <View style={styles.dateInner}>
+              <Text style={[styles.filterText, { fontSize: 15 * s }]}>
+                {filteredReports.length} of {reports.length}
+              </Text>
+              <Calendar size={18 * s} color="#000" />
+            </View>
+          </View>
+
+          <View style={styles.buttonColumn}>
+            <TouchableOpacity
+              style={styles.smallButton}
+              onPress={() => {
+                setSearch("");
+                setCategory("All Categories");
+                setStatus("All Statuses");
+              }}
+            >
+              <Filter size={14 * s} color="#34733B" />
+              <Text style={[styles.buttonText, { fontSize: 14 * s }]}>Reset</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        <View style={[styles.tablePanel, { marginTop: height * 0.02 }]}>
+          <View style={[styles.tableHeader, { height: 48 * s }]}>
+            <Text style={[styles.th, styles.idCol, { fontSize: 18 * s }]}>ID</Text>
+            <Text style={[styles.th, styles.detailsCol, { fontSize: 18 * s }]}>Report Details</Text>
+            <Text style={[styles.th, styles.locationCol, { fontSize: 18 * s, transform: [{ translateX: 20 * s }] }]}>Location</Text>
+            <Text style={[styles.th, styles.categoryCol, { fontSize: 18 * s }]}>Category</Text>
+            <Text style={[styles.th, styles.reportedCol, { fontSize: 18 * s }]}>Reported By</Text>
+            <Text style={[styles.th, styles.dateCol, { fontSize: 18 * s }]}>Date Reported</Text>
+            <Text style={[styles.th, styles.statusCol, { fontSize: 18 * s }]}>Status</Text>
+            <Text style={[styles.th, styles.actionCol, { fontSize: 18 * s, transform: [{ translateX: 35 * s }] }]}>Action</Text>
+          </View>
+
+          {filteredReports.map((report) => {
+            const submitted = formatDateTime(report.createdAt);
+            return (
+              <View key={report.id} style={[styles.tableRow, { minHeight: 88 * s }]}>
+                <Text style={[styles.td, styles.idCol, { fontSize: 18 * s }]}>#{report.id.slice(0, 8)}</Text>
+
+                <View style={[styles.detailsCol, styles.reportDetails]}>
+                  <TouchableOpacity
+                    onPress={() => {
+                      if (!thumbnails[report.id]) return;
+                      setViewerUri(thumbnails[report.id]);
+                      setViewerReport(report);
+                    }}
+                    style={[styles.imageBox, { width: 48 * s, height: 48 * s }]}
+                  >
+                    {thumbnails[report.id] ? (
+                      <Image source={{ uri: thumbnails[report.id] }} style={{ width: "100%", height: "100%" }} />
+                    ) : null}
+                  </TouchableOpacity>
+                  <View style={styles.reportTextBox}>
+                    <Text style={[styles.reportTitle, { fontSize: 16 * s }]}>{report.title}</Text>
+                    <Text style={[styles.reportDesc, { fontSize: 12 * s }]} numberOfLines={2}>
+                      {report.description}
+                    </Text>
+                  </View>
+                </View>
+
+                <Text style={[styles.td, styles.locationCol, { fontSize: 16 * s, transform: [{ translateX: 20 * s }] }]}>
+                  {report.location}
+                </Text>
+
+                <View style={[styles.categoryCol, styles.badgeWrap]}>
+                  <Text style={[styles.badge, categoryColor(report.category), { fontSize: 16 * s, paddingHorizontal: 8 * s, paddingVertical: 5 * s }]}>
+                    {report.category}
+                  </Text>
+                </View>
+
+                <View style={styles.reportedCol}>
+                  <Text style={[styles.td, { fontSize: 16 * s }]}>{report.reportedByName}</Text>
+                  <Text style={[styles.username, { fontSize: 13 * s }]}>{report.reportedByEmail || report.reportedByUid}</Text>
+                </View>
+
+                <View style={styles.dateCol}>
+                  <Text style={[styles.td, { fontSize: 16 * s }]}>{submitted.date}</Text>
+                  <Text style={[styles.username, { fontSize: 13 * s }]}>{submitted.time}</Text>
+                </View>
+
+                <View style={[styles.statusCol, styles.badgeWrap]}>
+                  <Text style={[styles.badge, statusColor(report.status), { fontSize: 16 * s, paddingHorizontal: 8 * s, paddingVertical: 5 * s }]}>
+                    {report.status}
+                  </Text>
+                </View>
+
+                <View style={[styles.actionCol, styles.actions]}>
+                  <TouchableOpacity
+                    onPress={() => router.navigate({ pathname: "/report-details", params: { id: report.id } })}
+                    style={styles.iconButton}
+                  >
+                    <Eye size={20 * s} color="#000" />
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => handleDelete(report)} style={styles.iconButton}>
+                    <Trash2 size={20 * s} color="#D83030" />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })}
+
+          <View style={[styles.paginationRow, { padding: 18 * s }]}>
+            <Text style={[styles.showing, { fontSize: 16 * s }]}>
+              Showing {filteredReports.length} of {stats.totalReports} reports
+            </Text>
+          </View>
+        </View>
+      </ScrollView>
+
+      <Modal transparent visible={showCategoryMenu} animationType="fade">
+        <TouchableOpacity style={styles.menuOverlay} onPress={() => setShowCategoryMenu(false)}>
+          <View style={styles.menuCard}>
+            {CATEGORIES.map((item) => (
+              <TouchableOpacity
+                key={item}
+                style={styles.menuItem}
+                onPress={() => {
+                  setCategory(item);
+                  setShowCategoryMenu(false);
+                }}
+              >
+                <Text style={styles.menuText}>{item}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal transparent visible={showStatusMenu} animationType="fade">
+        <TouchableOpacity style={styles.menuOverlay} onPress={() => setShowStatusMenu(false)}>
+          <View style={styles.menuCard}>
+            {STATUSES.map((item) => (
+              <TouchableOpacity
+                key={item}
+                style={styles.menuItem}
+                onPress={() => {
+                  setStatus(item);
+                  setShowStatusMenu(false);
+                }}
+              >
+                <Text style={styles.menuText}>{item}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      <Modal transparent visible={Boolean(viewerUri)} animationType="fade">
+        <View style={styles.viewerOverlay}>
+          <TouchableOpacity
+            style={styles.viewerClose}
+            onPress={() => {
+              setViewerUri(null);
+              setViewerReport(null);
+            }}
+          >
+            <X size={24} color="#fff" />
+          </TouchableOpacity>
+          {viewerUri ? (
+            <View style={styles.viewerContent}>
+              <Image source={{ uri: viewerUri }} style={styles.viewerImage} resizeMode="contain" />
+              {viewerReport ? (
+                <View style={styles.viewerMetadata}>
+                  <Text style={styles.viewerMetadataText}>
+                    Captured: {viewerReport.imageTimestamp || "Not recorded"}
+                  </Text>
+                  <Text style={styles.viewerMetadataText}>
+                    {viewerReport.imageLocation || viewerReport.location}
+                  </Text>
+                  {viewerReport.coordinates ? (
+                    <Text style={styles.viewerMetadataText}>
+                      GPS: {viewerReport.coordinates.latitude.toFixed(6)},{" "}
+                      {viewerReport.coordinates.longitude.toFixed(6)}
+                    </Text>
+                  ) : null}
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+        </View>
+      </Modal>
+    </AdminLayout>
+  );
+}
+
+/**
+ * Purpose: Maps report categories to consistent table badge colors.
+ * How it works:
+ * 1. Category keywords select water, forest, illegal-activity, or fallback colors.
+ * 2. The selected style object is applied without modifying the report value.
+ * Technologies Used: TypeScript string matching and React Native style objects.
+ * Why this implementation: Semantic color improves category recognition in dense report tables.
+ */
+function categoryColor(category: string) {
+  if (category.includes("Water")) return { backgroundColor: "#D7B9EA", color: "#6B168F" };
+  if (category.includes("Forest") || category.includes("Deforestation")) return { backgroundColor: "#C8E6C9", color: "#2E7D32" };
+  if (category.includes("Illegal")) return { backgroundColor: "#FFCDD2", color: "#C62828" };
+  return { backgroundColor: "#FFF9C4", color: "#F9A825" };
+}
+
+/**
+ * Purpose: Maps each report workflow status to a semantic table badge.
+ * How it works:
+ * 1. Pending, in-review, and resolved values select dedicated colors.
+ * 2. Remaining statuses use the rejection presentation.
+ * Technologies Used: TypeScript conditionals and React Native style objects.
+ * Why this implementation: Stable status colors make moderation progress easier to scan.
+ */
+function statusColor(status: string) {
+  if (status === "Pending") return { backgroundColor: "#FFF0B8", color: "#D99A00" };
+  if (status === "In Review") return { backgroundColor: "#C7DDFF", color: "#315BC9" };
+  if (status === "Resolved") return { backgroundColor: "#BFEBC5", color: "#168A18" };
+  return { backgroundColor: "#FFD0D0", color: "#D83030" };
+}
+
+const styles = StyleSheet.create({
+  page: { flex: 1, backgroundColor: "#fff" },
+  pageTitle: { fontFamily: "Montserrat_700Bold", color: "#0B5A1E" },
+  subtitle: { fontFamily: "Montserrat_700Bold", color: "#555", marginTop: 6 },
+  cards: { flexDirection: "row" },
+  filterPanel: {
+    borderWidth: 1,
+    borderColor: "#d6d6d6",
+    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 12,
+    flexWrap: "wrap",
+  },
+  searchBox: {
+    flex: 1.4,
+    minWidth: 180,
+    borderWidth: 1,
+    borderColor: "#d6d6d6",
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    height: 48,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  searchInput: { flex: 1, fontFamily: "Montserrat_700Bold", outlineStyle: "none" as any },
+  filterBox: {
+    minWidth: 140,
+    borderWidth: 1,
+    borderColor: "#d6d6d6",
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  dateBox: {
+    minWidth: 160,
+    borderWidth: 1,
+    borderColor: "#d6d6d6",
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  dateInner: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  filterLabel: { fontFamily: "Montserrat_700Bold", color: "#777", marginBottom: 4 },
+  filterText: { fontFamily: "Montserrat_700Bold", color: "#111" },
+  buttonColumn: { justifyContent: "center" },
+  smallButton: {
+    borderWidth: 1,
+    borderColor: "#9DE5A0",
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    height: 40,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  buttonText: { fontFamily: "Montserrat_700Bold", color: "#34733B" },
+  tablePanel: { borderWidth: 1, borderColor: "#d6d6d6", borderRadius: 8, overflow: "hidden" },
+  tableHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#F3F7F1",
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#d6d6d6",
+  },
+  tableRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: "#ececec",
+  },
+  th: { fontFamily: "Montserrat_700Bold", color: "#111" },
+  td: { fontFamily: "Montserrat_700Bold", color: "#222" },
+  idCol: { width: "8%" },
+  detailsCol: { width: "22%" },
+  locationCol: { width: "14%" },
+  categoryCol: { width: "12%" },
+  reportedCol: { width: "14%" },
+  dateCol: { width: "12%" },
+  statusCol: { width: "10%" },
+  actionCol: { width: "8%" },
+  reportDetails: { flexDirection: "row", alignItems: "center", gap: 10 },
+  imageBox: { backgroundColor: "#ddd", borderRadius: 6, overflow: "hidden" },
+  reportTextBox: { flex: 1 },
+  reportTitle: { fontFamily: "Montserrat_700Bold", color: "#111" },
+  reportDesc: { fontFamily: "Montserrat_700Bold", color: "#666", marginTop: 2 },
+  username: { fontFamily: "Montserrat_700Bold", color: "#777" },
+  badgeWrap: { alignItems: "flex-start" },
+  badge: { borderRadius: 5, overflow: "hidden", fontFamily: "Montserrat_700Bold" },
+  actions: { flexDirection: "row", gap: 8 },
+  iconButton: { padding: 6 },
+  paginationRow: { flexDirection: "row", justifyContent: "space-between" },
+  showing: { fontFamily: "Montserrat_700Bold", color: "#555" },
+  menuOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.25)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuCard: { width: 280, backgroundColor: "#fff", borderRadius: 8, paddingVertical: 8 },
+  menuItem: { paddingHorizontal: 16, paddingVertical: 12 },
+  menuText: { fontFamily: "Montserrat_700Bold", color: "#111" },
+  viewerOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.9)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  viewerClose: { position: "absolute", top: 24, right: 24, zIndex: 2 },
+  viewerContent: { width: "70%", height: "82%", alignItems: "center" },
+  viewerImage: { width: "100%", height: "78%" },
+  viewerMetadata: {
+    width: "100%",
+    backgroundColor: "#fff",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#d8e3d4",
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginTop: 10,
+  },
+  viewerMetadataText: {
+    color: "#263b28",
+    fontFamily: "Montserrat_700Bold",
+    fontSize: 14,
+    lineHeight: 20,
+  },
+});
