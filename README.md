@@ -1,3 +1,8 @@
+<<<<<<< HEAD
+=======
+# capstone
+capstone project
+>>>>>>> 5f26cc0f900238e7d38c95ae6cb8fba3ca8078ee
 # EcoBantay
 
 Environmental reporting system for Valencia — citizen mobile app, admin web dashboard, and backend API.
@@ -38,3 +43,7 @@ Environmental reporting system for Valencia — citizen mobile app, admin web da
 
 - Do not commit `.env` files or Firebase service account keys.
 - Report images are stored in **Firebase Storage** (not Supabase).
+<<<<<<< HEAD
+=======
+
+>>>>>>> 5f26cc0f900238e7d38c95ae6cb8fba3ca8078ee
