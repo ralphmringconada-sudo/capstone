@@ -110,6 +110,7 @@ export default function CreateReportScreen() {
    * image processing and GPS retrieval, and surface recoverable errors.
    */
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [imageProcessing, setImageProcessing] = useState(false);
   const [locating, setLocating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -371,8 +372,10 @@ export default function CreateReportScreen() {
    * Why this implementation: One final async boundary keeps evidence metadata and persistence status synchronized.
    */
   const finalizeSubmit = async () => {
-    if (!user || !coordinates || !stampedImageUri || !photoTimestamp || submitting) return;
+    if (!user || !coordinates || !stampedImageUri || !photoTimestamp) return;
+    if (submittingRef.current || submitting) return;
 
+    submittingRef.current = true;
     try {
       setSubmitting(true);
       setError(null);
@@ -416,13 +419,14 @@ export default function CreateReportScreen() {
 
       Alert.alert('Success', 'Report submitted successfully with timestamped image proof.');
       router.replace('/home');
+      // Keep locked after success to block rapid re-submits before navigation finishes.
     } catch (submitError) {
       /* Error handling: retain the completed form and evidence so the reporter can retry. */
       const message =
         submitError instanceof Error ? submitError.message : 'Failed to submit report. Please try again.';
       setError(message);
       Alert.alert('Error', message);
-    } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };

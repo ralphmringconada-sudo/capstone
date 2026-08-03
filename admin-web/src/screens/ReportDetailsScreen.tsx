@@ -81,7 +81,20 @@ export default function ReportDetailsScreen() {
    */
   const handleStatusUpdate = async (status: Report["status"], details: string) => {
     // Require both the target record and actor before a consequential report update.
-    if (!report || !admin) return;
+    if (!report || !admin || isUpdating) return;
+
+    // Terminal statuses cannot be changed again.
+    if (report.status === "Resolved" || report.status === "Rejected") {
+      setError("This report is already closed and cannot be updated.");
+      return;
+    }
+
+    // In Review can only move forward to Resolved or Rejected.
+    if (report.status === "In Review" && status === "In Review") {
+      setError("This report is already in review.");
+      return;
+    }
+
     setIsUpdating(true);
     setError("");
     // Persist the audited status decision before replacing the local report snapshot.
@@ -121,6 +134,10 @@ export default function ReportDetailsScreen() {
   }
 
   const submitted = formatDateTime(report.createdAt);
+  const isClosed = report.status === "Resolved" || report.status === "Rejected";
+  const canMarkInReview = report.status === "Pending";
+  const canMarkResolved = report.status === "Pending" || report.status === "In Review";
+  const canReject = report.status === "Pending" || report.status === "In Review";
 
   return (
     <AdminLayout activePage="Reports">
@@ -129,9 +146,11 @@ export default function ReportDetailsScreen() {
         contentContainerStyle={{
           paddingHorizontal: width * 0.025,
           paddingTop: height * 0.035,
-          paddingBottom: 30,
+          paddingBottom: 48,
+          flexGrow: 1,
         }}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
+        persistentScrollbar
       >
         <TouchableOpacity onPress={() => router.back()}>
           <ArrowLeft size={28 * s} color="#000" />
@@ -161,7 +180,7 @@ export default function ReportDetailsScreen() {
                 <Text
                   style={[
                     styles.badge,
-                    styles.pendingBadge,
+                    historyBadgeColor(report.status),
                     {
                       fontSize: 16 * s,
                       paddingHorizontal: 9 * s,
@@ -305,30 +324,45 @@ export default function ReportDetailsScreen() {
 
               {error ? <Text style={{ color: "#8B1E1E", marginBottom: 8 * s }}>{error}</Text> : null}
 
-              <ActionButton
-                text="Mark as In Review"
-                color="#259BEF"
-                icon={Check}
-                s={s}
-                onPress={() => handleStatusUpdate("In Review", "Marked report as in review")}
-                disabled={isUpdating}
-              />
-              <ActionButton
-                text="Mark as Resolved"
-                color="#20B83B"
-                icon={Check}
-                s={s}
-                onPress={() => handleStatusUpdate("Resolved", "Approved and resolved report")}
-                disabled={isUpdating}
-              />
-              <ActionButton
-                text="Reject Report"
-                color="#FF3B3B"
-                icon={X}
-                s={s}
-                onPress={() => handleStatusUpdate("Rejected", "Rejected report")}
-                disabled={isUpdating}
-              />
+              {isClosed ? (
+                <Text style={[styles.closedHint, { fontSize: 15 * s }]}>
+                  This report is {report.status.toLowerCase()} and can no longer be updated.
+                </Text>
+              ) : null}
+
+              {canMarkInReview ? (
+                <ActionButton
+                  text="Mark as In Review"
+                  color="#259BEF"
+                  icon={Check}
+                  s={s}
+                  onPress={() => handleStatusUpdate("In Review", "Marked report as in review")}
+                  disabled={isUpdating}
+                />
+              ) : null}
+
+              {canMarkResolved ? (
+                <ActionButton
+                  text="Mark as Resolved"
+                  color="#20B83B"
+                  icon={Check}
+                  s={s}
+                  onPress={() => handleStatusUpdate("Resolved", "Approved and resolved report")}
+                  disabled={isUpdating}
+                />
+              ) : null}
+
+              {canReject ? (
+                <ActionButton
+                  text="Reject Report"
+                  color="#FF3B3B"
+                  icon={X}
+                  s={s}
+                  onPress={() => handleStatusUpdate("Rejected", "Rejected report")}
+                  disabled={isUpdating}
+                />
+              ) : null}
+
               <ActionButton
                 text="Delete Report"
                 color="#8B1E1E"
@@ -336,7 +370,7 @@ export default function ReportDetailsScreen() {
                 s={s}
                 onPress={async () => {
                   // Require an existing report and authenticated audit actor before deletion.
-                  if (!report || !admin) return;
+                  if (!report || !admin || isUpdating) return;
                   setIsUpdating(true);
                   try {
                     // Load and execute the Firestore deletion service, then leave the removed record.
@@ -436,6 +470,17 @@ const styles = StyleSheet.create({
   page: {
     flex: 1,
     backgroundColor: "#fff",
+    // Keep the report details pane independently scrollable on web.
+    // @ts-expect-error web-only overflow for visible scrollbar
+    overflowY: "auto",
+    // @ts-expect-error web-only height constraint
+    maxHeight: "calc(100vh - 72px)",
+  },
+  closedHint: {
+    color: "#555",
+    fontFamily: "Montserrat_700Bold",
+    marginBottom: 4,
+    lineHeight: 22,
   },
   pageTitle: {
     fontFamily: "Montserrat_700Bold",
@@ -461,7 +506,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
-    marginBottom: 16,
+    marginBottom: 22,
   },
   sectionTitle: {
     fontFamily: "Montserrat_700Bold",
@@ -469,20 +514,24 @@ const styles = StyleSheet.create({
   },
   infoRowTop: {
     flexDirection: "row",
+    alignItems: "flex-start",
     borderBottomWidth: 1,
     borderBottomColor: "#d6d6d6",
-    paddingBottom: 14,
-    marginBottom: 2,
+    paddingBottom: 18,
+    marginBottom: 10,
+    gap: 16,
   },
   infoRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     borderBottomWidth: 1,
     borderBottomColor: "#d6d6d6",
-    paddingVertical: 13,
+    paddingVertical: 18,
+    gap: 16,
   },
   label: {
-    width: "35%",
+    width: "38%",
+    paddingRight: 12,
     fontFamily: "Montserrat_700Bold",
     color: "#000",
   },
@@ -490,12 +539,15 @@ const styles = StyleSheet.create({
     flex: 1,
     fontFamily: "Montserrat_700Bold",
     color: "#333",
-    lineHeight: 19,
+    lineHeight: 22,
+    paddingLeft: 4,
   },
   valueText: {
     flex: 1,
     fontFamily: "Montserrat_700Bold",
     color: "#000",
+    lineHeight: 22,
+    paddingLeft: 4,
   },
   badge: {
     alignSelf: "flex-start",
@@ -524,6 +576,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    marginBottom: 16,
   },
   reportImage: {
     borderRadius: 7,
@@ -599,14 +652,16 @@ historyRemarksCol: {
   locationFooter: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: 12,
-    gap: 10,
+    alignItems: "flex-start",
+    marginTop: 20,
+    gap: 16,
   },
   locationText: {
     flex: 1,
     fontFamily: "Montserrat_700Bold",
     color: "#333",
+    lineHeight: 24,
+    paddingRight: 8,
   },
   mapButton: {
     borderWidth: 1,

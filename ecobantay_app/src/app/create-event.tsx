@@ -79,6 +79,7 @@ export default function CreateEventScreen() {
   const [showTimePicker, setShowTimePicker] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
 
   const [categoryIndex, setCategoryIndex] = useState(0);
   const currentIndexRef = useRef(0);
@@ -169,6 +170,8 @@ export default function CreateEventScreen() {
   };
 
   const handleCreate = async () => {
+    if (submittingRef.current || submitting) return;
+
     if (!user?.uid) {
       Alert.alert('Sign in required', 'Please sign in to create an event.');
       return;
@@ -182,6 +185,7 @@ export default function CreateEventScreen() {
       return;
     }
 
+    submittingRef.current = true;
     setSubmitting(true);
     setError(null);
     try {
@@ -203,24 +207,21 @@ export default function CreateEventScreen() {
           email: user.email || '',
         },
       });
-      Alert.alert(
-        'Submitted for approval',
-        'Your event is Pending. Other users will see it after an admin accepts it.',
-        [
-          {
-            text: 'OK',
-            onPress: () =>
-              router.replace({
-                pathname: '/view-event',
-                params: { id: eventId },
-              }),
-          },
-        ],
-      );
+      Alert.alert('Event created', 'Waiting for admin approval.', [
+        {
+          text: 'OK',
+          onPress: () =>
+            router.replace({
+              pathname: '/view-event',
+              params: { id: eventId },
+            }),
+        },
+      ]);
+      // Keep locked after success so rapid taps cannot submit again.
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create event.');
-    } finally {
+      submittingRef.current = false;
       setSubmitting(false);
+      setError(err instanceof Error ? err.message : 'Failed to create event.');
     }
   };
 

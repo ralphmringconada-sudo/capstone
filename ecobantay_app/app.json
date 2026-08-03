@@ -25,7 +25,13 @@
         "googleMaps": {
           "apiKey": "AIzaSyBK-t1HyWS40z-Y18sT4OWuPWcY7gt-Dhw"
         }
-      }
+      },
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ],
+      "package": "com.wex_1231.ecobantay_app"
     },
     "web": {
       "output": "static",
@@ -60,6 +66,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "5adeabaa-e872-48cb-9647-217a98d35d48"
+      }
     }
   }
 }

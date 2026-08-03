@@ -1,5 +1,5 @@
 import React, { useRef, useState, useCallback } from 'react';
-import { View, Text, TouchableOpacity, SafeAreaView, StatusBar, StyleSheet, Image, Animated, Easing, ActivityIndicator } from 'react-native';
+import { View, Text, TouchableOpacity, SafeAreaView, StatusBar, StyleSheet, Image, Animated, Easing, ActivityIndicator, RefreshControl } from 'react-native';
 import { Shadow } from 'react-native-shadow-2';
 import { useRouter, Stack, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -38,6 +38,7 @@ export default function HomeScreen() {
   const [events, setEvents] = useState<EcoEvent[]>([]);
   const [isLoadingReports, setIsLoadingReports] = useState(false);
   const [isLoadingEvents, setIsLoadingEvents] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const spinValue = useRef(new Animated.Value(0)).current;
   const scrollY = useRef(new Animated.Value(0)).current;
@@ -121,6 +122,15 @@ export default function HomeScreen() {
       loadEvents();
     }, [loadReports, loadEvents]),
   );
+
+  const onRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      await Promise.all([loadReports(), loadEvents()]);
+    } finally {
+      setIsRefreshing(false);
+    }
+  }, [loadReports, loadEvents]);
 
   const filteredReports = reports.filter((report) => {
     const tab = USER_REPORT_TABS.find((item) => item.key === activeReportTab);
@@ -285,6 +295,14 @@ export default function HomeScreen() {
             useNativeDriver: false,
           })}
           scrollEventThrottle={16}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={onRefresh}
+              colors={['#3f5c2b']}
+              tintColor="#3f5c2b"
+            />
+          }
         >
           {isLoading ? (
             <View style={styles.emptyStateContainer}>

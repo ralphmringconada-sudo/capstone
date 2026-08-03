@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Modal,
   ScrollView,
@@ -114,6 +114,7 @@ export default function UsersScreen() {
   });
   const [adminFormError, setAdminFormError] = useState("");
   const [isCreatingAdmin, setIsCreatingAdmin] = useState(false);
+  const creatingAdminRef = useRef(false);
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [editForm, setEditForm] = useState({
     firstName: "",
@@ -432,6 +433,7 @@ export default function UsersScreen() {
    * Why this implementation: Server-side creation keeps privileged identity administration outside client code.
    */
   const handleCreateAdmin = async () => {
+    if (creatingAdminRef.current || isCreatingAdmin) return;
     setAdminFormError("");
     // Complete required-field and password confirmation checks before requesting a token.
     if (!adminForm.fullName || !adminForm.email || !adminForm.password) {
@@ -451,6 +453,7 @@ export default function UsersScreen() {
     }
 
     // Prevent duplicate privileged account requests while creation and reload complete.
+    creatingAdminRef.current = true;
     setIsCreatingAdmin(true);
     try {
       await createAdminAccount(token, {
@@ -475,6 +478,7 @@ export default function UsersScreen() {
     } catch (err) {
       setAdminFormError(err instanceof Error ? err.message : "Failed to create administrator.");
     } finally {
+      creatingAdminRef.current = false;
       setIsCreatingAdmin(false);
     }
   };

@@ -1,4 +1,4 @@
-import { createElement, useEffect, useMemo, useState } from "react";
+import { createElement, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Image,
@@ -39,6 +39,7 @@ import {
   fetchEvents,
   updateEventStatus,
 } from "@/services/adminDataService";
+import { uploadAdminEventImage } from "@/services/eventImageService";
 import type { AdminEvent } from "@/types/admin";
 
 type EventStatus = AdminEvent["status"];
@@ -127,6 +128,10 @@ export default function EventsScreen() {
   const [newCapacity, setNewCapacity] = useState("");
   const [newImageUri, setNewImageUri] = useState<string | null>(null);
   const [newCoordinates, setNewCoordinates] = useState(VALENCIA_DEFAULT);
+  const [isCreating, setIsCreating] = useState(false);
+  const [isModerating, setIsModerating] = useState(false);
+  const creatingRef = useRef(false);
+  const moderatingRef = useRef(false);
   const pageSize = 5;
 
   const reloadEvents = async () => {
@@ -211,7 +216,26 @@ export default function EventsScreen() {
     if (!result.canceled) setNewImageUri(result.assets[0].uri);
   };
 
+  const handleMapPin = (coordinates: { latitude: number; longitude: number }) => {
+    setNewCoordinates(coordinates);
+
+    // Fill location text from the pin only when the admin has not typed one yet.
+    if (typeof window === "undefined" || !window.google?.maps || newLocation.trim()) return;
+    const geocoder = new window.google.maps.Geocoder();
+    geocoder.geocode(
+      { location: { lat: coordinates.latitude, lng: coordinates.longitude } },
+      (results: Array<{ formatted_address?: string }> | null, status: string) => {
+        if (status === "OK" && results?.[0]?.formatted_address) {
+          setNewLocation(results[0].formatted_address);
+        }
+      },
+    );
+  };
+
   const addEvent = async () => {
+    if (creatingRef.current) return;
+    creatingRef.current = true;
+
     if (
       !newTitle.trim() ||
       !newDescription.trim() ||
@@ -220,20 +244,30 @@ export default function EventsScreen() {
       !newLocation.trim() ||
       !newCapacity.trim()
     ) {
+      creatingRef.current = false;
       Alert.alert("Incomplete event", "Complete all required event fields.");
       return;
     }
     const capacity = Number(newCapacity);
     if (!Number.isInteger(capacity) || capacity < 1) {
+      creatingRef.current = false;
       Alert.alert("Invalid participants", "Maximum participants must be a positive whole number.");
       return;
     }
 
     if (!admin) {
+      creatingRef.current = false;
       Alert.alert("Not authorized", "Sign in as an administrator to create events.");
       return;
     }
+
+    setIsCreating(true);
     try {
+      let imageUrl = "";
+      if (newImageUri) {
+        imageUrl = await uploadAdminEventImage(newImageUri);
+      }
+
       await createEvent(
         {
         title: newTitle.trim(),
@@ -248,37 +282,51 @@ export default function EventsScreen() {
         submittedBy: admin.fullName,
         submittedArea: "Admin Dashboard",
         submittedByUid: admin.uid,
-        imageUrl: newImageUri || "",
+        imageUrl,
         coordinates: newCoordinates,
       },
         admin,
       );
       await reloadEvents();
+      setNewTitle("");
+      setNewCategory("Clean-up");
+      setNewDescription("");
+      setNewDate("");
+      setNewTime("");
+      setNewLocation("");
+      setNewCapacity("");
+      setNewImageUri(null);
+      setNewCoordinates(VALENCIA_DEFAULT);
+      setAddModalOpen(false);
+      changeTab("All Events");
+      Alert.alert("Event created", "Saved successfully.");
+      // Stay locked briefly so a second click cannot fire another create.
     } catch (error) {
       Alert.alert("Event not saved", error instanceof Error ? error.message : "Failed to create event.");
+      creatingRef.current = false;
+      setIsCreating(false);
       return;
     }
-    setNewTitle("");
-    setNewCategory("Clean-up");
-    setNewDescription("");
-    setNewDate("");
-    setNewTime("");
-    setNewLocation("");
-    setNewCapacity("");
-    setNewImageUri(null);
-    setNewCoordinates(VALENCIA_DEFAULT);
-    setAddModalOpen(false);
-    changeTab("All Events");
+
+    setTimeout(() => {
+      creatingRef.current = false;
+      setIsCreating(false);
+    }, 800);
   };
 
   const moderateEvent = async (nextStatus: EventStatus) => {
-    if (!selectedEvent || !admin) return;
+    if (!selectedEvent || !admin || moderatingRef.current) return;
+    moderatingRef.current = true;
+    setIsModerating(true);
     try {
       await updateEventStatus(selectedEvent.id, nextStatus, admin);
       setSelectedEvent(null);
       await reloadEvents();
     } catch (error) {
       Alert.alert("Event update failed", error instanceof Error ? error.message : "Failed to update event.");
+    } finally {
+      moderatingRef.current = false;
+      setIsModerating(false);
     }
   };
 
@@ -641,11 +689,10 @@ export default function EventsScreen() {
                   coordinates={newCoordinates}
                   height={180}
                   selectable
-                  onSelect={setNewCoordinates}
+                  onSelect={handleMapPin}
                 />
                 <Text style={styles.mapHint}>
-                  Drag or click the map to set coordinates ({newCoordinates.latitude.toFixed(5)},{" "}
-                  {newCoordinates.longitude.toFixed(5)})
+                  Click the map to pin a location, or type the address below.
                 </Text>
                 <FormField
                   label="Location"
@@ -668,12 +715,21 @@ export default function EventsScreen() {
               </View>
             </View>
             <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => setAddModalOpen(false)}>
+              <TouchableOpacity
+                style={[styles.cancelButton, isCreating && { opacity: 0.6 }]}
+                onPress={() => !isCreating && setAddModalOpen(false)}
+                disabled={isCreating}
+              >
                 <Text style={styles.cancelText}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.saveButton} onPress={addEvent}>
+              <TouchableOpacity
+                style={[styles.saveButton, isCreating && { opacity: 0.7 }]}
+                onPress={addEvent}
+                disabled={isCreating}
+                activeOpacity={isCreating ? 1 : 0.8}
+              >
                 <Check size={17} color="#ffffff" />
-                <Text style={styles.saveText}>Create Event</Text>
+                <Text style={styles.saveText}>{isCreating ? "Creating..." : "Create Event"}</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -716,26 +772,46 @@ export default function EventsScreen() {
               <View style={styles.moderationActions}>
                 {selectedEvent.status === "Pending" && (
                   <>
-                    <TouchableOpacity style={styles.rejectEventButton} onPress={() => moderateEvent("Rejected")}>
-                      <Text style={styles.saveText}>Reject Event</Text>
+                    <TouchableOpacity
+                      style={[styles.rejectEventButton, isModerating && { opacity: 0.7 }]}
+                      onPress={() => moderateEvent("Rejected")}
+                      disabled={isModerating}
+                    >
+                      <Text style={styles.saveText}>{isModerating ? "Please wait..." : "Reject Event"}</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={styles.saveButton} onPress={() => moderateEvent("Upcoming")}>
+                    <TouchableOpacity
+                      style={[styles.saveButton, isModerating && { opacity: 0.7 }]}
+                      onPress={() => moderateEvent("Upcoming")}
+                      disabled={isModerating}
+                    >
                       <Check size={17} color="#ffffff" />
-                      <Text style={styles.saveText}>Approve Event</Text>
+                      <Text style={styles.saveText}>{isModerating ? "Please wait..." : "Approve Event"}</Text>
                     </TouchableOpacity>
                   </>
                 )}
                 {selectedEvent.status === "Upcoming" && (
-                  <TouchableOpacity style={styles.saveButton} onPress={() => moderateEvent("Ongoing")}>
-                    <Text style={styles.saveText}>Mark Ongoing</Text>
+                  <TouchableOpacity
+                    style={[styles.saveButton, isModerating && { opacity: 0.7 }]}
+                    onPress={() => moderateEvent("Ongoing")}
+                    disabled={isModerating}
+                  >
+                    <Text style={styles.saveText}>{isModerating ? "Please wait..." : "Mark Ongoing"}</Text>
                   </TouchableOpacity>
                 )}
                 {selectedEvent.status === "Ongoing" && (
-                  <TouchableOpacity style={styles.saveButton} onPress={() => moderateEvent("Completed")}>
-                    <Text style={styles.saveText}>Mark Completed</Text>
+                  <TouchableOpacity
+                    style={[styles.saveButton, isModerating && { opacity: 0.7 }]}
+                    onPress={() => moderateEvent("Completed")}
+                    disabled={isModerating}
+                  >
+                    <Text style={styles.saveText}>{isModerating ? "Please wait..." : "Mark Completed"}</Text>
                   </TouchableOpacity>
                 )}
-                <TouchableOpacity style={styles.cancelButton} onPress={() => setSelectedEvent(null)}>
+                <TouchableOpacity
+                  style={[styles.cancelButton, isModerating && { opacity: 0.6 }]}
+                  onPress={() => !isModerating && setSelectedEvent(null)}
+                  disabled={isModerating}
+                >
                   <Text style={styles.cancelText}>Close</Text>
                 </TouchableOpacity>
               </View>
