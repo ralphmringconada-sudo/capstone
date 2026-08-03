@@ -13,6 +13,7 @@ import {
 } from "lucide-react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import AdminLayout from "../components/AdminLayout";
+import InteractiveLocationMap from "@/components/InteractiveLocationMap";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { fetchReportById, updateReportStatus } from "@/services/adminDataService";
 import { resolveReportImageUrls } from "@/services/reportImageService";
@@ -257,7 +258,7 @@ export default function ReportDetailsScreen() {
             <View style={[styles.panel, { padding: 18 * s }]}>
               <SectionTitle icon={MapPin} title="Location" s={s} />
 
-              <ReportLocationMap
+              <InteractiveLocationMap
                 coordinates={report.coordinates}
                 height={170 * s}
               />
@@ -389,47 +390,6 @@ function InfoRow({ label, value, s }: any) {
     <View style={styles.infoRow}>
       <Text style={[styles.label, { fontSize: 18 * s }]}>{label}</Text>
       <Text style={[styles.valueText, { fontSize: 16 * s }]}>{value}</Text>
-    </View>
-  );
-}
-
-/**
- * Purpose: Visualizes the GPS coordinates attached to an environmental report.
- * How it works:
- * 1. Missing coordinates produce an explicit fallback panel.
- * 2. Available latitude and longitude build a Google Maps embed URL.
- * 3. A lazy iframe renders the location at the requested height.
- * Technologies Used: React, React Native Web, HTML iframe embedding, and Google Maps URLs.
- * Why this implementation: Embedded coordinates let reviewers inspect location context without leaving the report.
- */
-function ReportLocationMap({
-  coordinates,
-  height,
-}: {
-  coordinates?: { latitude: number; longitude: number };
-  height: number;
-}) {
-  // Avoid generating an invalid external map URL when a submission lacks GPS evidence.
-  if (!coordinates) {
-    return (
-      <View style={[styles.mapImage, styles.mapFallback, { height }]}>
-        <Text style={styles.locationText}>Location coordinates unavailable.</Text>
-      </View>
-    );
-  }
-
-  const mapUrl =
-    `https://www.google.com/maps?q=${coordinates.latitude},${coordinates.longitude}` +
-    `&z=16&output=embed`;
-
-  return (
-    <View style={[styles.mapImage, { height }]}>
-      <iframe
-        title="Report location"
-        src={mapUrl}
-        loading="lazy"
-        style={{ width: "100%", height: "100%", border: 0 }}
-      />
     </View>
   );
 }

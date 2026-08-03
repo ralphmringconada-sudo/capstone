@@ -8,6 +8,9 @@ export const APP_ROUTES = [
   'create-report',
   'view-report',
   'edit-report',
+  'create-event',
+  'view-event',
+  'edit-event',
 ] as const;
 
 export type AuthRoute = (typeof AUTH_ROUTES)[number];

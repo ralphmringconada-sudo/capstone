@@ -29,7 +29,15 @@ const menu = [
  * Technologies Used: React, React Native Web, Expo Router, Lucide React Native, and Firebase Authentication.
  * Why this implementation: Central navigation gives every admin module a predictable access path.
  */
-export default function Sidebar({ activePage }: { activePage: string }) {
+export default function Sidebar({
+  activePage,
+  collapsed,
+  onToggle,
+}: {
+  activePage: string;
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
   const { logout } = useAdminAuth();
 
   /**
@@ -46,17 +54,22 @@ export default function Sidebar({ activePage }: { activePage: string }) {
   };
 
   return (
-    <View style={styles.sidebar}>
-      <View style={styles.logoArea}>
+    <View style={[styles.sidebar, collapsed && styles.sidebarCollapsed]}>
+      <Pressable
+        style={[styles.logoArea, collapsed && styles.logoAreaCollapsed]}
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityLabel={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+      >
         <Image
           source={require("../../assets/images/ecobantay-logo.png")}
-          style={styles.logo}
+          style={[styles.logo, collapsed && styles.logoCollapsed]}
           resizeMode="contain"
         />
-        <Text style={styles.adminTitle}>ADMIN DASHBOARD</Text>
-      </View>
+        {!collapsed && <Text style={styles.adminTitle}>ADMIN DASHBOARD</Text>}
+      </Pressable>
 
-      <View style={styles.menu}>
+      <View style={[styles.menu, collapsed && styles.menuCollapsed]}>
         {menu.map((item) => {
           const Icon = item.icon;
           const active = activePage === item.name;
@@ -64,21 +77,34 @@ export default function Sidebar({ activePage }: { activePage: string }) {
           return (
             <Pressable
               key={item.name}
-              style={[styles.menuItem, active && styles.activeItem]}
+              style={[
+                styles.menuItem,
+                collapsed && styles.menuItemCollapsed,
+                active && styles.activeItem,
+              ]}
               onPress={() => router.navigate(item.route as any)}
+              accessibilityRole="button"
+              accessibilityLabel={item.name}
             >
               <Icon size={22} color={active ? "#ffffff" : "#000000"} />
-              <Text style={[styles.menuText, active && styles.activeText]}>
-                {item.name}
-              </Text>
+              {!collapsed && (
+                <Text style={[styles.menuText, active && styles.activeText]}>
+                  {item.name}
+                </Text>
+              )}
             </Pressable>
           );
         })}
       </View>
 
-      <Pressable style={styles.logout} onPress={handleLogout}>
+      <Pressable
+        style={[styles.logout, collapsed && styles.logoutCollapsed]}
+        onPress={handleLogout}
+        accessibilityRole="button"
+        accessibilityLabel="Logout"
+      >
         <LogOut size={22} color="#2cc6c6" />
-        <Text style={styles.logoutText}>Logout</Text>
+        {!collapsed && <Text style={styles.logoutText}>Logout</Text>}
       </Pressable>
     </View>
   );
@@ -91,13 +117,25 @@ const styles = StyleSheet.create({
     backgroundColor: "#E3F5B9",
     position: "relative",
   },
+  sidebarCollapsed: {
+    width: 84,
+  },
   logoArea: {
     alignItems: "center",
+  },
+  logoAreaCollapsed: {
+    height: 96,
+    justifyContent: "center",
   },
   logo: {
     width: 900,
     height: 350,
     bottom: 90,
+  },
+  logoCollapsed: {
+    width: 76,
+    height: 76,
+    bottom: 0,
   },
   adminTitle: {
     position: "absolute",
@@ -112,6 +150,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     gap: 22,
   },
+  menuCollapsed: {
+    marginTop: 8,
+    paddingHorizontal: 12,
+    gap: 18,
+  },
   menuItem: {
     height: 48,
     flexDirection: "row",
@@ -119,6 +162,10 @@ const styles = StyleSheet.create({
     gap: 22,
     borderRadius: 8,
     paddingHorizontal: 12,
+  },
+  menuItemCollapsed: {
+    paddingHorizontal: 0,
+    justifyContent: "center",
   },
   activeItem: {
     backgroundColor: "#3E7C40",
@@ -146,5 +193,9 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     fontSize: 18,
     fontFamily: "Montserrat_700Bold",
+  },
+  logoutCollapsed: {
+    justifyContent: "center",
+    paddingLeft: 0,
   },
 });

@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet } from "react-native";
+import { Pressable, View, Text, StyleSheet } from "react-native";
 import { Bell, Menu, UserCircle } from "lucide-react-native";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 
@@ -10,12 +10,19 @@ import { useAdminAuth } from "@/context/AdminAuthContext";
  * Technologies Used: React, React Native Web, Lucide React Native, and React Context.
  * Why this implementation: Persistent identity helps administrators verify which account and role are active.
  */
-export default function Topbar() {
+export default function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   const { admin } = useAdminAuth();
 
   return (
     <View style={styles.topbar}>
-      <Menu size={24} color="#000" />
+      <Pressable
+        style={({ pressed }) => [styles.menuButton, pressed && styles.menuButtonPressed]}
+        onPress={onToggleSidebar}
+        accessibilityRole="button"
+        accessibilityLabel="Toggle navigation sidebar"
+      >
+        <Menu size={24} color="#000" />
+      </Pressable>
 
       <View style={styles.right}>
         <Bell size={19} color="#000" />
@@ -45,6 +52,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
+  },
+  menuButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  menuButtonPressed: {
+    backgroundColor: "#eef4e6",
   },
   divider: {
     width: 1,

@@ -1,3 +1,4 @@
+import { useState, type ReactNode } from "react";
 import { View, StyleSheet } from "react-native";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
@@ -10,12 +11,24 @@ import Topbar from "./Topbar";
  * Technologies Used: React and React Native Web layout components.
  * Why this implementation: One reusable shell keeps navigation and identity presentation consistent.
  */
-export default function AdminLayout({ children, activePage }: any) {
+export default function AdminLayout({
+  children,
+  activePage,
+}: {
+  children: ReactNode;
+  activePage: string;
+}) {
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
   return (
     <View style={styles.layout}>
-      <Sidebar activePage={activePage} />
+      <Sidebar
+        activePage={activePage}
+        collapsed={sidebarCollapsed}
+        onToggle={() => setSidebarCollapsed((current) => !current)}
+      />
       <View style={styles.main}>
-        <Topbar />
+        <Topbar onToggleSidebar={() => setSidebarCollapsed((current) => !current)} />
         {children}
       </View>
     </View>

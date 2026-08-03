@@ -46,6 +46,7 @@ const router = express.Router();
  * status, and audit information needed by EcoBantay's administrative workflows.
  */
 router.post('/create', verifySuperAdmin, async (req, res) => {
+  let createdUid = null;
   // Converts asynchronous Auth and Firestore failures into controlled HTTP responses.
   try {
     // Extracts only the profile fields accepted by this administrator-creation workflow.
@@ -71,6 +72,7 @@ router.post('/create', verifySuperAdmin, async (req, res) => {
       password,
       displayName: fullName.trim(),
     });
+    createdUid = userRecord.uid;
 
     // Transforms request values and trusted creator context into the Firestore profile schema.
     const adminProfile = {
@@ -101,6 +103,11 @@ router.post('/create', verifySuperAdmin, async (req, res) => {
 
     return res.status(201).json({ admin: adminProfile });
   } catch (error) {
+    // Prevent an unusable Auth-only account when profile or activity persistence fails.
+    if (createdUid) {
+      await db.collection('admins').doc(createdUid).delete().catch(() => undefined);
+      await auth.deleteUser(createdUid).catch(() => undefined);
+    }
     // Maps Firebase's duplicate-email condition to an HTTP conflict instead of a generic failure.
     if (error.code === 'auth/email-already-exists') {
       return res.status(409).json({ error: 'An account with this email already exists.' });

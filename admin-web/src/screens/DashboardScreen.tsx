@@ -1,30 +1,34 @@
-import { ScrollView, StyleSheet, Text, View, useWindowDimensions, Image } from "react-native";
-import { useEffect, useState } from "react";
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  useWindowDimensions,
+  Image,
+  TouchableOpacity,
+} from "react-native";
+import { useEffect, useMemo, useState } from "react";
 import {
   CalendarClock,
   Check,
   ClipboardList,
   UserCircle,
 } from "lucide-react-native";
+import { router } from "expo-router";
 import AdminLayout from "../components/AdminLayout";
 import DashboardCard from "../components/DashboardCard";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { useAdminData } from "@/hooks/useAdminData";
+import { fetchEvents } from "@/services/adminDataService";
 import { resolveReportImageUrls } from "@/services/reportImageService";
 import { formatDateTime } from "@/utils/format";
-
-const events = [
-  ["Coastal Clean-Up Drive", "May 29, 2026"],
-  ["Tree Planting Activity", "May 31, 2026"],
-  ["River Rehabilitation Campaign", "June 3, 2026"],
-  ["Environmental Awareness Seminar", "June 10, 2026"],
-];
+import type { AdminEvent } from "@/types/admin";
 
 /**
  * Purpose: Presents an at-a-glance operational summary for the signed-in administrator.
  * How it works:
  * 1. Shared auth and data hooks provide the active profile, reports, and derived totals.
- * 2. The newest reports are selected for a compact status table.
+ * 2. Paginated recent reports are selected for a compact status table.
  * 3. Metric cards and scheduled events complete the dashboard overview.
  * Technologies Used: React, React Native Web, React Context, Lucide React Native, and Firestore-backed hooks.
  * Why this implementation: A single overview helps administrators prioritize recent environmental activity.
@@ -36,8 +40,32 @@ export default function DashboardScreen() {
   // Shared hook state ties the welcome identity and dashboard metrics to current backend data.
   const { admin } = useAdminAuth();
   const { reports, stats } = useAdminData();
-  const recentReports = reports.slice(0, 4);
+  const [upcomingEvents, setUpcomingEvents] = useState<AdminEvent[]>([]);
+  const [approvedEventsCount, setApprovedEventsCount] = useState(0);
+  const [reportPage, setReportPage] = useState(1);
+  const reportsPerPage = 4;
+  const reportPageCount = Math.max(1, Math.ceil(reports.length / reportsPerPage));
+  const currentReportPage = Math.min(reportPage, reportPageCount);
+  const recentReports = useMemo(
+    () =>
+      reports.slice(
+        (currentReportPage - 1) * reportsPerPage,
+        currentReportPage * reportsPerPage,
+      ),
+    [reports, currentReportPage],
+  );
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
+
+  const pageNumbers = useMemo((): Array<number | "..."> => {
+    if (reportPageCount <= 5) {
+      return Array.from({ length: reportPageCount }, (_, index) => index + 1);
+    }
+    if (currentReportPage <= 3) return [1, 2, 3, "...", reportPageCount];
+    if (currentReportPage >= reportPageCount - 2) {
+      return [1, "...", reportPageCount - 2, reportPageCount - 1, reportPageCount];
+    }
+    return [1, "...", currentReportPage, "...", reportPageCount];
+  }, [currentReportPage, reportPageCount]);
 
   const ensureThumbnail = async (report: (typeof reports)[number]) => {
     if (thumbnails[report.id]) return;
@@ -52,7 +80,30 @@ export default function DashboardScreen() {
       ensureThumbnail(report);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reports]);
+  }, [recentReports]);
+
+  useEffect(() => {
+    let active = true;
+    const loadEvents = async () => {
+      try {
+        const events = await fetchEvents();
+        if (!active) return;
+        const liveEvents = events.filter(
+          (event) => event.status === "Upcoming" || event.status === "Ongoing",
+        );
+        setApprovedEventsCount(liveEvents.length);
+        setUpcomingEvents(liveEvents.slice(0, 4));
+      } catch {
+        if (!active) return;
+        setUpcomingEvents([]);
+        setApprovedEventsCount(0);
+      }
+    };
+    void loadEvents();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return (
     <AdminLayout activePage="Dashboard">
@@ -77,7 +128,7 @@ export default function DashboardScreen() {
         <View style={[styles.cards, { gap: width * 0.025, marginTop: height * 0.065 }]}>
           <DashboardCard title="Total Reports" value={String(stats.totalReports)} color="#DDEAD3" icon={ClipboardList} iconColor="#20B83B" />
           <DashboardCard title="Reports In Review" value={String(stats.reportsInReview)} color="#CFE6FA" icon={Check} iconColor="#259BEF" />
-          <DashboardCard title="Approved Events" value="3" color="#FCE8C8" icon={CalendarClock} iconColor="#FF8A00" />
+          <DashboardCard title="Approved Events" value={String(approvedEventsCount)} color="#FCE8C8" icon={CalendarClock} iconColor="#FF8A00" />
           <DashboardCard title="Registered Users" value={String(stats.totalUsers)} color="#E5E8F0" icon={UserCircle} iconColor="#3D8DFF" />
         </View>
 
@@ -85,7 +136,9 @@ export default function DashboardScreen() {
           <View style={[styles.reportsPanel, { height: panelHeight, padding: 16 * s }]}>
             <View style={styles.panelHeader}>
               <Text style={[styles.panelTitle, { fontSize: 30 * s }]}>Recent Reports</Text>
-              <Text style={[styles.viewAll, { fontSize: 16 * s }]}>View All</Text>
+              <TouchableOpacity onPress={() => router.navigate("/reports" as never)}>
+                <Text style={[styles.viewAll, { fontSize: 16 * s }]}>View All</Text>
+              </TouchableOpacity>
             </View>
 
             <View style={[styles.tableHeader, { height: 40 * s, paddingHorizontal: 10 * s }]}>
@@ -242,43 +295,98 @@ export default function DashboardScreen() {
 
             <View style={styles.paginationRow}>
               <Text style={[styles.showing, { fontSize: 16 * s }]}>
-                Showing 1 to {recentReports.length} of {stats.totalReports} reports
+                Showing {reports.length ? (currentReportPage - 1) * reportsPerPage + 1 : 0} to{" "}
+                {Math.min(currentReportPage * reportsPerPage, reports.length)} of{" "}
+                {stats.totalReports} reports
               </Text>
-              <Text style={[styles.pagination, { fontSize: 16 * s }]}>
-                ‹  1  2  3  ...  20  ›
-              </Text>
+              <View style={styles.paginationButtons}>
+                <TouchableOpacity
+                  style={styles.paginationButton}
+                  disabled={currentReportPage === 1}
+                  onPress={() => setReportPage((value) => Math.max(1, value - 1))}
+                >
+                  <Text style={[styles.pagination, { fontSize: 16 * s }]}>‹</Text>
+                </TouchableOpacity>
+                {pageNumbers.map((entry, index) =>
+                  entry === "..." ? (
+                    <Text
+                      key={`ellipsis-${index}`}
+                      style={[styles.pagination, { fontSize: 16 * s, paddingHorizontal: 4 }]}
+                    >
+                      ...
+                    </Text>
+                  ) : (
+                    <TouchableOpacity
+                      key={entry}
+                      style={[
+                        styles.paginationButton,
+                        currentReportPage === entry && styles.paginationButtonActive,
+                      ]}
+                      onPress={() => setReportPage(entry)}
+                    >
+                      <Text
+                        style={[
+                          styles.pagination,
+                          { fontSize: 16 * s },
+                          currentReportPage === entry && styles.paginationTextActive,
+                        ]}
+                      >
+                        {entry}
+                      </Text>
+                    </TouchableOpacity>
+                  ),
+                )}
+                <TouchableOpacity
+                  style={styles.paginationButton}
+                  disabled={currentReportPage === reportPageCount}
+                  onPress={() => setReportPage((value) => Math.min(reportPageCount, value + 1))}
+                >
+                  <Text style={[styles.pagination, { fontSize: 16 * s }]}>›</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
 
           <View style={[styles.eventsPanel, { height: panelHeight, padding: 16 * s }]}>
             <View style={styles.panelHeader}>
               <Text style={[styles.panelTitle, { fontSize: 30 * s }]}>Upcoming Events</Text>
-              <Text style={[styles.viewAll, { fontSize: 16 * s }]}>View All</Text>
+              <TouchableOpacity onPress={() => router.navigate("/events" as never)}>
+                <Text style={[styles.viewAll, { fontSize: 16 * s }]}>View All</Text>
+              </TouchableOpacity>
             </View>
 
-            {events.map((event, index) => (
-              <View key={index} style={[styles.eventRow, { height: 96 * s }]}>
-                <View style={[styles.eventImage, { width: 58 * s, height: 58 * s }]} />
-                <View style={styles.eventInfo}>
-                  <Text style={[styles.eventTitle, { fontSize: 18 * s }]}>{event[0]}</Text>
-                  <Text style={[styles.eventDate, { fontSize: 14 * s }]}>
-                    ▣ {event[1]}  ♦ West Balabag
+            {upcomingEvents.length ? (
+              upcomingEvents.map((event) => (
+                <View key={event.id} style={[styles.eventRow, { height: 96 * s }]}>
+                  <View style={[styles.eventImage, { width: 58 * s, height: 58 * s }]} />
+                  <View style={styles.eventInfo}>
+                    <Text style={[styles.eventTitle, { fontSize: 18 * s }]}>{event.title}</Text>
+                    <Text style={[styles.eventDate, { fontSize: 14 * s }]}>
+                      ▣ {event.date}  ♦ {event.location}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.upcomingBadge,
+                      {
+                        fontSize: 16 * s,
+                        paddingHorizontal: 18 * s,
+                        paddingVertical: 10 * s,
+                        backgroundColor: event.status === "Ongoing" ? "#C7DDFF" : "#E8C1EF",
+                      },
+                    ]}
+                  >
+                    {event.status}
                   </Text>
                 </View>
-                <Text
-                  style={[
-                    styles.upcomingBadge,
-                    {
-                      fontSize: 16 * s,
-                      paddingHorizontal: 18 * s,
-                      paddingVertical: 10 * s,
-                    },
-                  ]}
-                >
-                  Upcoming
+              ))
+            ) : (
+              <View style={styles.emptyEvents}>
+                <Text style={[styles.emptyEventsText, { fontSize: 15 * s }]}>
+                  No upcoming events yet. Approved admin and user events will appear here.
                 </Text>
               </View>
-            ))}
+            )}
           </View>
         </View>
       </ScrollView>
@@ -449,14 +557,39 @@ dateCol: {
     marginTop: 10,
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
   },
   showing: {
     fontFamily: "Montserrat_700Bold",
     color: "#000",
   },
+  paginationButtons: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+  },
+  paginationButton: {
+    minWidth: 28,
+    height: 28,
+    borderWidth: 1,
+    borderColor: "#a9b3a9",
+    borderRadius: 5,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 5,
+  },
+  paginationButtonActive: {
+    backgroundColor: "#34733B",
+    borderColor: "#34733B",
+  },
   pagination: {
     fontFamily: "Montserrat_700Bold",
     color: "#34733B",
+  },
+  paginationTextActive: {
+    color: "#ffffff",
   },
   eventRow: {
     borderBottomWidth: 1,
@@ -480,6 +613,17 @@ dateCol: {
     fontFamily: "Montserrat_700Bold",
     color: "#000",
     marginTop: 4,
+  },
+  emptyEvents: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 18,
+  },
+  emptyEventsText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#777",
+    textAlign: "center",
   },
   upcomingBadge: {
     backgroundColor: "#D7B9EA",

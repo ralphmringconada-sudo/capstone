@@ -3,6 +3,7 @@
   "compilerOptions": {
     "ignoreDeprecations": "6.0",
     "strict": true,
+    "jsx": "react-jsx",
     "paths": {
       "@/*": [
         "./src/*"

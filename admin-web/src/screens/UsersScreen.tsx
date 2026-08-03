@@ -127,6 +127,10 @@ export default function UsersScreen() {
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("All Roles");
+  const [userPage, setUserPage] = useState(1);
+  const [activityPage, setActivityPage] = useState(1);
+  const usersPerPage = 6;
+  const activityPerPage = 6;
 
   // Derive persisted flags from both account collections for constant-time row checks.
   const flaggedUserIds = useMemo(
@@ -180,6 +184,20 @@ export default function UsersScreen() {
       return matchesSearch && matchesRole;
     });
   }, [tableUsers, search, roleFilter]);
+
+  const userPageCount = Math.max(1, Math.ceil(filteredTableUsers.length / usersPerPage));
+  const currentUserPage = Math.min(userPage, userPageCount);
+  const visibleTableUsers = filteredTableUsers.slice(
+    (currentUserPage - 1) * usersPerPage,
+    currentUserPage * usersPerPage,
+  );
+  const activityPageCount = Math.max(1, Math.ceil(adminActivity.length / activityPerPage));
+  const currentActivityPage = Math.min(activityPage, activityPageCount);
+  const visibleAdminActivity = adminActivity.slice(
+    (currentActivityPage - 1) * activityPerPage,
+    currentActivityPage * activityPerPage,
+  );
+
 
   /**
    * Purpose: Opens an edit form populated for the selected, manageable account.
@@ -334,6 +352,7 @@ export default function UsersScreen() {
   const openUserProfile = async (user: any) => {
     setSelectedUser(user);
     setIsProfileOpen(true);
+    setActivityPage(1);
 
     // Clear potentially sensitive history before evaluating access for the new selection.
     setAdminActivity([]);
@@ -366,6 +385,7 @@ export default function UsersScreen() {
     setIsProfileOpen(false);
     setSelectedUser(null);
     setAdminActivity([]);
+    setActivityPage(1);
   };
 
   /**
@@ -450,6 +470,7 @@ export default function UsersScreen() {
         confirmPassword: "",
       });
       await reload();
+      Alert.alert("Administrator created", "The new administrator can now sign in.");
     // Keep entered values available when backend validation or authorization fails.
     } catch (err) {
       setAdminFormError(err instanceof Error ? err.message : "Failed to create administrator.");
@@ -511,12 +532,18 @@ export default function UsersScreen() {
               placeholderTextColor="#777"
               style={[styles.searchInput, { fontSize: 16 * s }]}
               value={search}
-              onChangeText={setSearch}
+              onChangeText={(value) => {
+                setSearch(value);
+                setUserPage(1);
+              }}
             />
             <Search size={20 * s} color="#000" />
           </View>
 
-          <TouchableOpacity style={styles.filterBox} onPress={() => setRoleFilter((prev) => (prev === "All Roles" ? "User" : prev === "User" ? "Admin" : prev === "Admin" ? "Super Admin" : "All Roles"))}>
+          <TouchableOpacity style={styles.filterBox} onPress={() => {
+            setRoleFilter((prev) => (prev === "All Roles" ? "User" : prev === "User" ? "Admin" : prev === "Admin" ? "Super Admin" : "All Roles"));
+            setUserPage(1);
+          }}>
             <Text style={[styles.filterLabel, { fontSize: 16 * s }]}>Roles</Text>
             <Text style={[styles.filterText, { fontSize: 16 * s }]}>{roleFilter}⌄</Text>
           </TouchableOpacity>
@@ -552,7 +579,7 @@ export default function UsersScreen() {
             <Text style={[styles.th, styles.actionCol, { fontSize: 18 * s, transform: [{ translateX: 12 * s }] }]}>Action</Text>
           </View>
 
-          {filteredTableUsers.map((u, index) => {
+          {visibleTableUsers.map((u, index) => {
             const isFlagged = flaggedUserIds.has(u[7]);
 
             return (
@@ -642,11 +669,45 @@ export default function UsersScreen() {
 
           <View style={[styles.paginationRow, { padding: 18 * s }]}>
             <Text style={[styles.showing, { fontSize: 16 * s }]}>
-              Showing 1 to 6 of 312 users
+              Showing {filteredTableUsers.length ? (currentUserPage - 1) * usersPerPage + 1 : 0} to{" "}
+              {Math.min(currentUserPage * usersPerPage, filteredTableUsers.length)} of{" "}
+              {filteredTableUsers.length} users
             </Text>
-            <Text style={[styles.pagination, { fontSize: 16 * s }]}>
-              ‹  1  2  3  ...  48  ›
-            </Text>
+            <View style={styles.paginationButtons}>
+              <TouchableOpacity
+                style={styles.paginationButton}
+                disabled={currentUserPage === 1}
+                onPress={() => setUserPage((value) => Math.max(1, value - 1))}
+              >
+                <Text style={styles.pagination}>‹</Text>
+              </TouchableOpacity>
+              {Array.from({ length: userPageCount }, (_, index) => index + 1).map((number) => (
+                <TouchableOpacity
+                  key={number}
+                  style={[
+                    styles.paginationButton,
+                    currentUserPage === number && styles.paginationButtonActive,
+                  ]}
+                  onPress={() => setUserPage(number)}
+                >
+                  <Text
+                    style={[
+                      styles.pagination,
+                      currentUserPage === number && styles.paginationTextActive,
+                    ]}
+                  >
+                    {number}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+              <TouchableOpacity
+                style={styles.paginationButton}
+                disabled={currentUserPage === userPageCount}
+                onPress={() => setUserPage((value) => Math.min(userPageCount, value + 1))}
+              >
+                <Text style={styles.pagination}>›</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
@@ -870,7 +931,7 @@ export default function UsersScreen() {
                       </Text>
                     </View>
 
-                    {adminActivity.map((item) => {
+                    {visibleAdminActivity.map((item) => {
                       const loggedAt = formatDateTime(item.createdAt);
                       return (
                       <View key={item.id} style={styles.activityRow}>
@@ -913,6 +974,48 @@ export default function UsersScreen() {
                         </TouchableOpacity>
                       </View>
                     )})}
+
+                    {adminActivity.length > activityPerPage ? (
+                      <View style={styles.activityPagination}>
+                        <TouchableOpacity
+                          style={styles.paginationButton}
+                          disabled={currentActivityPage === 1}
+                          onPress={() => setActivityPage((value) => Math.max(1, value - 1))}
+                        >
+                          <Text style={styles.pagination}>‹</Text>
+                        </TouchableOpacity>
+                        {Array.from({ length: activityPageCount }, (_, index) => index + 1).map(
+                          (number) => (
+                            <TouchableOpacity
+                              key={number}
+                              style={[
+                                styles.paginationButton,
+                                currentActivityPage === number && styles.paginationButtonActive,
+                              ]}
+                              onPress={() => setActivityPage(number)}
+                            >
+                              <Text
+                                style={[
+                                  styles.pagination,
+                                  currentActivityPage === number && styles.paginationTextActive,
+                                ]}
+                              >
+                                {number}
+                              </Text>
+                            </TouchableOpacity>
+                          ),
+                        )}
+                        <TouchableOpacity
+                          style={styles.paginationButton}
+                          disabled={currentActivityPage === activityPageCount}
+                          onPress={() =>
+                            setActivityPage((value) => Math.min(activityPageCount, value + 1))
+                          }
+                        >
+                          <Text style={styles.pagination}>›</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
 
                     {canManageSelected ? (
                       <View style={styles.modalActions}>
@@ -1539,6 +1642,35 @@ const styles = StyleSheet.create({
   pagination: {
     fontFamily: "Montserrat_700Bold",
     color: "#34733B",
+  },
+  paginationButtons: {
+    flexDirection: "row",
+    gap: 5,
+    flexWrap: "wrap",
+    justifyContent: "flex-end",
+  },
+  paginationButton: {
+    minWidth: 28,
+    height: 28,
+    borderWidth: 1,
+    borderColor: "#a9b3a9",
+    borderRadius: 5,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 5,
+  },
+  paginationButtonActive: {
+    backgroundColor: "#34733B",
+    borderColor: "#34733B",
+  },
+  paginationTextActive: {
+    color: "#ffffff",
+  },
+  activityPagination: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 5,
+    marginTop: 14,
   },
 
   modalOverlay: {

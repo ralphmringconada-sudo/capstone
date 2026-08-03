@@ -58,6 +58,9 @@ export function AppNavigator() {
       <Stack.Screen name="create-report" />
       <Stack.Screen name="view-report" />
       <Stack.Screen name="edit-report" />
+      <Stack.Screen name="create-event" />
+      <Stack.Screen name="view-event" />
+      <Stack.Screen name="edit-event" />
     </Stack>
   );
 }

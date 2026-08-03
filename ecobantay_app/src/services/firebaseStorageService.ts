@@ -119,14 +119,14 @@ async function uploadWebImage(localUri: string, filePath: string, userId: string
   return getDownloadURL(storageRef);
 }
 
-export async function uploadReportImage(localUri: string, userId: string): Promise<string> {
+async function uploadUserImage(localUri: string, userId: string, folder: 'reports' | 'events'): Promise<string> {
   const currentUser = getAuthInstance().currentUser;
   if (!currentUser) {
-    throw new Error('You must be signed in to upload a report image.');
+    throw new Error(`You must be signed in to upload a ${folder.slice(0, -1)} image.`);
   }
 
   try {
-    const filePath = `reports/${userId}/${Date.now()}_${Math.random().toString(36).slice(2, 10)}.jpg`;
+    const filePath = `${folder}/${userId}/${Date.now()}_${Math.random().toString(36).slice(2, 10)}.jpg`;
 
     if (Platform.OS === 'web') {
       return uploadWebImage(localUri, filePath, userId);
@@ -140,4 +140,12 @@ export async function uploadReportImage(localUri: string, userId: string): Promi
     }
     throw new Error(formatStorageError(error));
   }
+}
+
+export async function uploadReportImage(localUri: string, userId: string): Promise<string> {
+  return uploadUserImage(localUri, userId, 'reports');
+}
+
+export async function uploadEventImage(localUri: string, userId: string): Promise<string> {
+  return uploadUserImage(localUri, userId, 'events');
 }

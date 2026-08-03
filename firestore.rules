@@ -76,6 +76,48 @@ service cloud.firestore {
       allow delete: if isAdmin() || (isSignedIn() && resource.data.reportedByUid == request.auth.uid);
     }
 
+    match /events/{eventId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin() || (
+        isSignedIn()
+        && request.resource.data.submittedByUid == request.auth.uid
+        && request.resource.data.status == 'Pending'
+      );
+      // Admin full control; owner may edit/delete Pending; any user may join/leave (participants counter).
+      allow update: if isAdmin()
+        || (
+          isSignedIn()
+          && resource.data.submittedByUid == request.auth.uid
+          && resource.data.status == 'Pending'
+          && request.resource.data.submittedByUid == resource.data.submittedByUid
+          && request.resource.data.status == 'Pending'
+        )
+        || (
+          isSignedIn()
+          && resource.data.status in ['Upcoming', 'Ongoing']
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['participants', 'updatedAt'])
+          && (
+            request.resource.data.participants == resource.data.participants + 1
+            || request.resource.data.participants == resource.data.participants - 1
+          )
+        );
+      allow delete: if isAdmin()
+        || (
+          isSignedIn()
+          && resource.data.submittedByUid == request.auth.uid
+          && resource.data.status == 'Pending'
+        );
+
+      match /participants/{participantId} {
+        allow read: if isSignedIn();
+        allow create: if isSignedIn()
+          && request.auth.uid == participantId
+          && request.resource.data.uid == request.auth.uid
+          && get(/databases/$(database)/documents/events/$(eventId)).data.status in ['Upcoming', 'Ongoing'];
+        allow delete: if isSignedIn() && request.auth.uid == participantId;
+      }
+    }
+
     match /admin_activity_logs/{logId} {
       allow read: if isSuperAdmin() || (isAdmin() && resource.data.adminUid == request.auth.uid);
       allow create: if isAdmin();

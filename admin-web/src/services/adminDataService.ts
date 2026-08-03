@@ -10,15 +10,24 @@ import {
   deleteDoc,
   where,
   limit,
+  setDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import {
+  createUserWithEmailAndPassword,
+  deleteUser,
+  getAuth,
   sendPasswordResetEmail,
+  signOut,
+  updateProfile,
   updatePassword,
   EmailAuthProvider,
   reauthenticateWithCredential,
 } from 'firebase/auth';
+import { getApps, initializeApp } from 'firebase/app';
 import { auth, db } from '@/config/firebase';
-import type { ActivityLog, AdminProfile, AppUser, Report, ReportStatus } from '@/types/admin';
+import { firebaseConfig } from '@/config/firebaseConfig';
+import type { ActivityLog, AdminEvent, AdminProfile, AppUser, Report, ReportStatus } from '@/types/admin';
 
 /**
  * Purpose: Loads the administrator profile used for portal authorization.
@@ -77,6 +86,73 @@ export async function fetchReports(): Promise<Report[]> {
   return snapshot.docs.map((item) => ({ id: item.id, ...(item.data() as Omit<Report, 'id'>) }));
 }
 
+/** Loads persistent events for the administrator event-management workspace. */
+export async function fetchEvents(): Promise<AdminEvent[]> {
+  try {
+    const snapshot = await getDocs(query(collection(db, 'events'), orderBy('createdAt', 'desc')));
+    return snapshot.docs.map((item) => ({
+      id: item.id,
+      ...(item.data() as Omit<AdminEvent, 'id'>),
+    }));
+  } catch {
+    const snapshot = await getDocs(collection(db, 'events'));
+    return snapshot.docs
+      .map((item) => ({
+        id: item.id,
+        ...(item.data() as Omit<AdminEvent, 'id'>),
+      }))
+      .sort((first, second) => (second.createdAt || '').localeCompare(first.createdAt || ''));
+  }
+}
+
+/** Creates a persistent event and records the administrator responsible for it. */
+export async function createEvent(
+  input: Omit<AdminEvent, 'id' | 'createdAt' | 'updatedAt'>,
+  admin: AdminProfile,
+): Promise<AdminEvent> {
+  const eventRef = doc(collection(db, 'events'));
+  const activityRef = doc(collection(db, 'admin_activity_logs'));
+  const now = new Date().toISOString();
+  const eventData: Omit<AdminEvent, 'id'> = { ...input, createdAt: now, updatedAt: now };
+  const event: AdminEvent = { id: eventRef.id, ...eventData };
+  const batch = writeBatch(db);
+  batch.set(eventRef, eventData);
+  batch.set(activityRef, {
+    adminUid: admin.uid,
+    adminName: admin.fullName,
+    action: 'Created Event',
+    module: 'Events',
+    recordId: eventRef.id,
+    details: `Created event "${event.title}"`,
+    createdAt: now,
+  });
+  await batch.commit();
+  return event;
+}
+
+/** Updates event moderation status together with its immutable audit entry. */
+export async function updateEventStatus(
+  eventId: string,
+  status: AdminEvent['status'],
+  admin: AdminProfile,
+): Promise<void> {
+  const eventRef = doc(db, 'events', eventId);
+  const activityRef = doc(collection(db, 'admin_activity_logs'));
+  const now = new Date().toISOString();
+  const batch = writeBatch(db);
+  batch.update(eventRef, { status, updatedAt: now });
+  batch.set(activityRef, {
+    adminUid: admin.uid,
+    adminName: admin.fullName,
+    action: `${status} Event`,
+    module: 'Events',
+    recordId: eventId,
+    details: `Changed event status to ${status}`,
+    createdAt: now,
+  });
+  await batch.commit();
+}
+
 /**
  * Purpose: Retrieves one environmental report by its persistent identifier.
  * How it works:
@@ -106,22 +182,25 @@ export async function updateReportStatus(
   admin: AdminProfile,
   details: string,
 ) {
-  // Persist the workflow decision before recording who performed it.
   const reportRef = doc(db, 'reports', reportId);
-  await updateDoc(reportRef, {
+  const activityRef = doc(collection(db, 'admin_activity_logs'));
+  const now = new Date().toISOString();
+  const batch = writeBatch(db);
+  batch.update(reportRef, {
     status,
-    updatedAt: new Date().toISOString(),
+    updatedAt: now,
   });
-
-  // Record the consequential report action for administrative review.
-  await logAdminActivity({
+  batch.set(activityRef, {
     adminUid: admin.uid,
     adminName: admin.fullName,
     action: `Updated Report Status`,
     module: 'Reports',
     recordId: reportId,
     details: `${details} (Status: ${status})`,
+    createdAt: now,
   });
+  // Commit the moderation decision and audit trail atomically.
+  await batch.commit();
 }
 
 /**
@@ -329,15 +408,16 @@ export async function fetchActivityLogs(adminUid?: string): Promise<ActivityLog[
   const base = collection(db, 'admin_activity_logs');
   // Standard-admin views use a UID filter; privileged global views omit it.
   const snapshot = adminUid
-    ? await getDocs(
-        query(base, where('adminUid', '==', adminUid), orderBy('createdAt', 'desc'), limit(50)),
-      )
+    ? await getDocs(query(base, where('adminUid', '==', adminUid)))
     : await getDocs(query(base, orderBy('createdAt', 'desc'), limit(100)));
 
-  return snapshot.docs.map((item) => ({
-    id: item.id,
-    ...(item.data() as Omit<ActivityLog, 'id'>),
-  }));
+  return snapshot.docs
+    .map((item) => ({
+      id: item.id,
+      ...(item.data() as Omit<ActivityLog, 'id'>),
+    }))
+    .sort((first, second) => second.createdAt.localeCompare(first.createdAt))
+    .slice(0, adminUid ? 50 : 100);
 }
 
 /**
@@ -350,7 +430,7 @@ export async function fetchActivityLogs(adminUid?: string): Promise<ActivityLog[
  * Why this implementation: Server-side creation protects privileged Firebase Authentication operations.
  */
 export async function createAdminAccount(
-  token: string,
+  _token: string,
   payload: {
     fullName: string;
     email: string;
@@ -360,22 +440,47 @@ export async function createAdminAccount(
     status?: 'active' | 'inactive';
   },
 ) {
-  const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
-  // Delegate privileged account creation to the backend with the requester's bearer token.
-  const response = await fetch(`${apiUrl}/api/admins/create`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(payload),
-  });
+  const provisioningApp =
+    getApps().find((item) => item.name === 'admin-provisioning') ||
+    initializeApp(firebaseConfig, 'admin-provisioning');
+  const provisioningAuth = getAuth(provisioningApp);
+  const normalizedEmail = payload.email.trim().toLowerCase();
+  const credential = await createUserWithEmailAndPassword(
+    provisioningAuth,
+    normalizedEmail,
+    payload.password,
+  );
 
-  // Surface backend validation or authorization failures to the calling admin form.
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error || 'Failed to create administrator.');
+  try {
+    await updateProfile(credential.user, { displayName: payload.fullName.trim() });
+    const profile: AdminProfile = {
+      uid: credential.user.uid,
+      fullName: payload.fullName.trim(),
+      email: normalizedEmail,
+      contactNumber: payload.contactNumber.trim(),
+      username: payload.username.trim() || normalizedEmail.split('@')[0],
+      role: 'admin',
+      status: payload.status || 'active',
+      createdAt: new Date().toISOString(),
+      createdBy: auth.currentUser?.uid,
+    };
+    // The primary Firestore session remains the super admin while secondary Auth creates credentials.
+    await setDoc(doc(db, 'admins', credential.user.uid), profile);
+    await logAdminActivity({
+      adminUid: auth.currentUser?.uid || '',
+      adminName: auth.currentUser?.displayName || auth.currentUser?.email || 'Super Admin',
+      action: 'Created Administrator',
+      module: 'Users',
+      recordId: credential.user.uid,
+      details: `Created admin account for ${normalizedEmail}`,
+    });
+    await signOut(provisioningAuth);
+    return profile;
+  } catch (error) {
+    // Remove the new Auth identity if its required Firestore profile cannot be completed.
+    await deleteDoc(doc(db, 'admins', credential.user.uid)).catch(() => undefined);
+    await deleteUser(credential.user).catch(() => undefined);
+    await signOut(provisioningAuth).catch(() => undefined);
+    throw error;
   }
-
-  return data.admin as AdminProfile;
 }

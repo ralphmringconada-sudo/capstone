@@ -1,14 +1,17 @@
 {
   "expo": {
-    "name": "admin-web",
-    "slug": "admin-web",
+    "name": "EcoBantay Admin",
+    "slug": "ecobantay-admin",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "adminweb",
+    "scheme": "ecobantayadmin",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "config": {
+        "googleMapsApiKey": "AIzaSyBK-t1HyWS40z-Y18sT4OWuPWcY7gt-Dhw"
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -17,11 +20,19 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyBK-t1HyWS40z-Y18sT4OWuPWcY7gt-Dhw"
+        }
+      }
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/favicon.png",
+      "config": {
+        "googleMapsApiKey": "AIzaSyBK-t1HyWS40z-Y18sT4OWuPWcY7gt-Dhw"
+      }
     },
     "plugins": [
       "expo-router",
@@ -35,7 +46,8 @@
           }
         }
       ],
-      "expo-font"
+      "expo-font",
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true,

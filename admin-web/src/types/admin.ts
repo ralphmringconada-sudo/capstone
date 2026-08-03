@@ -55,6 +55,26 @@ export type Report = {
   imageMetadata?: Record<string, unknown>;
 };
 
+export type AdminEvent = {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  date: string;
+  time: string;
+  location: string;
+  status: 'Pending' | 'Upcoming' | 'Ongoing' | 'Completed' | 'Rejected';
+  participants: number;
+  capacity: number;
+  submittedBy: string;
+  submittedArea: string;
+  submittedByUid?: string;
+  imageUrl?: string;
+  coordinates?: { latitude: number; longitude: number };
+  createdAt: string;
+  updatedAt?: string;
+};
+
 export type ActivityLog = {
   id: string;
   adminUid: string;

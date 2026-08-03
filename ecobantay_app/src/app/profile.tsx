@@ -19,10 +19,11 @@ import { useRouter, Stack, useFocusEffect } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { deleteUserAccount } from '@/services/authService';
 import { fetchUserReports } from '@/services/reportService';
+import { countUserCreatedEvents, countUserJoinedEvents } from '@/services/eventService';
 
 /**
  * Purpose: Displays the signed-in user's profile, activity count, and account controls.
- * How it works: 1) reads auth context. 2) loads report totals. 3) supports edits, logout, and verified deletion.
+ * How it works: 1) reads auth context. 2) loads report/event totals. 3) supports edits, logout, and verified deletion.
  * Technologies Used: React Native, Expo Router, Firebase Authentication, Firebase Firestore, React Context.
  * Why this implementation: Related identity and account-management workflows are consolidated in one protected screen.
  */
@@ -34,6 +35,8 @@ export default function ProfileScreen() {
    * modal, password, and deletion flags coordinate provider-sensitive account removal.
    */
   const [reportsMade, setReportsMade] = useState(0);
+  const [eventsMade, setEventsMade] = useState(0);
+  const [eventsJoined, setEventsJoined] = useState(0);
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
@@ -44,12 +47,18 @@ export default function ProfileScreen() {
     }, [refreshUser]),
   );
 
-  /* Firestore read: refresh the user's submitted-report count whenever the active UID changes. */
+  /* Firestore read: refresh activity counts whenever the active UID changes. */
   useEffect(() => {
     if (!user?.uid) return;
     fetchUserReports(user.uid)
       .then((reports) => setReportsMade(reports.length))
       .catch(() => setReportsMade(0));
+    countUserCreatedEvents(user.uid)
+      .then(setEventsMade)
+      .catch(() => setEventsMade(0));
+    countUserJoinedEvents(user.uid)
+      .then(setEventsJoined)
+      .catch(() => setEventsJoined(0));
   }, [user?.uid]);
 
   const userData = {
@@ -210,13 +219,13 @@ export default function ProfileScreen() {
                 </View>
                 <Text style={styles.statLabel}>Events Made</Text>
               </View>
-              <Text style={styles.statNumber}>0</Text>
+              <Text style={styles.statNumber}>{eventsMade}</Text>
             </View>
           </View>
 
           <View style={[styles.statBoxFull, styles.statBoxLightBlue]}>
             <Text style={styles.statLabel}>Events Participated</Text>
-            <Text style={styles.statNumber}>0</Text>
+            <Text style={styles.statNumber}>{eventsJoined}</Text>
           </View>
         </View>
 

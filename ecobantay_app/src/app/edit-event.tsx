@@ -1,0 +1,557 @@
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import DateTimePicker from '@react-native-community/datetimepicker';
+import { Shadow } from 'react-native-shadow-2';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import { useAuth } from '@/context/AuthContext';
+import { fetchEventById, updateUserEvent } from '@/services/eventService';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const CARD_PADDING = 72;
+const ITEM_SIZE = 80;
+const CENTER_OFFSET = (SCREEN_WIDTH - CARD_PADDING - ITEM_SIZE) / 2;
+
+const categories = [
+  { name: 'Clean-up', icon: require('@/assets/images/calendar_icon.png') },
+  { name: 'Tree Planting', icon: require('@/assets/images/information_icon.png') },
+  { name: 'Seminar', icon: require('@/assets/images/warning_icon.png') },
+  { name: 'Rehabilitation', icon: require('@/assets/images/location_icon.png') },
+  { name: 'Collection', icon: require('@/assets/images/settings_icon.png') },
+];
+
+function formatDisplayDate(date: Date): string {
+  return date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function formatDisplayTime(date: Date): string {
+  return date.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+}
+
+function parseStoredDate(value: string): Date {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+export default function EditEventScreen() {
+  const router = useRouter();
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  const { user } = useAuth();
+
+  const [barangay, setBarangay] = useState('');
+  const [location, setLocation] = useState('');
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
+  const [capacity, setCapacity] = useState('50');
+  const [eventDate, setEventDate] = useState(new Date());
+  const [eventTime, setEventTime] = useState(new Date());
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const [categoryIndex, setCategoryIndex] = useState(0);
+  const currentIndexRef = useRef(0);
+  const scrollViewRef = useRef<ScrollView | null>(null);
+  const scrollX = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const listener = scrollX.addListener(({ value }) => {
+      const newIndex = Math.max(0, Math.min(categories.length - 1, Math.round(value / ITEM_SIZE)));
+      if (newIndex !== currentIndexRef.current) {
+        currentIndexRef.current = newIndex;
+        setCategoryIndex(newIndex);
+      }
+    });
+    return () => {
+      scrollX.removeListener(listener);
+    };
+  }, [scrollX]);
+
+  useEffect(() => {
+    if (!id || !user?.uid) {
+      setIsLoading(false);
+      return;
+    }
+
+    (async () => {
+      try {
+        const event = await fetchEventById(String(id));
+        if (!event || event.submittedByUid !== user.uid) {
+          Alert.alert('Not found', 'This event could not be loaded.');
+          router.back();
+          return;
+        }
+        if (event.status !== 'Pending') {
+          Alert.alert('Locked', 'Only pending events can be edited.');
+          router.back();
+          return;
+        }
+
+        setTitle(event.title);
+        setDescription(event.description);
+        setLocation(event.location);
+        setBarangay(event.submittedArea || '');
+        setCapacity(String(event.capacity || 50));
+        setEventDate(parseStoredDate(event.date));
+        setEventTime(parseStoredDate(`${event.date} ${event.time}`));
+
+        const catIndex = Math.max(
+          0,
+          categories.findIndex((item) => item.name === event.category),
+        );
+        setCategoryIndex(catIndex === -1 ? 0 : catIndex);
+        currentIndexRef.current = catIndex === -1 ? 0 : catIndex;
+        setTimeout(() => {
+          scrollViewRef.current?.scrollTo({
+            x: (catIndex === -1 ? 0 : catIndex) * ITEM_SIZE,
+            animated: false,
+          });
+        }, 50);
+      } finally {
+        setIsLoading(false);
+      }
+    })();
+  }, [id, user?.uid, router]);
+
+  const handleSave = async () => {
+    if (!id || !user?.uid) return;
+    if (!title.trim() || !description.trim()) {
+      Alert.alert('Missing fields', 'Title and description are required.');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await updateUserEvent(String(id), user.uid, {
+        title,
+        description,
+        category: categories[categoryIndex].name,
+        date: formatDisplayDate(eventDate),
+        time: formatDisplayTime(eventTime),
+        location,
+        barangay,
+        capacity: Number(capacity) || 50,
+      });
+      Alert.alert('Saved', 'Event updated.', [
+        {
+          text: 'OK',
+          onPress: () =>
+            router.replace({
+              pathname: '/view-event',
+              params: { id: String(id) },
+            }),
+        },
+      ]);
+    } catch (err) {
+      Alert.alert('Error', err instanceof Error ? err.message : 'Failed to update event.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color="#375e55" />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="dark-content" backgroundColor="#9FC37F" />
+      <Stack.Screen options={{ headerShown: false }} />
+
+      <View style={styles.topHeader}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <Image
+            source={require('@/assets/images/back_arrow.png')}
+            style={styles.backArrowImage}
+            resizeMode="contain"
+          />
+        </TouchableOpacity>
+        <Image
+          source={require('@/assets/images/Ecobantay_Logo_2.png')}
+          style={styles.brandImage}
+          resizeMode="contain"
+        />
+        <TouchableOpacity
+          activeOpacity={0.7}
+          style={styles.settingsButton}
+          onPress={() => router.push('/profile')}
+        >
+          <Image source={require('@/assets/images/settings_icon.png')} style={styles.headerIcon} />
+        </TouchableOpacity>
+      </View>
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <Shadow
+            distance={2}
+            startColor={'rgba(0, 0, 0, 0.05)'}
+            offset={[0, 2]}
+            style={styles.cardShadowWrapper}
+          >
+            <View style={styles.card}>
+              <Text style={styles.sectionTitleCenter}>CATEGORY</Text>
+              <View style={styles.carouselContainer}>
+                <View style={styles.carouselWrapper}>
+                  <Animated.ScrollView
+                    ref={scrollViewRef}
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    snapToInterval={ITEM_SIZE}
+                    snapToAlignment="start"
+                    decelerationRate="fast"
+                    contentContainerStyle={{ paddingHorizontal: CENTER_OFFSET }}
+                    onScroll={Animated.event(
+                      [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+                      { useNativeDriver: false },
+                    )}
+                    scrollEventThrottle={16}
+                  >
+                    {categories.map((cat, index) => {
+                      const inputRange = [
+                        (index - 1) * ITEM_SIZE,
+                        index * ITEM_SIZE,
+                        (index + 1) * ITEM_SIZE,
+                      ];
+                      const scale = scrollX.interpolate({
+                        inputRange,
+                        outputRange: [0.7, 1.1, 0.7],
+                        extrapolate: 'clamp',
+                      });
+                      const borderRadius = scrollX.interpolate({
+                        inputRange,
+                        outputRange: [32, 6, 32],
+                        extrapolate: 'clamp',
+                      });
+                      const backgroundColor = scrollX.interpolate({
+                        inputRange,
+                        outputRange: ['#9db0a6', '#2d5a52', '#9db0a6'],
+                        extrapolate: 'clamp',
+                      });
+                      const opacity = scrollX.interpolate({
+                        inputRange: [
+                          (index - 2) * ITEM_SIZE,
+                          (index - 1) * ITEM_SIZE,
+                          index * ITEM_SIZE,
+                          (index + 1) * ITEM_SIZE,
+                          (index + 2) * ITEM_SIZE,
+                        ],
+                        outputRange: [0, 1, 1, 1, 0],
+                        extrapolate: 'clamp',
+                      });
+
+                      return (
+                        <Animated.View key={cat.name} style={[styles.slotContainer, { opacity }]}>
+                          <TouchableOpacity
+                            activeOpacity={0.9}
+                            onPress={() =>
+                              scrollViewRef.current?.scrollTo({
+                                x: index * ITEM_SIZE,
+                                animated: true,
+                              })
+                            }
+                          >
+                            <Animated.View
+                              style={[
+                                styles.slotCircle,
+                                { backgroundColor, borderRadius, transform: [{ scale }] },
+                              ]}
+                            >
+                              <Image source={cat.icon} style={styles.slotIcon} />
+                            </Animated.View>
+                          </TouchableOpacity>
+                        </Animated.View>
+                      );
+                    })}
+                  </Animated.ScrollView>
+                </View>
+                <Text style={styles.activeCategoryText}>{categories[categoryIndex].name}</Text>
+              </View>
+            </View>
+          </Shadow>
+
+          <Shadow
+            distance={2}
+            startColor={'rgba(0, 0, 0, 0.05)'}
+            offset={[0, 2]}
+            style={styles.cardShadowWrapper}
+          >
+            <View style={styles.card}>
+              <View style={styles.sectionHeader}>
+                <Image
+                  source={require('@/assets/images/location_icon.png')}
+                  style={styles.sectionIcon}
+                />
+                <Text style={styles.sectionTitle}>Location</Text>
+              </View>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Barangay"
+                placeholderTextColor="#a0a0a0"
+                value={barangay}
+                onChangeText={setBarangay}
+              />
+              <TextInput
+                style={[styles.textInput, { marginTop: 10 }]}
+                placeholder="Full location"
+                placeholderTextColor="#a0a0a0"
+                value={location}
+                onChangeText={setLocation}
+              />
+            </View>
+          </Shadow>
+
+          <Shadow
+            distance={2}
+            startColor={'rgba(0, 0, 0, 0.05)'}
+            offset={[0, 2]}
+            style={styles.cardShadowWrapper}
+          >
+            <View style={styles.card}>
+              <View style={styles.sectionHeader}>
+                <Image
+                  source={require('@/assets/images/information_icon.png')}
+                  style={styles.sectionIcon}
+                />
+                <Text style={styles.sectionTitle}>Additional Information</Text>
+              </View>
+              <TextInput
+                style={[styles.textInput, { marginBottom: 12 }]}
+                placeholder="Title"
+                placeholderTextColor="#a0a0a0"
+                value={title}
+                onChangeText={setTitle}
+              />
+              <View style={styles.dateTimeRow}>
+                <TouchableOpacity style={styles.pill} onPress={() => setShowDatePicker(true)}>
+                  <Text style={styles.pillText}>{formatDisplayDate(eventDate)}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.pill} onPress={() => setShowTimePicker(true)}>
+                  <Text style={styles.pillText}>{formatDisplayTime(eventTime)}</Text>
+                </TouchableOpacity>
+              </View>
+              {showDatePicker ? (
+                <DateTimePicker
+                  value={eventDate}
+                  mode="date"
+                  minimumDate={new Date()}
+                  onChange={(_, date) => {
+                    setShowDatePicker(Platform.OS === 'ios');
+                    if (date) setEventDate(date);
+                  }}
+                />
+              ) : null}
+              {showTimePicker ? (
+                <DateTimePicker
+                  value={eventTime}
+                  mode="time"
+                  onChange={(_, date) => {
+                    setShowTimePicker(Platform.OS === 'ios');
+                    if (date) setEventTime(date);
+                  }}
+                />
+              ) : null}
+              <TextInput
+                style={[styles.textInput, { marginBottom: 12 }]}
+                placeholder="Max participants"
+                placeholderTextColor="#a0a0a0"
+                keyboardType="number-pad"
+                value={capacity}
+                onChangeText={setCapacity}
+              />
+              <TextInput
+                style={styles.textArea}
+                placeholder="Description"
+                placeholderTextColor="#a0a0a0"
+                value={description}
+                onChangeText={setDescription}
+                multiline
+                textAlignVertical="top"
+              />
+            </View>
+          </Shadow>
+
+          <View style={styles.actionButtonsContainer}>
+            <Shadow
+              distance={2}
+              startColor={'rgba(0, 0, 0, 0.15)'}
+              offset={[0, 2]}
+              style={{ width: '100%', marginBottom: 12 }}
+            >
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={[styles.actionButton, styles.confirmButton]}
+                onPress={handleSave}
+                disabled={isSaving}
+              >
+                {isSaving ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.actionButtonText}>CONFIRM CHANGES</Text>
+                )}
+              </TouchableOpacity>
+            </Shadow>
+
+            <Shadow distance={2} startColor={'rgba(0, 0, 0, 0.15)'} offset={[0, 2]} style={{ width: '100%' }}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={[styles.actionButton, styles.cancelButton]}
+                onPress={() => router.back()}
+              >
+                <Text style={styles.actionButtonText}>CANCEL</Text>
+              </TouchableOpacity>
+            </Shadow>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#f8f9fa' },
+  centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  topHeader: {
+    backgroundColor: '#E1F0B9',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    paddingTop: Platform.select({ android: 30, ios: 8, default: 0 }),
+  },
+  backButton: { padding: 8, marginLeft: -8 },
+  backArrowImage: { width: 24, height: 24, tintColor: '#194f24' },
+  brandImage: { width: 130, height: 32 },
+  settingsButton: { padding: 8, marginRight: -8 },
+  headerIcon: { width: 24, height: 24, tintColor: '#194f24' },
+  scrollContent: { flexGrow: 1, paddingHorizontal: 20, paddingTop: 20, paddingBottom: 40 },
+  cardShadowWrapper: { width: '100%', marginBottom: 20 },
+  card: {
+    width: '100%',
+    backgroundColor: '#ffffff',
+    borderRadius: 8,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
+  },
+  sectionTitleCenter: {
+    fontFamily: 'Montserrat-Bold',
+    fontSize: 16,
+    color: '#000000',
+    textAlign: 'center',
+    marginBottom: 16,
+    includeFontPadding: false,
+  },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  sectionIcon: { width: 18, height: 18, tintColor: '#000000', marginRight: 8 },
+  sectionTitle: {
+    fontFamily: 'Montserrat-Bold',
+    fontSize: 16,
+    color: '#000000',
+    includeFontPadding: false,
+  },
+  carouselContainer: { width: '100%', alignItems: 'center' },
+  carouselWrapper: { width: '100%', height: 70, position: 'relative', justifyContent: 'center' },
+  slotContainer: { width: ITEM_SIZE, alignItems: 'center', justifyContent: 'center' },
+  slotCircle: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center' },
+  slotIcon: { width: 32, height: 32, tintColor: '#ffffff' },
+  activeCategoryText: {
+    marginTop: 12,
+    fontFamily: 'Montserrat-Semi-Bold',
+    fontSize: 14,
+    color: '#000000',
+    textAlign: 'center',
+    includeFontPadding: false,
+  },
+  textInput: {
+    width: '100%',
+    height: 44,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    fontFamily: 'Montserrat-Regular',
+    fontSize: 14,
+    color: '#333333',
+    includeFontPadding: false,
+  },
+  textArea: {
+    width: '100%',
+    height: 120,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 6,
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 12,
+    fontFamily: 'Montserrat-Regular',
+    fontSize: 14,
+    color: '#333333',
+    includeFontPadding: false,
+  },
+  dateTimeRow: { flexDirection: 'row', marginBottom: 12 },
+  pill: {
+    backgroundColor: '#eef2f0',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginRight: 10,
+  },
+  pillText: { fontFamily: 'Montserrat-Medium', fontSize: 12, color: '#000000' },
+  actionButtonsContainer: { width: '100%', marginTop: 8 },
+  actionButton: {
+    width: '100%',
+    height: 52,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmButton: { backgroundColor: '#375e55' },
+  cancelButton: { backgroundColor: '#e74c3c' },
+  actionButtonText: {
+    fontFamily: 'Montserrat-Bold',
+    fontSize: 16,
+    color: '#ffffff',
+    letterSpacing: 0.5,
+    includeFontPadding: false,
+  },
+});
