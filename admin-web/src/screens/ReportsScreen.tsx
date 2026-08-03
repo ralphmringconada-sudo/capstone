@@ -212,7 +212,7 @@ export default function ReportsScreen() {
           <View style={[styles.tableHeader, { height: 48 * s }]}>
             <Text style={[styles.th, styles.idCol, { fontSize: 18 * s }]}>ID</Text>
             <Text style={[styles.th, styles.detailsCol, { fontSize: 18 * s }]}>Report Details</Text>
-            <Text style={[styles.th, styles.locationCol, { fontSize: 18 * s, transform: [{ translateX: 20 * s }] }]}>Location</Text>
+            <Text style={[styles.th, styles.locationCol, { fontSize: 18 * s }]}>Location</Text>
             <Text style={[styles.th, styles.categoryCol, { fontSize: 18 * s }]}>Category</Text>
             <Text style={[styles.th, styles.reportedCol, { fontSize: 18 * s }]}>Reported By</Text>
             <Text style={[styles.th, styles.dateCol, { fontSize: 18 * s }]}>Date Reported</Text>
@@ -247,7 +247,7 @@ export default function ReportsScreen() {
                   </View>
                 </View>
 
-                <Text style={[styles.td, styles.locationCol, { fontSize: 16 * s, transform: [{ translateX: 20 * s }] }]}>
+                <Text style={[styles.td, styles.locationCol, { fontSize: 16 * s }]} numberOfLines={3}>
                   {report.location}
                 </Text>
 
@@ -479,8 +479,8 @@ const styles = StyleSheet.create({
   td: { fontFamily: "Montserrat_700Bold", color: "#222" },
   idCol: { width: "8%" },
   detailsCol: { width: "22%" },
-  locationCol: { width: "14%" },
-  categoryCol: { width: "12%" },
+  locationCol: { width: "15%", paddingRight: 18 },
+  categoryCol: { width: "12%", paddingLeft: 10 },
   reportedCol: { width: "14%" },
   dateCol: { width: "12%" },
   statusCol: { width: "10%" },
