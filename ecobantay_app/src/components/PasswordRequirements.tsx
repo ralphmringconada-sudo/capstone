@@ -51,11 +51,11 @@ const styles = StyleSheet.create({
   container: {
     width: '100%',
     marginTop: 8,
-    gap: 4,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 4,
   },
   icon: {
     width: 18,

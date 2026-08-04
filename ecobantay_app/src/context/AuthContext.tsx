@@ -6,13 +6,14 @@ import React, {
   useMemo,
   useState,
 } from 'react';
-import { onAuthStateChanged } from 'firebase/auth';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 import {
   FIREBASE_SETUP_MESSAGE,
   getAuthInstance,
   isFirebaseConfigured,
 } from '@/config/firebase';
 import {
+  assertNotAdminAccount,
   getUserProfile,
   loginWithEmail,
   loginWithGoogle,
@@ -79,29 +80,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    /* Firebase Authentication observer: reacts to login, logout, and restored native sessions. */
-    const unsubscribe = onAuthStateChanged(getAuthInstance(), async (firebaseUser) => {
-      if (!firebaseUser) {
-        setUser(null);
-        setIsLoading(false);
-        return;
-      }
+    let unsubscribe: (() => void) | undefined;
 
-      /*
-       * Firestore read and error handling: an authenticated identity is accepted
-       * only when its required application profile can also be loaded.
-       */
-      try {
-        const profile = await getUserProfile(firebaseUser.uid);
-        setUser(profile);
-      } catch {
-        setUser(null);
-      } finally {
-        setIsLoading(false);
-      }
-    });
+    try {
+      /* Firebase Authentication observer: reacts to login, logout, and restored native sessions. */
+      unsubscribe = onAuthStateChanged(getAuthInstance(), async (firebaseUser) => {
+        if (!firebaseUser) {
+          setUser(null);
+          setIsLoading(false);
+          return;
+        }
 
-    return unsubscribe;
+        /*
+         * Firestore read and error handling: an authenticated identity is accepted
+         * only when its required application profile can also be loaded.
+         * Admin accounts are signed out so they cannot use the mobile app.
+         */
+        try {
+          await assertNotAdminAccount(firebaseUser.uid);
+          const profile = await getUserProfile(firebaseUser.uid);
+          if (!profile) {
+            await signOut(getAuthInstance());
+            setUser(null);
+          } else {
+            setUser(profile);
+          }
+        } catch {
+          setUser(null);
+        } finally {
+          setIsLoading(false);
+        }
+      });
+    } catch (error) {
+      console.warn('Firebase auth startup failed:', error);
+      setUser(null);
+      setIsLoading(false);
+    }
+
+    return () => {
+      unsubscribe?.();
+    };
   }, []);
 
   /**

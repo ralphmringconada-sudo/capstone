@@ -407,13 +407,8 @@ export async function deleteAppUserAccount(token: string, userId: string) {
  */
 export async function sendAdminPasswordReset(email: string) {
   const normalized = email.trim().toLowerCase();
-  // Only send reset mail for known administrator accounts.
-  const snapshot = await getDocs(
-    query(collection(db, 'admins'), where('email', '==', normalized), limit(1)),
-  );
-  if (snapshot.empty) {
-    throw new Error('No administrator account was found for that email.');
-  }
+  // Auth-only: do not query Firestore here — forgot-password runs while logged out,
+  // and admins collection reads require an authenticated session.
   await sendPasswordResetEmail(auth, normalized);
 }
 

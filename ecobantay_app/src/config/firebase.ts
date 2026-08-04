@@ -57,9 +57,9 @@ let storageInstance: FirebaseStorage | null = null;
 
 /**
  * Purpose: Creates Firebase Authentication with persistence suited to the running platform.
- * How it works: 1) uses standard Auth on web. 2) initializes AsyncStorage persistence on native. 3) reuses Auth if needed.
+ * How it works: 1) uses standard Auth on web. 2) tries AsyncStorage persistence on native. 3) falls back safely.
  * Technologies Used: Firebase Authentication, React Native Platform, AsyncStorage.
- * Why this implementation: Native sessions survive app restarts while web retains Firebase's standard behavior.
+ * Why this implementation: Native sessions survive restarts when persistence is available, without crashing startup.
  */
 function createAuthInstance(firebaseApp: FirebaseApp): Auth {
   if (Platform.OS === 'web') {
@@ -67,19 +67,25 @@ function createAuthInstance(firebaseApp: FirebaseApp): Auth {
   }
 
   try {
-    const { getReactNativePersistence } = require('firebase/auth') as {
-      getReactNativePersistence: (storage: typeof AsyncStorage) => unknown;
+    const authModule = require('firebase/auth') as {
+      getReactNativePersistence?: (storage: typeof AsyncStorage) => unknown;
     };
-
-    return initializeAuth(firebaseApp, {
-      persistence: getReactNativePersistence(AsyncStorage),
-    });
+    if (typeof authModule.getReactNativePersistence === 'function') {
+      return initializeAuth(firebaseApp, {
+        persistence: authModule.getReactNativePersistence(AsyncStorage) as never,
+      });
+    }
   } catch (error) {
-    // Hot reload may re-run init; reuse the existing Auth instance with persistence.
     if ((error as { code?: string }).code === 'auth/already-initialized') {
       return getAuth(firebaseApp);
     }
-    throw error;
+  }
+
+  // Safe fallback: app must open even if RN persistence helper is unavailable.
+  try {
+    return getAuth(firebaseApp);
+  } catch {
+    return initializeAuth(firebaseApp);
   }
 }
 
@@ -90,12 +96,10 @@ function createAuthInstance(firebaseApp: FirebaseApp): Auth {
  * Why this implementation: Lazy singletons avoid duplicate-app errors and defer setup until a service is required.
  */
 function initializeFirebase() {
-  /* Configuration validation: fail before any Firebase SDK call when credentials are incomplete. */
   if (!isFirebaseConfigured()) {
     throw new Error(FIREBASE_SETUP_MESSAGE);
   }
 
-  /* Firebase App initialization: reuse an SDK-created app during hot reload when available. */
   if (!appInstance) {
     appInstance = getApps().length ? getApp() : initializeApp(firebaseConfig);
   }
@@ -104,18 +108,17 @@ function initializeFirebase() {
     authInstance = createAuthInstance(appInstance);
   }
 
-  /*
-   * Firestore initialization: native clients enable transport auto-detection for
-   * mobile networks while web uses the standard browser Firestore instance.
-   */
   if (!dbInstance) {
-    dbInstance =
-      Platform.OS === 'web'
-        ? getFirestore(appInstance)
-        : initializeFirestore(appInstance, {
-            // Select long polling only on networks that cannot use the faster default transport.
-            experimentalAutoDetectLongPolling: true,
-          });
+    try {
+      dbInstance =
+        Platform.OS === 'web'
+          ? getFirestore(appInstance)
+          : initializeFirestore(appInstance, {
+              experimentalAutoDetectLongPolling: true,
+            });
+    } catch {
+      dbInstance = getFirestore(appInstance);
+    }
   }
 
   if (!storageInstance) {

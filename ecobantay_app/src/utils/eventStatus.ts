@@ -28,7 +28,7 @@ export const USER_EVENT_TABS = [
   {
     key: 'ALL',
     label: 'ALL',
-    statuses: ['Pending', 'Upcoming', 'Ongoing', 'Completed', 'Rejected'] as EventStatus[],
+    statuses: ['Pending', 'Upcoming', 'Ongoing', 'Completed'] as EventStatus[],
   },
   { key: 'PENDING', label: 'PENDING', statuses: ['Pending'] as EventStatus[] },
   {
@@ -36,7 +36,6 @@ export const USER_EVENT_TABS = [
     label: 'ACCEPTED',
     statuses: ['Upcoming', 'Ongoing', 'Completed'] as EventStatus[],
   },
-  { key: 'REJECTED', label: 'REJECTED', statuses: ['Rejected'] as EventStatus[] },
 ] as const;
 
 export type UserEventTabKey = (typeof USER_EVENT_TABS)[number]['key'];
