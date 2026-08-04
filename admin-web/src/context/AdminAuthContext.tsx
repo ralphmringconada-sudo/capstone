@@ -72,11 +72,21 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Resolve the Firestore role document before treating the session as administrative.
+      // Citizen (users) accounts are signed out so they cannot stay on the admin portal.
       try {
         const profile = await getAdminProfile(user.uid);
-        setAdmin(profile);
-      // Any profile read failure is handled as an unauthorized admin session.
+        if (!profile || profile.status !== 'active') {
+          await signOut(auth);
+          setAdmin(null);
+        } else {
+          setAdmin(profile);
+        }
       } catch {
+        try {
+          await signOut(auth);
+        } catch {
+          // Ignore sign-out failures during unauthorized session cleanup.
+        }
         setAdmin(null);
       } finally {
         setIsLoading(false);

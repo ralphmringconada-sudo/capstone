@@ -36,11 +36,13 @@ import InteractiveLocationMap from "@/components/InteractiveLocationMap";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
   createEvent,
+  fetchEventParticipants,
   fetchEvents,
   updateEventStatus,
 } from "@/services/adminDataService";
 import { uploadAdminEventImage } from "@/services/eventImageService";
-import type { AdminEvent } from "@/types/admin";
+import type { AdminEvent, EventParticipant } from "@/types/admin";
+import { formatDateTime } from "@/utils/format";
 
 type EventStatus = AdminEvent["status"];
 type EventTab = "All Events" | "Pending Approval" | "Rejected";
@@ -119,6 +121,8 @@ export default function EventsScreen() {
   const [selectionMenu, setSelectionMenu] = useState<"category" | "status" | "sort" | null>(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<AdminEvent | null>(null);
+  const [eventParticipants, setEventParticipants] = useState<EventParticipant[]>([]);
+  const [loadingParticipants, setLoadingParticipants] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newCategory, setNewCategory] = useState("Clean-up");
   const [newDescription, setNewDescription] = useState("");
@@ -314,13 +318,35 @@ export default function EventsScreen() {
     }, 800);
   };
 
+  const openEventDetails = async (event: AdminEvent) => {
+    setSelectedEvent(event);
+    setEventParticipants([]);
+    setLoadingParticipants(true);
+    try {
+      setEventParticipants(await fetchEventParticipants(event.id));
+    } catch (error) {
+      Alert.alert(
+        "Participants unavailable",
+        error instanceof Error ? error.message : "Failed to load participants.",
+      );
+    } finally {
+      setLoadingParticipants(false);
+    }
+  };
+
+  const closeEventDetails = () => {
+    setSelectedEvent(null);
+    setEventParticipants([]);
+    setLoadingParticipants(false);
+  };
+
   const moderateEvent = async (nextStatus: EventStatus) => {
     if (!selectedEvent || !admin || moderatingRef.current) return;
     moderatingRef.current = true;
     setIsModerating(true);
     try {
       await updateEventStatus(selectedEvent.id, nextStatus, admin);
-      setSelectedEvent(null);
+      closeEventDetails();
       await reloadEvents();
     } catch (error) {
       Alert.alert("Event update failed", error instanceof Error ? error.message : "Failed to update event.");
@@ -335,9 +361,10 @@ export default function EventsScreen() {
       <ScrollView
         style={styles.page}
         contentContainerStyle={{
-          paddingHorizontal: width * 0.025,
+          paddingHorizontal: 20,
           paddingTop: height * 0.018,
           paddingBottom: 30,
+          width: "100%",
         }}
         showsVerticalScrollIndicator={false}
       >
@@ -474,8 +501,8 @@ export default function EventsScreen() {
         </View>
 
         <View style={styles.tablePanel}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={styles.table}>
+          <ScrollView horizontal={width < 1100} showsHorizontalScrollIndicator={width < 1100}>
+            <View style={[styles.table, width >= 1100 ? styles.tableFullWidth : null]}>
               <View style={styles.tableHeader}>
                 {activeTab === "All Events" && <Text style={[styles.th, styles.idColumn]}>ID</Text>}
                 <Text style={[styles.th, styles.detailsColumn]}>Event Details</Text>
@@ -496,11 +523,17 @@ export default function EventsScreen() {
                 visibleEvents.map((event) => (
                   <View key={event.id} style={styles.tableRow}>
                     {activeTab === "All Events" && (
-                      <Text style={[styles.cellText, styles.idColumn]}>#{event.id}</Text>
+                      <Text style={[styles.cellText, styles.idColumn]} numberOfLines={1}>
+                        #{event.id.slice(0, 8)}
+                      </Text>
                     )}
                     <View style={[styles.detailsCell, styles.detailsColumn]}>
                       <View style={styles.eventThumbnail}>
-                        <CalendarDays size={18} color="#7d8c7c" />
+                        {event.imageUrl ? (
+                          <Image source={{ uri: event.imageUrl }} style={styles.eventThumbnailImage} />
+                        ) : (
+                          <CalendarDays size={18} color="#7d8c7c" />
+                        )}
                       </View>
                       <View style={styles.eventCopy}>
                         <Text numberOfLines={1} style={styles.eventTitle}>{event.title}</Text>
@@ -546,7 +579,7 @@ export default function EventsScreen() {
                       <Text style={styles.smallText}>Expected</Text>
                     </View>
                     <View style={styles.actionColumn}>
-                      <TouchableOpacity style={styles.viewButton} onPress={() => setSelectedEvent(event)}>
+                      <TouchableOpacity style={styles.viewButton} onPress={() => void openEventDetails(event)}>
                         <Eye size={13} color="#377b3d" />
                         <Text style={styles.viewButtonText}>View Event</Text>
                       </TouchableOpacity>
@@ -736,19 +769,22 @@ export default function EventsScreen() {
         </View>
       </Modal>
 
-      <Modal visible={selectedEvent !== null} transparent animationType="fade" onRequestClose={() => setSelectedEvent(null)}>
+      <Modal visible={selectedEvent !== null} transparent animationType="fade" onRequestClose={closeEventDetails}>
         <View style={styles.modalOverlay}>
           {selectedEvent && (
-            <View style={styles.detailsModal}>
+            <ScrollView style={styles.detailsModalScroll} contentContainerStyle={styles.detailsModal}>
               <View style={styles.modalHeader}>
                 <View style={styles.modalTitleWrap}>
                   <Text style={styles.modalTitle}>{selectedEvent.title}</Text>
                   <Text style={styles.modalSubtitle}>#{selectedEvent.id}</Text>
                 </View>
-                <Pressable style={styles.closeButton} onPress={() => setSelectedEvent(null)}>
+                <Pressable style={styles.closeButton} onPress={closeEventDetails}>
                   <X size={20} color="#222" />
                 </Pressable>
               </View>
+              {selectedEvent.imageUrl ? (
+                <Image source={{ uri: selectedEvent.imageUrl }} style={styles.detailsHeroImage} />
+              ) : null}
               <Text style={styles.detailsDescription}>{selectedEvent.description}</Text>
               <InteractiveLocationMap
                 coordinates={selectedEvent.coordinates}
@@ -769,6 +805,36 @@ export default function EventsScreen() {
                 value={`${selectedEvent.participants} of ${selectedEvent.capacity}`}
               />
               <DetailRow label="Submitted By" value={selectedEvent.submittedBy} />
+
+              <Text style={styles.participantsHeading}>Participant List</Text>
+              {loadingParticipants ? (
+                <Text style={styles.smallText}>Loading participants...</Text>
+              ) : eventParticipants.length === 0 ? (
+                <Text style={styles.smallText}>No users have joined this event yet.</Text>
+              ) : (
+                eventParticipants.map((participant) => {
+                  const joined = participant.joinedAt
+                    ? formatDateTime(participant.joinedAt)
+                    : null;
+                  return (
+                    <View key={participant.uid} style={styles.participantRow}>
+                      <View style={styles.submitterIcon}>
+                        <UserRound size={13} color="#ffffff" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.eventTitle}>{participant.name}</Text>
+                        <Text style={styles.smallText}>{participant.email}</Text>
+                        {joined ? (
+                          <Text style={styles.smallText}>
+                            Joined {joined.date} · {joined.time}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </View>
+                  );
+                })
+              )}
+
               <View style={styles.moderationActions}>
                 {selectedEvent.status === "Pending" && (
                   <>
@@ -809,13 +875,13 @@ export default function EventsScreen() {
                 )}
                 <TouchableOpacity
                   style={[styles.cancelButton, isModerating && { opacity: 0.6 }]}
-                  onPress={() => !isModerating && setSelectedEvent(null)}
+                  onPress={() => !isModerating && closeEventDetails()}
                   disabled={isModerating}
                 >
                   <Text style={styles.cancelText}>Close</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+            </ScrollView>
           )}
         </View>
       </Modal>
@@ -1175,7 +1241,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: "hidden",
   },
-  table: { minWidth: 1250 },
+  table: { minWidth: 980 },
+  tableFullWidth: { minWidth: "100%", width: "100%" },
   tableHeader: {
     height: 50,
     flexDirection: "row",
@@ -1193,15 +1260,15 @@ const styles = StyleSheet.create({
     borderBottomColor: "#dddddd",
     paddingHorizontal: 16,
   },
-  idColumn: { width: 105 },
-  detailsColumn: { width: 245 },
-  submittedColumn: { width: 150 },
-  categoryColumn: { width: 145 },
-  dateColumn: { width: 150 },
-  locationColumn: { width: 155 },
-  statusColumn: { width: 110 },
-  participantsColumn: { width: 105 },
-  actionColumn: { width: 115, alignItems: "center" },
+  idColumn: { flex: 0.7, minWidth: 90 },
+  detailsColumn: { flex: 2.2, minWidth: 220 },
+  submittedColumn: { flex: 1.2, minWidth: 140 },
+  categoryColumn: { flex: 1.1, minWidth: 120 },
+  dateColumn: { flex: 1.1, minWidth: 120 },
+  locationColumn: { flex: 1.3, minWidth: 130 },
+  statusColumn: { flex: 0.9, minWidth: 100 },
+  participantsColumn: { flex: 0.9, minWidth: 100 },
+  actionColumn: { flex: 1, minWidth: 110, alignItems: "center" },
   cellText: { fontSize: 12, fontFamily: "Montserrat_700Bold", color: "#242424" },
   detailsCell: { flexDirection: "row", alignItems: "center", gap: 9 },
   submittedCell: { flexDirection: "row", alignItems: "center", gap: 8 },
@@ -1220,6 +1287,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#d9ddda",
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
+  },
+  eventThumbnailImage: {
+    width: 42,
+    height: 42,
   },
   eventCopy: { flex: 1, paddingRight: 6 },
   eventTitle: { fontSize: 12, fontFamily: "Montserrat_700Bold", color: "#1c1c1c" },
@@ -1270,7 +1342,36 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   formModal: { width: "100%", maxWidth: 880, backgroundColor: "#fff", borderRadius: 14, padding: 24 },
-  detailsModal: { width: "100%", maxWidth: 520, backgroundColor: "#fff", borderRadius: 14, padding: 24 },
+  detailsModalScroll: {
+    width: "94%",
+    maxWidth: 720,
+    maxHeight: "90%",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+  },
+  detailsModal: { padding: 28, paddingBottom: 32 },
+  detailsHeroImage: {
+    width: "100%",
+    height: 180,
+    borderRadius: 10,
+    marginBottom: 12,
+    backgroundColor: "#d9ddda",
+  },
+  participantsHeading: {
+    marginTop: 16,
+    marginBottom: 10,
+    fontSize: 15,
+    color: "#1c1c1c",
+    fontFamily: "Montserrat_700Bold",
+  },
+  participantRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#ececec",
+  },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",

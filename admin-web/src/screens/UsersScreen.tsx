@@ -33,6 +33,7 @@ import { useAdminData } from "@/hooks/useAdminData";
 import {
   createAdminAccount,
   deleteAppUserAccount,
+  sendAdminPasswordResetForAdmin,
   setAccountFlag,
   updateAdminProfileInfo,
   updateAppUserProfile,
@@ -52,11 +53,13 @@ import type { ActivityLog } from "@/types/admin";
  */
 export default function UsersScreen() {
   const { width, height } = useWindowDimensions();
-  const s = Math.min(width / 1920, height / 1080);
+  // Floor scale so modal/table text does not compress on smaller viewports.
+  const s = Math.max(0.72, Math.min(width / 1920, height / 1080));
   const { isSuperAdmin, admin } = useAdminAuth();
   const { users: appUsers, admins, reports, stats, reload, loadAdminActivity } = useAdminData();
 
   // Normalize separate Firestore schemas into one display model without altering source records.
+  // Standard admins only see citizen accounts; Super Admins see admins + users.
   const tableUsers = useMemo(() => {
     const citizenRows = appUsers.map((user) => {
       const registered = formatDateTime(user.createdAt);
@@ -72,22 +75,26 @@ export default function UsersScreen() {
       ];
     });
 
-    const adminRows = admins.map((admin) => {
-      const registered = formatDateTime(admin.createdAt);
+    if (!isSuperAdmin) {
+      return citizenRows;
+    }
+
+    const adminRows = admins.map((adminRow) => {
+      const registered = formatDateTime(adminRow.createdAt);
       return [
-        `#${admin.uid.slice(0, 8)}`,
-        admin.fullName,
-        `@${admin.username}`,
-        admin.email,
-        admin.role === "super_admin" ? "Super Admin" : "Admin",
+        `#${adminRow.uid.slice(0, 8)}`,
+        adminRow.fullName,
+        `@${adminRow.username}`,
+        adminRow.email,
+        adminRow.role === "super_admin" ? "Super Admin" : "Admin",
         registered.date,
         registered.time,
-        admin.uid,
+        adminRow.uid,
       ];
     });
 
     return [...adminRows, ...citizenRows];
-  }, [admins, appUsers]);
+  }, [admins, appUsers, isSuperAdmin]);
 
   /*
    * Selection and modal state preserve the account currently under review.
@@ -126,6 +133,7 @@ export default function UsersScreen() {
   });
   const [editError, setEditError] = useState("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
+  const [isSendingReset, setIsSendingReset] = useState(false);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("All Roles");
   const [userPage, setUserPage] = useState(1);
@@ -304,6 +312,27 @@ export default function UsersScreen() {
   };
 
   /**
+   * Purpose: Sends a Firebase password-reset email for a selected standard admin.
+   * How it works: Super admin only; uses Firebase Auth email recovery (easier default flow).
+   */
+  const handleSendAdminPasswordReset = async () => {
+    if (!selectedUser || !admin || !isSuperAdmin || selectedUser[4] !== "Admin") return;
+    setIsSendingReset(true);
+    setEditError("");
+    try {
+      await sendAdminPasswordResetForAdmin(selectedUser[7], admin);
+      Alert.alert(
+        "Password reset sent",
+        "A Firebase reset email was sent. The admin can open it and set a new password.",
+      );
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Failed to send password reset.");
+    } finally {
+      setIsSendingReset(false);
+    }
+  };
+
+  /**
    * Purpose: Confirms and requests permanent deletion of a manageable account.
    * How it works:
    * 1. Current selection and role-derived permission are required.
@@ -351,6 +380,15 @@ export default function UsersScreen() {
    * Why this implementation: Delayed, permission-aware loading prevents stale or overexposed activity records.
    */
   const openUserProfile = async (user: any) => {
+    // Standard admins may only open citizen profiles — never other admins/super admins.
+    if (!isSuperAdmin && (user[4] === "Admin" || user[4] === "Super Admin")) {
+      Alert.alert(
+        "Access denied",
+        "Administrators can only view citizen user accounts and their activity.",
+      );
+      return;
+    }
+
     setSelectedUser(user);
     setIsProfileOpen(true);
     setActivityPage(1);
@@ -359,7 +397,7 @@ export default function UsersScreen() {
     setAdminActivity([]);
     if (
       (user[4] === "Admin" || user[4] === "Super Admin") &&
-      (isSuperAdmin || user[7] === admin?.uid)
+      isSuperAdmin
     ) {
       // Query Firestore only after the viewer passes the audit-history role check.
       try {
@@ -523,9 +561,30 @@ export default function UsersScreen() {
         </View>
 
         <View style={[styles.cards, { gap: width * 0.025, marginTop: height * 0.035 }]}>
-          <DashboardCard title="Total Users" value={String(stats.totalUsers + admins.length)} color="#DDEAD3" icon={UsersRound} iconColor="#20B83B" />
+          <DashboardCard
+            title="Total Users"
+            value={String(isSuperAdmin ? stats.totalUsers + admins.length : stats.totalUsers)}
+            color="#DDEAD3"
+            icon={UsersRound}
+            iconColor="#20B83B"
+          />
           <DashboardCard title="Active Users" value={String(stats.totalUsers)} color="#CFE6FA" icon={Check} iconColor="#259BEF" />
-          <DashboardCard title="New This Month" value={String(admins.length)} color="#FCEFCB" icon={UserPlus} iconColor="#FFC02B" />
+          <DashboardCard
+            title="New This Month"
+            value={String(
+              appUsers.filter((user) => {
+                const created = new Date(user.createdAt);
+                const now = new Date();
+                return (
+                  created.getFullYear() === now.getFullYear() &&
+                  created.getMonth() === now.getMonth()
+                );
+              }).length,
+            )}
+            color="#FCEFCB"
+            icon={UserPlus}
+            iconColor="#FFC02B"
+          />
           <DashboardCard title="Inactive Users" value="0" color="#DADAF8" icon={Users} iconColor="#7C7CF2" />
         </View>
 
@@ -545,7 +604,18 @@ export default function UsersScreen() {
           </View>
 
           <TouchableOpacity style={styles.filterBox} onPress={() => {
-            setRoleFilter((prev) => (prev === "All Roles" ? "User" : prev === "User" ? "Admin" : prev === "Admin" ? "Super Admin" : "All Roles"));
+            setRoleFilter((prev) => {
+              if (!isSuperAdmin) {
+                return prev === "All Roles" ? "User" : "All Roles";
+              }
+              return prev === "All Roles"
+                ? "User"
+                : prev === "User"
+                  ? "Admin"
+                  : prev === "Admin"
+                    ? "Super Admin"
+                    : "All Roles";
+            });
             setUserPage(1);
           }}>
             <Text style={[styles.filterLabel, { fontSize: 16 * s }]}>Roles</Text>
@@ -843,7 +913,7 @@ export default function UsersScreen() {
 
               {selectedUser &&
               (selectedUser[4] === "Admin" || selectedUser[4] === "Super Admin") ? (
-                <View style={styles.modalContent}>
+                <ScrollView contentContainerStyle={[styles.modalContent, { paddingBottom: 24 }]}>
                   <View style={styles.modalLeft}>
                     <View
                       style={[
@@ -1059,9 +1129,9 @@ export default function UsersScreen() {
                       </View>
                     ) : null}
                   </View>
-                </View>
+                </ScrollView>
               ) : selectedUser ? (
-  <View style={styles.modalContent}>
+  <ScrollView contentContainerStyle={[styles.modalContent, { paddingBottom: 24 }]}>
     <View style={styles.modalLeft}>
       <View
         style={[
@@ -1211,7 +1281,7 @@ export default function UsersScreen() {
         </TouchableOpacity>
       </View> : null}
     </View>
-  </View>
+  </ScrollView>
 ) : null}
             </View>
           </View>
@@ -1219,9 +1289,13 @@ export default function UsersScreen() {
 
         <Modal transparent visible={isEditOpen} animationType="fade">
           <View style={styles.modalOverlay}>
-            <View style={[styles.profileModal, { padding: 26 * s, maxWidth: 520 }]}>
+            <ScrollView
+              style={styles.editModal}
+              contentContainerStyle={{ paddingBottom: 20 }}
+              showsVerticalScrollIndicator
+            >
               <Text style={[styles.pageTitle, { fontSize: 28 * s, marginBottom: 16 * s }]}>
-                Edit User
+                {selectedUser?.[4] === "Admin" ? "Edit Administrator" : "Edit User"}
               </Text>
 
               {selectedUser?.[4] === "User" ? (
@@ -1264,6 +1338,11 @@ export default function UsersScreen() {
                     value={editForm.username}
                     onChangeText={(value: string) => setEditForm((prev) => ({ ...prev, username: value }))}
                   />
+                  {selectedUser?.[4] === "Admin" ? (
+                    <Text style={{ color: "#555", marginBottom: 12, fontFamily: "Montserrat_700Bold" }}>
+                      Email: {selectedUser[3]}
+                    </Text>
+                  ) : null}
                 </>
               )}
 
@@ -1276,6 +1355,22 @@ export default function UsersScreen() {
               />
 
               {editError ? <Text style={{ color: "#8B1E1E", marginBottom: 8 }}>{editError}</Text> : null}
+
+              {isSuperAdmin && selectedUser?.[4] === "Admin" ? (
+                <TouchableOpacity
+                  style={[styles.editButton, { marginBottom: 16, alignSelf: "flex-start" }]}
+                  onPress={() => void handleSendAdminPasswordReset()}
+                  disabled={isSendingReset}
+                >
+                  {isSendingReset ? (
+                    <ActivityIndicator color="#34733B" />
+                  ) : (
+                    <Text style={[styles.editButtonText, { fontSize: 15 * s }]}>
+                      Send Password Reset Email
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              ) : null}
 
               <View style={styles.modalActions}>
                 <TouchableOpacity style={styles.editButton} onPress={() => setIsEditOpen(false)}>
@@ -1293,7 +1388,7 @@ export default function UsersScreen() {
                   )}
                 </TouchableOpacity>
               </View>
-            </View>
+            </ScrollView>
           </View>
         </Modal>
       </ScrollView>
@@ -1685,41 +1780,62 @@ const styles = StyleSheet.create({
   },
 
   profileModal: {
-    width: "35%",
-    height: "55%",
+    width: "94%",
+    maxWidth: 780,
+    maxHeight: "92%",
     backgroundColor: "#fff",
-    borderRadius: 12,
+    borderRadius: 14,
     position: "relative",
+    overflow: "hidden",
   },
 
   adminProfileModal: {
-  width: "58%",
-  minHeight: "45%",
-  backgroundColor: "#fff",
-  borderRadius: 12,
-  position: "relative",
+    width: "96%",
+    maxWidth: 1040,
+    maxHeight: "92%",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    position: "relative",
+    overflow: "hidden",
+  },
+
+  editModal: {
+    width: "92%",
+    maxWidth: 600,
+    maxHeight: "90%",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    padding: 28,
   },
 
   closeButton: {
     position: "absolute",
-    top: 14,
-    right: 18,
+    top: 16,
+    right: 20,
     zIndex: 10,
   },
 
   modalContent: {
     flexDirection: "row",
-    marginTop: 50,
-    gap: 35,
+    flexWrap: "wrap",
+    marginTop: 44,
+    paddingHorizontal: 12,
+    gap: 28,
+    alignItems: "flex-start",
   },
 
   modalLeft: {
-    width: "35%",
+    minWidth: 220,
+    maxWidth: 280,
+    flexGrow: 1,
     alignItems: "center",
+    paddingBottom: 12,
   },
 
   modalRight: {
     flex: 1,
+    minWidth: 280,
+    paddingRight: 8,
   },
 
   profileAvatar: {
@@ -1828,8 +1944,9 @@ const styles = StyleSheet.create({
   modalActions: {
     flexDirection: "row",
     justifyContent: "flex-end",
+    flexWrap: "wrap",
     gap: 12,
-    marginTop: 70,
+    marginTop: 24,
   },
 
   editButton: {
@@ -1859,20 +1976,29 @@ const styles = StyleSheet.create({
   },
 
   addAdminModal: {
-  width: "48%",
-  backgroundColor: "#fff",
-  borderRadius: 12,
-  flexDirection: "row",
-  position: "relative",
-},
+    width: "96%",
+    maxWidth: 960,
+    maxHeight: "92%",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+    flexDirection: "row",
+    flexWrap: "wrap",
+    position: "relative",
+    overflow: "hidden",
+  },
 
 addAdminLeft: {
-  width: "58%",
+  flexGrow: 1,
+  flexBasis: "55%",
+  minWidth: 300,
+  paddingRight: 12,
 },
 
 addAdminRight: {
-  flex: 1,
-  paddingLeft: 24,
+  flexGrow: 1,
+  flexBasis: "35%",
+  minWidth: 240,
+  paddingLeft: 20,
   justifyContent: "center",
 },
 
