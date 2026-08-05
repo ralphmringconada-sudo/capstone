@@ -32,6 +32,7 @@ import {
   X,
 } from "lucide-react-native";
 import AdminLayout from "@/components/AdminLayout";
+import DateRangeFilter from "@/components/DateRangeFilter";
 import InteractiveLocationMap from "@/components/InteractiveLocationMap";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
@@ -42,6 +43,7 @@ import {
 } from "@/services/adminDataService";
 import { uploadAdminEventImage } from "@/services/eventImageService";
 import type { AdminEvent, EventParticipant } from "@/types/admin";
+import { isWithinDateRange } from "@/utils/dateRange";
 import { formatDateTime } from "@/utils/format";
 
 type EventStatus = AdminEvent["status"];
@@ -117,6 +119,8 @@ export default function EventsScreen() {
   const [category, setCategory] = useState("All Types");
   const [status, setStatus] = useState("All Statuses");
   const [sortOrder, setSortOrder] = useState("Newest First");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [page, setPage] = useState(1);
   const [selectionMenu, setSelectionMenu] = useState<"category" | "status" | "sort" | null>(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -177,14 +181,18 @@ export default function EventsScreen() {
         event.id.toLowerCase().includes(query);
       const matchesCategory = category === "All Types" || event.category === category;
       const matchesStatus = status === "All Statuses" || event.status === status;
-      return matchesTab && matchesSearch && matchesCategory && matchesStatus;
+      // Prefer scheduled event date; fall back to createdAt when the display date is unparseable.
+      const eventDay = new Date(event.date);
+      const dateValue = Number.isNaN(eventDay.getTime()) ? event.createdAt : eventDay;
+      const matchesDate = isWithinDateRange(dateValue, fromDate, toDate);
+      return matchesTab && matchesSearch && matchesCategory && matchesStatus && matchesDate;
     });
     return [...matchingEvents].sort((first, second) =>
       sortOrder === "Newest First"
-        ? second.id.localeCompare(first.id)
-        : first.id.localeCompare(second.id),
+        ? second.createdAt.localeCompare(first.createdAt)
+        : first.createdAt.localeCompare(second.createdAt),
     );
-  }, [activeTab, category, events, search, sortOrder, status]);
+  }, [activeTab, category, events, search, sortOrder, status, fromDate, toDate]);
 
   const totalPages = Math.max(1, Math.ceil(filteredEvents.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -206,6 +214,8 @@ export default function EventsScreen() {
     setCategory("All Types");
     setStatus("All Statuses");
     setSortOrder("Newest First");
+    setFromDate("");
+    setToDate("");
     setPage(1);
   };
 
@@ -531,15 +541,20 @@ export default function EventsScreen() {
 </View>
 
           {activeTab === "All Events" ? (
-            <View style={styles.filterBox}>
-              <Text style={[styles.filterLabel, { fontSize: 12 * s }]}>Date Range</Text>
-              <View style={styles.filterValueRow}>
-                <Text style={[styles.filterValue, { fontSize: 16 * s }]}>
-                  May 20, 2026 - Jun 26, 2026
-                </Text>
-                <CalendarDays size={16 * s} color="#333" />
-              </View>
-            </View>
+            <DateRangeFilter
+              label="Date Range"
+              fromDate={fromDate}
+              toDate={toDate}
+              onChangeFrom={(value) => {
+                setFromDate(value);
+                setPage(1);
+              }}
+              onChangeTo={(value) => {
+                setToDate(value);
+                setPage(1);
+              }}
+              style={{ flex: 1.5, minWidth: 220 }}
+            />
           ) : (
             <TouchableOpacity style={styles.filterBox} onPress={() => setSelectionMenu("sort")}>
               <Text style={[styles.filterLabel, { fontSize: 11 * s }]}>Sort By</Text>

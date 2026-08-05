@@ -28,6 +28,7 @@ import {
 import { auth } from "@/config/firebase";
 import AdminLayout from "../components/AdminLayout";
 import DashboardCard from "../components/DashboardCard";
+import DateRangeFilter from "@/components/DateRangeFilter";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { useAdminData } from "@/hooks/useAdminData";
 import {
@@ -38,6 +39,7 @@ import {
   updateAdminProfileInfo,
   updateAppUserProfile,
 } from "@/services/adminDataService";
+import { isWithinDateRange } from "@/utils/dateRange";
 import { formatDateTime, getUserDisplayName } from "@/utils/format";
 import type { ActivityLog } from "@/types/admin";
 
@@ -136,6 +138,9 @@ export default function UsersScreen() {
   const [isSendingReset, setIsSendingReset] = useState(false);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("All Roles");
+  const [statusFilter, setStatusFilter] = useState("All Statuses");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [userPage, setUserPage] = useState(1);
   const [activityPage, setActivityPage] = useState(1);
   const usersPerPage = 6;
@@ -152,15 +157,16 @@ export default function UsersScreen() {
   );
 
   /*
-   * Establish the management boundary once for all profile controls:
-   * any admin may manage citizens, while only a super admin may manage standard admins.
+   * Edit/delete account controls are super-admin only.
+   * Standard admins may view citizen profiles but cannot edit them.
    */
   const selectedRole = selectedUser?.[4];
   const isSelectedCitizen = selectedRole === "User";
   const isSelectedStandardAdmin = selectedRole === "Admin";
   const canManageSelected =
     Boolean(selectedUser) &&
-    (isSelectedCitizen || (isSuperAdmin && isSelectedStandardAdmin));
+    isSuperAdmin &&
+    (isSelectedCitizen || isSelectedStandardAdmin);
 
   /**
    * Purpose: Resolves the contact number for the account currently displayed.
@@ -180,9 +186,14 @@ export default function UsersScreen() {
     return admins.find((item) => item.uid === uid)?.contactNumber || "Not set";
   };
 
-  // Derive visible accounts from search and role criteria while preserving the source list.
+  // Derive visible accounts from search, role, status, and registration date range.
   const filteredTableUsers = useMemo(() => {
     const queryText = search.trim().toLowerCase();
+    const createdAtByUid = new Map<string, string>([
+      ...appUsers.map((user) => [user.uid, user.createdAt] as const),
+      ...admins.map((adminRow) => [adminRow.uid, adminRow.createdAt] as const),
+    ]);
+
     return tableUsers.filter((u) => {
       const matchesSearch =
         !queryText ||
@@ -190,9 +201,15 @@ export default function UsersScreen() {
         u[3].toLowerCase().includes(queryText) ||
         u[2].toLowerCase().includes(queryText);
       const matchesRole = roleFilter === "All Roles" || u[4] === roleFilter;
-      return matchesSearch && matchesRole;
+      const isFlagged = flaggedUserIds.has(u[7]);
+      const matchesStatus =
+        statusFilter === "All Statuses" ||
+        (statusFilter === "Flagged" && isFlagged) ||
+        (statusFilter === "Active" && !isFlagged);
+      const matchesDate = isWithinDateRange(createdAtByUid.get(u[7]), fromDate, toDate);
+      return matchesSearch && matchesRole && matchesStatus && matchesDate;
     });
-  }, [tableUsers, search, roleFilter]);
+  }, [tableUsers, search, roleFilter, statusFilter, fromDate, toDate, appUsers, admins, flaggedUserIds]);
 
   const userPageCount = Math.max(1, Math.ceil(filteredTableUsers.length / usersPerPage));
   const currentUserPage = Math.min(userPage, userPageCount);
@@ -622,35 +639,60 @@ export default function UsersScreen() {
             <Text style={[styles.filterText, { fontSize: 16 * s }]}>{roleFilter}⌄</Text>
           </TouchableOpacity>
 
-          <View style={styles.filterBox}>
+          <TouchableOpacity
+            style={styles.filterBox}
+            onPress={() => {
+              setStatusFilter((prev) =>
+                prev === "All Statuses" ? "Active" : prev === "Active" ? "Flagged" : "All Statuses",
+              );
+              setUserPage(1);
+            }}
+          >
             <Text style={[styles.filterLabel, { fontSize: 16 * s }]}>Status</Text>
-            <Text style={[styles.filterText, { fontSize: 16 * s }]}>All Statuses⌄</Text>
-          </View>
+            <Text style={[styles.filterText, { fontSize: 16 * s }]}>{statusFilter}⌄</Text>
+          </TouchableOpacity>
 
-          <View style={styles.dateBox}>
-            <Text style={[styles.filterLabel, { fontSize: 16 * s }]}>Date Registered</Text>
-            <View style={styles.dateInner}>
-              <Text style={[styles.filterText, { fontSize: 16 * s }]}>
-                May 20, 2026-May 26, 2026
-              </Text>
-              <Calendar size={18 * s} color="#000" />
-            </View>
-          </View>
+          <DateRangeFilter
+            label="Date Registered"
+            fromDate={fromDate}
+            toDate={toDate}
+            onChangeFrom={(value) => {
+              setFromDate(value);
+              setUserPage(1);
+            }}
+            onChangeTo={(value) => {
+              setToDate(value);
+              setUserPage(1);
+            }}
+            style={{ flex: 1.6 }}
+          />
 
-          <TouchableOpacity style={styles.smallButton}>
+          <TouchableOpacity
+            style={styles.smallButton}
+            onPress={() => {
+              setSearch("");
+              setRoleFilter("All Roles");
+              setStatusFilter("All Statuses");
+              setFromDate("");
+              setToDate("");
+              setUserPage(1);
+            }}
+          >
             <Filter size={14 * s} color="#34733B" />
-            <Text style={[styles.buttonText, { fontSize: 16 * s }]}>Filter</Text>
+            <Text style={[styles.buttonText, { fontSize: 16 * s }]}>Reset</Text>
           </TouchableOpacity>
         </View>
 
         <View style={[styles.tablePanel, { marginTop: height * 0.02 }]}>
+          <ScrollView horizontal={width < 1100} showsHorizontalScrollIndicator={width < 1100}>
+            <View style={[styles.table, width >= 1100 ? styles.tableFullWidth : null]}>
           <View style={[styles.tableHeader, { height: 48 * s }]}>
             <Text style={[styles.th, styles.idCol, { fontSize: 18 * s }]}>ID</Text>
             <Text style={[styles.th, styles.userCol, { fontSize: 18 * s }]}>User</Text>
             <Text style={[styles.th, styles.emailCol, { fontSize: 18 * s }]}>Email</Text>
             <Text style={[styles.th, styles.roleCol, { fontSize: 18 * s }]}>Role</Text>
             <Text style={[styles.th, styles.dateCol, { fontSize: 18 * s }]}>Date Registered</Text>
-            <Text style={[styles.th, styles.actionCol, { fontSize: 18 * s, transform: [{ translateX: 12 * s }] }]}>Action</Text>
+            <Text style={[styles.th, styles.actionCol, { fontSize: 18 * s }]}>Action</Text>
           </View>
 
           {visibleTableUsers.map((u, index) => {
@@ -740,6 +782,8 @@ export default function UsersScreen() {
               </View>
             );
           })}
+            </View>
+          </ScrollView>
 
           <View style={[styles.paginationRow, { padding: 18 * s }]}>
             <Text style={[styles.showing, { fontSize: 16 * s }]}>
@@ -1624,6 +1668,9 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
   },
 
+  table: { minWidth: 980 },
+  tableFullWidth: { minWidth: "100%", width: "100%" },
+
   tableHeader: {
     backgroundColor: "#ffffff",
     borderBottomWidth: 1,
@@ -1651,12 +1698,12 @@ const styles = StyleSheet.create({
     color: "#000",
   },
 
-  idCol: { width: "14%" },
-  userCol: { width: "24%" },
-  emailCol: { width: "22%" },
-  roleCol: { width: "12%" },
-  dateCol: { width: "16%" },
-  actionCol: { width: "12%" },
+  idCol: { flex: 0.8, minWidth: 90 },
+  userCol: { flex: 1.8, minWidth: 200 },
+  emailCol: { flex: 1.6, minWidth: 180 },
+  roleCol: { flex: 1, minWidth: 120 },
+  dateCol: { flex: 1.2, minWidth: 140 },
+  actionCol: { flex: 1.4, minWidth: 180 },
 
   userInfo: {
     flexDirection: "row",

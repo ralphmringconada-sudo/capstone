@@ -7,7 +7,6 @@ import {
   View,
   TouchableOpacity,
   useWindowDimensions,
-  Alert,
   Image,
   Modal,
 } from "react-native";
@@ -16,19 +15,17 @@ import {
   Clock,
   Check,
   Eye,
-  Trash2,
   Search,
-  Calendar,
   Filter,
   X,
 } from "lucide-react-native";
 import { router } from "expo-router";
 import AdminLayout from "../components/AdminLayout";
 import DashboardCard from "../components/DashboardCard";
+import DateRangeFilter from "@/components/DateRangeFilter";
 import { useAdminData } from "@/hooks/useAdminData";
-import { useAdminAuth } from "@/context/AdminAuthContext";
-import { deleteReport } from "@/services/adminDataService";
 import { resolveReportImageUrls } from "@/services/reportImageService";
+import { isWithinDateRange } from "@/utils/dateRange";
 import { formatDateTime } from "@/utils/format";
 import type { Report } from "@/types/admin";
 import { Dropdown } from "react-native-element-dropdown";
@@ -45,20 +42,19 @@ const statusData = STATUSES.map((item) => ({
   value: item,
 }));
 /**
- * Purpose: Enables administrators to search, review, inspect, and delete environmental reports.
+ * Purpose: Enables administrators to search, review, and inspect environmental reports.
  * How it works:
  * 1. Shared Firestore-backed data supplies reports and summary statistics.
  * 2. Memoized text, category, and status filters derive the visible table.
  * 3. Evidence thumbnails are resolved for visible records and opened in a modal.
- * 4. Report details and audited deletion actions are available from each row.
+ * 4. Report details are available from each row (deletion is disabled).
  * Technologies Used: React hooks, React Native Web, Expo Router, Cloud Firestore services, and image URL handling.
  * Why this implementation: A unified workspace supports efficient report triage without duplicating backend state.
  */
 export default function ReportsScreen() {
   const { width, height } = useWindowDimensions();
   const s = Math.min(width / 1920, height / 1080);
-  const { reports, stats, reload } = useAdminData();
-  const { admin } = useAdminAuth();
+  const { reports, stats } = useAdminData();
 
   /*
    * Filter state derives the visible report set, menu state controls filter dialogs,
@@ -67,12 +63,13 @@ export default function ReportsScreen() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All Categories");
   const [status, setStatus] = useState("All Statuses");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const [viewerReport, setViewerReport] = useState<Report | null>(null);
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
 
   const filteredReports = useMemo(() => {
-    // Apply all user-selected criteria in one derived list without mutating Firestore data.
     const queryText = search.trim().toLowerCase();
     return reports.filter((report) => {
       const matchesSearch =
@@ -85,9 +82,10 @@ export default function ReportsScreen() {
 
       const matchesCategory = category === "All Categories" || report.category === category;
       const matchesStatus = status === "All Statuses" || report.status === status;
-      return matchesSearch && matchesCategory && matchesStatus;
+      const matchesDate = isWithinDateRange(report.createdAt, fromDate, toDate);
+      return matchesSearch && matchesCategory && matchesStatus && matchesDate;
     });
-  }, [reports, search, category, status]);
+  }, [reports, search, category, status, fromDate, toDate]);
 
   /**
    * Purpose: Resolves and caches a representative evidence image for one report row.
@@ -113,37 +111,6 @@ export default function ReportsScreen() {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredReports]);
-
-  /**
-   * Purpose: Confirms and executes permanent deletion of an environmental report.
-   * How it works:
-   * 1. An authenticated administrator is required before the confirmation appears.
-   * 2. The destructive alert requires an explicit confirmation.
-   * 3. Firestore deletion and audit logging complete before shared data reloads.
-   * Technologies Used: React Native alerts, Cloud Firestore services, React Context, and asynchronous JavaScript.
-   * Why this implementation: Explicit confirmation and audit attribution reduce untraceable destructive actions.
-   */
-  const handleDelete = (report: Report) => {
-    // The current administrator is required for both authorization context and audit attribution.
-    if (!admin) return;
-    Alert.alert("Delete Report", `Permanently delete "${report.title}"?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          // Delete only after the user confirms the irreversible report action.
-          try {
-            await deleteReport(report.id, admin);
-            await reload();
-          // Keep the table intact and report backend or Firestore failures to the administrator.
-          } catch (err) {
-            Alert.alert("Error", err instanceof Error ? err.message : "Failed to delete report.");
-          }
-        },
-      },
-    ]);
-  };
 
   return (
     <AdminLayout activePage="Reports">
@@ -208,15 +175,13 @@ export default function ReportsScreen() {
             />
           </View>
 
-          <View style={styles.dateBox}>
-            <Text style={[styles.filterLabel, { fontSize: 13 * s }]}>Results</Text>
-            <View style={styles.dateInner}>
-              <Text style={[styles.filterText, { fontSize: 15 * s }]}>
-                {filteredReports.length} of {reports.length}
-              </Text>
-              <Calendar size={18 * s} color="#000" />
-            </View>
-          </View>
+          <DateRangeFilter
+            label="Date Reported"
+            fromDate={fromDate}
+            toDate={toDate}
+            onChangeFrom={setFromDate}
+            onChangeTo={setToDate}
+          />
 
           <View style={styles.buttonColumn}>
             <TouchableOpacity
@@ -225,6 +190,8 @@ export default function ReportsScreen() {
                 setSearch("");
                 setCategory("All Categories");
                 setStatus("All Statuses");
+                setFromDate("");
+                setToDate("");
               }}
             >
               <Filter size={14 * s} color="#34733B" />
@@ -234,15 +201,17 @@ export default function ReportsScreen() {
         </View>
 
         <View style={[styles.tablePanel, { marginTop: height * 0.02 }]}>
+          <ScrollView horizontal={width < 1100} showsHorizontalScrollIndicator={width < 1100}>
+            <View style={[styles.table, width >= 1100 ? styles.tableFullWidth : null]}>
           <View style={[styles.tableHeader, { height: 48 * s }]}>
             <Text style={[styles.th, styles.idCol, { fontSize: 18 * s }]}>ID</Text>
-            <Text style={[styles.th, styles.detailsCol, { fontSize: 18 * s, transform: [{ translateX: 100* s }] }]}>Report Details</Text>
+            <Text style={[styles.th, styles.detailsCol, { fontSize: 18 * s }]}>Report Details</Text>
             <Text style={[styles.th, styles.locationCol, { fontSize: 18 * s }]}>Location</Text>
             <Text style={[styles.th, styles.categoryCol, { fontSize: 18 * s }]}>Category</Text>
             <Text style={[styles.th, styles.reportedCol, { fontSize: 18 * s }]}>Reported By</Text>
             <Text style={[styles.th, styles.dateCol, { fontSize: 18 * s }]}>Date Reported</Text>
             <Text style={[styles.th, styles.statusCol, { fontSize: 18 * s }]}>Status</Text>
-            <Text style={[styles.th, styles.actionCol, { fontSize: 18 * s, transform: [{ translateX: 35 * s }] }]}>Action</Text>
+            <Text style={[styles.th, styles.actionCol, { fontSize: 18 * s }]}>Action</Text>
           </View>
 
           {filteredReports.map((report) => {
@@ -251,13 +220,7 @@ export default function ReportsScreen() {
               <View key={report.id} style={[styles.tableRow, { minHeight: 88 * s }]}>
                 <Text style={[styles.td, styles.idCol, { fontSize: 18 * s }]}>#{report.id.slice(0, 8)}</Text>
 
-                <View
-                    style={[
-                      styles.detailsCol,
-                      styles.reportDetails,
-                      { transform: [{ translateX: 80 * s }] },
-                    ]}
-                  >
+                <View style={[styles.detailsCol, styles.reportDetails]}>
                   <TouchableOpacity
                     onPress={() => {
                       if (!thumbnails[report.id]) return;
@@ -311,13 +274,12 @@ export default function ReportsScreen() {
                   >
                     <Eye size={20 * s} color="#000" />
                   </TouchableOpacity>
-                  <TouchableOpacity onPress={() => handleDelete(report)} style={styles.iconButton}>
-                    <Trash2 size={20 * s} color="#D83030" />
-                  </TouchableOpacity>
                 </View>
               </View>
             );
           })}
+            </View>
+          </ScrollView>
 
           <View style={[styles.paginationRow, { padding: 18 * s }]}>
             <Text style={[styles.showing, { fontSize: 16 * s }]}>
@@ -459,6 +421,8 @@ const styles = StyleSheet.create({
   },
   buttonText: { fontFamily: "Montserrat_700Bold", color: "#34733B" },
   tablePanel: { borderWidth: 1, borderColor: "#d6d6d6", borderRadius: 8, overflow: "hidden" },
+  table: { minWidth: 1100 },
+  tableFullWidth: { minWidth: "100%", width: "100%" },
   tableHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -476,14 +440,14 @@ const styles = StyleSheet.create({
   },
   th: { fontFamily: "Montserrat_700Bold", color: "#111" },
   td: { fontFamily: "Montserrat_700Bold", color: "#222" },
-  idCol: { width: "8%" },
-  detailsCol: { width: "22%" },
-  locationCol: { width: "15%", paddingRight: 15 },
-  categoryCol: { width: "12%", paddingLeft: 10 },
-  reportedCol: { width: "14%" },
-  dateCol: { width: "12%" },
-  statusCol: { width: "10%" },
-  actionCol: { width: "8%" },
+  idCol: { flex: 0.8, minWidth: 90 },
+  detailsCol: { flex: 2.2, minWidth: 240 },
+  locationCol: { flex: 1.4, minWidth: 150, paddingRight: 12 },
+  categoryCol: { flex: 1.1, minWidth: 130 },
+  reportedCol: { flex: 1.3, minWidth: 150 },
+  dateCol: { flex: 1.1, minWidth: 120 },
+  statusCol: { flex: 1, minWidth: 110 },
+  actionCol: { flex: 0.7, minWidth: 70 },
   reportDetails: { flexDirection: "row", alignItems: "center", gap: 10 },
   imageBox: { backgroundColor: "#ddd", borderRadius: 6, overflow: "hidden" },
   reportTextBox: { flex: 1 },
