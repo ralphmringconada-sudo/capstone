@@ -44,11 +44,11 @@ const DEFAULT_REGION = {
 };
 
 const categories = [
-  { id: 'deforestation', name: 'Deforestation', icon: require('@/assets/images/calendar_icon.png') },
-  { id: 'forest_fires', name: 'Forest Fires', icon: require('@/assets/images/information_icon.png') },
-  { id: 'illegal_logging', name: 'Illegal Logging', icon: require('@/assets/images/warning_icon.png') },
-  { id: 'waste_dumping', name: 'Waste Dumping', icon: require('@/assets/images/location_icon.png') },
-  { id: 'other', name: 'Other', icon: require('@/assets/images/settings_icon.png') },
+  { id: 'deforestation', name: 'Deforestation', icon: require('@/assets/images/deforest.png') },
+  { id: 'forest_fires', name: 'Forest Fires', icon: require('@/assets/images/fire.png') },
+  { id: 'illegal_logging', name: 'Illegal Logging', icon: require('@/assets/images/logging.png') },
+  { id: 'waste_dumping', name: 'Waste Dumping', icon: require('@/assets/images/waste.png') },
+  { id: 'other', name: 'Other', icon: require('@/assets/images/other.png') },
 ];
 
 /**

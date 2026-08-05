@@ -174,7 +174,11 @@ export default function HomeScreen() {
           <View style={styles.greenSection}>
             <View style={styles.topBar}>
               <View style={styles.topLeft}>
-                <View style={styles.whiteCircleLogo} />
+                <Image
+                  source={require('@/assets/images/Valencia_Logo.png')}
+                  style={styles.whiteCircleLogo}
+                  resizeMode="contain"
+                />
                 <Image
                   source={require('@/assets/images/Ecobantay_Logo.png')}
                   style={styles.brandImage}

@@ -61,7 +61,11 @@ export default function IntroductionScreen() {
         </View>
 
         <View style={styles.footer}>
-          <View style={styles.logoPlaceholder} />
+          <Image
+            source={require('@/assets/images/Valencia_Logo.png')}
+            style={styles.logoPlaceholder}
+            resizeMode="contain"
+          />
           <Text style={styles.footerText}>
             property of the local government unit of{'\n'}Valencia, Negros Oriental Philippines
           </Text>
