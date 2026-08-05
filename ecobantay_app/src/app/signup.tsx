@@ -119,7 +119,7 @@ export default function SignUpScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#9FC37F" />
+      <StatusBar barStyle="dark-content" backgroundColor="#E1F0B9" />
 
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -141,7 +141,7 @@ export default function SignUpScreen() {
           />
           <Text style={styles.subtitle}>Please enter your credentials</Text>
           <Text style={styles.pageTitle} numberOfLines={1} allowFontScaling={false}>
-            REGISTER
+            SIGN UP
           </Text>
 
           <TextInput
@@ -154,7 +154,7 @@ export default function SignUpScreen() {
             editable={!isSubmitting}
           />
           <TextInput
-            style={styles.input}
+            style={[styles.input, styles.groupBottom]}
             placeholder="Last Name"
             placeholderTextColor="#83a96e"
             value={lastName}
@@ -162,8 +162,9 @@ export default function SignUpScreen() {
             autoCapitalize="words"
             editable={!isSubmitting}
           />
+
           <TextInput
-            style={styles.input}
+            style={[styles.input, styles.groupBottom]}
             placeholder="Birthday (MM/DD/YYYY)"
             placeholderTextColor="#83a96e"
             value={birthdayText}
@@ -171,6 +172,7 @@ export default function SignUpScreen() {
             keyboardType="numbers-and-punctuation"
             editable={!isSubmitting}
           />
+
           <TextInput
             style={styles.input}
             placeholder="Email"
@@ -183,7 +185,7 @@ export default function SignUpScreen() {
             editable={!isSubmitting}
           />
           <TextInput
-            style={styles.input}
+            style={[styles.input, styles.groupBottom]}
             placeholder="Contact Number"
             placeholderTextColor="#83a96e"
             value={contactNumber}
@@ -229,7 +231,7 @@ export default function SignUpScreen() {
             disabled={isSubmitting}
           >
             {isSubmitting ? (
-              <ActivityIndicator color="#3f5c2b" />
+              <ActivityIndicator color="#ffffff" />
             ) : (
               <Text style={styles.buttonText}>SIGN UP</Text>
             )}
@@ -241,6 +243,10 @@ export default function SignUpScreen() {
               Sign in!
             </Text>
           </Text>
+
+          <Text style={styles.footerText}>
+            property of the local government unit of{'\n'}Valencia, Negros Oriental, Philippines
+          </Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -248,7 +254,7 @@ export default function SignUpScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#9FC37F' },
+  container: { flex: 1, backgroundColor: '#E1F0B9' },
   flex: { flex: 1 },
   content: {
     flexGrow: 1,
@@ -262,16 +268,16 @@ const styles = StyleSheet.create({
   brandImage: { width: 280, height: 80, marginBottom: 4 },
   subtitle: {
     fontFamily: 'Montserrat-Regular',
-    color: '#ffffff',
+    color: '#3f5c2b',
     fontSize: 14,
-    marginBottom: 8,
+    marginBottom: 16,
   },
   pageTitle: {
     fontFamily: 'Montserrat-Semi-Bold',
-    color: '#ffffff',
+    color: '#407e41',
     fontSize: 28,
     lineHeight: 36,
-    marginBottom: 16,
+    marginBottom: 20,
     textAlign: 'center',
     includeFontPadding: false,
   },
@@ -286,6 +292,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: 'Montserrat-Regular',
     marginBottom: 10,
+  },
+  groupBottom: {
+    marginBottom: 24,
   },
   passwordRow: {
     width: '100%',
@@ -310,7 +319,7 @@ const styles = StyleSheet.create({
     color: '#c2dc68',
   },
   errorText: {
-    color: '#ffe0e0',
+    color: '#8b1e1e',
     fontFamily: 'Montserrat-Regular',
     fontSize: 13,
     textAlign: 'center',
@@ -320,17 +329,20 @@ const styles = StyleSheet.create({
   button: {
     width: '100%',
     maxWidth: 260,
-    backgroundColor: '#c2dc68',
+    backgroundColor: '#3B703C',
     height: 48,
-    borderRadius: 8,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 2,
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 12,
+    marginTop: 16,
   },
   buttonDisabled: { opacity: 0.7 },
   buttonText: {
     fontFamily: 'Montserrat-Bold',
-    color: '#3f5c2b',
+    color: '#ffffff',
     fontSize: 18,
   },
   helperText: {
@@ -344,4 +356,12 @@ const styles = StyleSheet.create({
     textDecorationLine: 'underline',
     fontFamily: 'Montserrat-Bold',
   },
+  footerText: {
+    fontFamily: 'Montserrat-Regular',
+    color: '#3f5c2b',
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 40,
+    opacity: 0.8,
+  }
 });

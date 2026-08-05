@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, SafeAreaView, StatusBar, StyleSheet, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StatusBar, StyleSheet, Image } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 /**
@@ -10,10 +11,11 @@ import { useRouter } from 'expo-router';
  */
 export default function IntroductionScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#E1F0B9" />
+    <View style={[styles.container, { paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+      <StatusBar barStyle="dark-content" translucent backgroundColor="transparent" />
 
       <View style={styles.content}>
         <View style={styles.header}>
@@ -30,14 +32,11 @@ export default function IntroductionScreen() {
             style={styles.button}
             onPress={() => router.push('/login')}
           >
-            <Text
-              style={styles.buttonText}
-              numberOfLines={1}
-              allowFontScaling={false}
-              android_hyphenationFrequency="none"
-            >
-              LOGIN
-            </Text>
+            <Image 
+              source={require('@/assets/images/Login.jpg')} // Path to your local image
+              style={styles.buttonImage}
+              resizeMode="contain"
+            />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -45,14 +44,20 @@ export default function IntroductionScreen() {
             style={[styles.button, styles.buttonMargin]}
             onPress={() => router.push('/signup')}
           >
-            <Text
+            {/* <Text
               style={styles.buttonText}
               numberOfLines={1}
               allowFontScaling={false}
               android_hyphenationFrequency="none"
+              textBreakStrategy="simple"
             >
-              REGISTER
-            </Text>
+              REGISTER 
+            </Text> */}
+            <Image 
+              source={require('@/assets/images/register.jpg')} // Path to your local image
+              style={styles.buttonImage}
+              resizeMode="contain"
+            />
           </TouchableOpacity>
 
           <Text style={styles.tagline}>
@@ -66,12 +71,15 @@ export default function IntroductionScreen() {
             style={styles.logoPlaceholder}
             resizeMode="contain"
           />
-          <Text style={styles.footerText}>
-            property of the local government unit of{'\n'}Valencia, Negros Oriental Philippines
-          </Text>
+
+          <Image 
+              source={require('@/assets/images/footertext.jpg')} // Path to your local image
+              style={styles.buttonImage1}
+              resizeMode="contain"
+            />
         </View>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -83,7 +91,7 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: 24,
-    paddingTop: 64,
+    paddingTop: 24,
     paddingBottom: 32,
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -107,7 +115,7 @@ const styles = StyleSheet.create({
     width: '100%',
     backgroundColor: '#3B703C',
     minHeight: 52,
-    paddingVertical: 16,
+    paddingVertical: 10,
     paddingHorizontal: 28,
     borderTopLeftRadius: 10,
     borderTopRightRadius: 2,
@@ -121,11 +129,18 @@ const styles = StyleSheet.create({
   buttonMargin: {
     marginTop: 16,
   },
+  buttonImage: {
+    height: 40,  // Adjust to fit your design
+  },
+  buttonImage1: {
+    height: 50,  // Adjust to fit your design
+  },
   buttonText: {
-    fontFamily: 'Montserrat-Semi-Bold',
+    fontFamily: 'Montserrat-Bold',
     color: '#ffffff',
-    fontSize: 17,
-    lineHeight: 24,
+    fontSize: 18,
+    paddingHorizontal: 1,
+    lineHeight: 16,
     textAlign: 'center',
     includeFontPadding: false,
     textAlignVertical: 'center',
@@ -158,6 +173,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#3f5c2b',
     fontSize: 10,
-    paddingHorizontal: 40,
+    paddingHorizontal: 16,
+    lineHeight: 16,
   },
 });

@@ -170,7 +170,7 @@ export default function HomeScreen() {
       <Stack.Screen options={{ headerShown: false }} />
 
       <View style={styles.screenWrapper}>
-        <Animated.View style={styles.headerContainer}>
+        <Animated.View style={styles.headerContainer}>c
           <View style={styles.greenSection}>
             <View style={styles.topBar}>
               <View style={styles.topLeft}>

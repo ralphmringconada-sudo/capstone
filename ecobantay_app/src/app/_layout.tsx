@@ -1,75 +1,73 @@
-import 'react-native-gesture-handler';
+import 'react-native-gesture-handler'; //
 
-import React, { useState, useEffect } from 'react';
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { useColorScheme, View, StyleSheet } from 'react-native';
-import * as SplashScreen from 'expo-splash-screen';
-import * as Font from 'expo-font';
-import { Asset } from 'expo-asset';
+import React, { useState, useEffect } from 'react'; //[cite: 1]
+import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native'; //[cite: 1]
+import { useColorScheme, View, StyleSheet } from 'react-native'; //[cite: 1]
+import * as SplashScreen from 'expo-splash-screen'; //[cite: 1]
+import * as Font from 'expo-font'; //[cite: 1]
+import { Asset } from 'expo-asset'; //[cite: 1]
+import { SafeAreaProvider } from 'react-native-safe-area-context'; // <-- ADD THIS IMPORT
 
-import LoadingScreen from '@/components/LoadingScreen';
-import { AuthProvider } from '@/context/AuthContext';
-import { AppNavigator } from '@/components/AppNavigator';
+import LoadingScreen from '@/components/LoadingScreen'; //[cite: 1]
+import { AuthProvider } from '@/context/AuthContext'; //[cite: 1]
+import { AppNavigator } from '@/components/AppNavigator'; //[cite: 1]
 
-SplashScreen.preventAutoHideAsync().catch(() => undefined);
+SplashScreen.preventAutoHideAsync().catch(() => undefined); //[cite: 1]
 
 const CustomTheme = {
-  ...DefaultTheme,
+  ...DefaultTheme, //[cite: 1]
   colors: {
-    ...DefaultTheme.colors,
-    background: '#95c17e',
+    ...DefaultTheme.colors, //[cite: 1]
+    background: '#95c17e', //[cite: 1]
   },
-};
+}; //[cite: 1]
 
-/**
- * Purpose: Establishes the application root after required startup resources are ready.
- * How it works: 1) preloads fonts and branding. 2) always mounts navigation. 3) overlays loading until assets finish.
- * Technologies Used: React hooks, Expo Font, Expo Asset, Expo SplashScreen, React Navigation, React Context.
- * Why this implementation: Navigation must stay mounted so auth routes never fall through to the system browser.
- */
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
-  const [isAppReady, setIsAppReady] = useState(false);
+  const colorScheme = useColorScheme(); //[cite: 1]
+  const [isAppReady, setIsAppReady] = useState(false); //[cite: 1]
 
   useEffect(() => {
     async function prepareApp() {
       try {
         await Promise.all([
           Font.loadAsync({
-            'Montserrat-Regular': require('@/assets/fonts/Montserrat-Regular.ttf'),
-            'Montserrat-Bold': require('@/assets/fonts/Montserrat-ExtraBold.ttf'),
-            'Montserrat-Semi-Bold': require('@/assets/fonts/Montserrat-Bold.ttf'),
-          }),
-          Asset.loadAsync(require('@/assets/images/Ecobantay_Logo.png')),
-        ]);
+            'Montserrat-Regular': require('@/assets/fonts/Montserrat-Regular.ttf'), //[cite: 1]
+            'Montserrat-Bold': require('@/assets/fonts/Montserrat-ExtraBold.ttf'), //[cite: 1]
+            'Montserrat-Semi-Bold': require('@/assets/fonts/Montserrat-Bold.ttf'), //[cite: 1]
+          }), //[cite: 1]
+          Asset.loadAsync(require('@/assets/images/Ecobantay_Logo.png')), //[cite: 1]
+        ]); //[cite: 1]
       } catch (e) {
-        console.warn('Error loading assets:', e);
+        console.warn('Error loading assets:', e); //[cite: 1]
       } finally {
-        setIsAppReady(true);
-        await SplashScreen.hideAsync().catch(() => undefined);
+        setIsAppReady(true); //[cite: 1]
+        await SplashScreen.hideAsync().catch(() => undefined); //[cite: 1]
       }
     }
 
-    prepareApp();
-  }, []);
+    prepareApp(); //[cite: 1]
+  }, []); //[cite: 1]
 
+  // --> WRAP EVERYTHING IN SafeAreaProvider BELOW <--
   return (
-    <AuthProvider>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : CustomTheme}>
-        <AppNavigator />
-        {!isAppReady ? (
-          <View style={styles.loadingOverlay} pointerEvents="auto">
-            <LoadingScreen message="Ecobantay is Loading..." />
-          </View>
-        ) : null}
-      </ThemeProvider>
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : CustomTheme}>
+          <AppNavigator />
+          {!isAppReady ? (
+            <View style={styles.loadingOverlay} pointerEvents="auto">
+              <LoadingScreen message="Ecobantay is Loading..." />
+            </View>
+          ) : null}
+        </ThemeProvider>
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
 
 const styles = StyleSheet.create({
   loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 1000,
+    ...StyleSheet.absoluteFillObject, //[cite: 1]
+    zIndex: 1000, //[cite: 1]
   },
-});
+}); //[cite: 1]
