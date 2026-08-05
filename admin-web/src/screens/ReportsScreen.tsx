@@ -31,10 +31,19 @@ import { deleteReport } from "@/services/adminDataService";
 import { resolveReportImageUrls } from "@/services/reportImageService";
 import { formatDateTime } from "@/utils/format";
 import type { Report } from "@/types/admin";
+import { Dropdown } from "react-native-element-dropdown";
 
 const CATEGORIES = ["All Categories", "Deforestation", "Forest Fires", "Illegal Logging", "Waste Dumping", "Other"];
 const STATUSES = ["All Statuses", "Pending", "In Review", "Resolved", "Rejected"];
+const categoryData = CATEGORIES.map((item) => ({
+  label: item,
+  value: item,
+}));
 
+const statusData = STATUSES.map((item) => ({
+  label: item,
+  value: item,
+}));
 /**
  * Purpose: Enables administrators to search, review, inspect, and delete environmental reports.
  * How it works:
@@ -58,8 +67,6 @@ export default function ReportsScreen() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All Categories");
   const [status, setStatus] = useState("All Statuses");
-  const [showCategoryMenu, setShowCategoryMenu] = useState(false);
-  const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const [viewerReport, setViewerReport] = useState<Report | null>(null);
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
@@ -173,15 +180,33 @@ export default function ReportsScreen() {
             <Search size={20 * s} color="#000" />
           </View>
 
-          <TouchableOpacity style={styles.filterBox} onPress={() => setShowCategoryMenu(true)}>
-            <Text style={[styles.filterLabel, { fontSize: 13 * s }]}>Category</Text>
-            <Text style={[styles.filterText, { fontSize: 15 * s }]}>{category} ⌄</Text>
-          </TouchableOpacity>
+          <View style={styles.filterBox}>
+            <Dropdown
+              style={styles.dropdown}
+              placeholderStyle={[styles.dropdownPlaceholder, { fontSize: 15 * s }]}
+              selectedTextStyle={[styles.dropdownText, { fontSize: 15 * s }]}
+              data={categoryData}
+              labelField="label"
+              valueField="value"
+              value={category}
+              placeholder="Select Category"
+              onChange={(item) => setCategory(item.value)}
+            />
+          </View>
 
-          <TouchableOpacity style={styles.filterBox} onPress={() => setShowStatusMenu(true)}>
-            <Text style={[styles.filterLabel, { fontSize: 13 * s }]}>Status</Text>
-            <Text style={[styles.filterText, { fontSize: 15 * s }]}>{status} ⌄</Text>
-          </TouchableOpacity>
+          <View style={styles.filterBox}>
+            <Dropdown
+              style={styles.dropdown}
+              placeholderStyle={[styles.dropdownPlaceholder, { fontSize: 15 * s }]}
+              selectedTextStyle={[styles.dropdownText, { fontSize: 15 * s }]}
+              data={statusData}
+              labelField="label"
+              valueField="value"
+              value={status}
+              placeholder="Select Status"
+              onChange={(item) => setStatus(item.value)}
+            />
+          </View>
 
           <View style={styles.dateBox}>
             <Text style={[styles.filterLabel, { fontSize: 13 * s }]}>Results</Text>
@@ -211,7 +236,7 @@ export default function ReportsScreen() {
         <View style={[styles.tablePanel, { marginTop: height * 0.02 }]}>
           <View style={[styles.tableHeader, { height: 48 * s }]}>
             <Text style={[styles.th, styles.idCol, { fontSize: 18 * s }]}>ID</Text>
-            <Text style={[styles.th, styles.detailsCol, { fontSize: 18 * s }]}>Report Details</Text>
+            <Text style={[styles.th, styles.detailsCol, { fontSize: 18 * s, transform: [{ translateX: 100* s }] }]}>Report Details</Text>
             <Text style={[styles.th, styles.locationCol, { fontSize: 18 * s }]}>Location</Text>
             <Text style={[styles.th, styles.categoryCol, { fontSize: 18 * s }]}>Category</Text>
             <Text style={[styles.th, styles.reportedCol, { fontSize: 18 * s }]}>Reported By</Text>
@@ -226,7 +251,13 @@ export default function ReportsScreen() {
               <View key={report.id} style={[styles.tableRow, { minHeight: 88 * s }]}>
                 <Text style={[styles.td, styles.idCol, { fontSize: 18 * s }]}>#{report.id.slice(0, 8)}</Text>
 
-                <View style={[styles.detailsCol, styles.reportDetails]}>
+                <View
+                    style={[
+                      styles.detailsCol,
+                      styles.reportDetails,
+                      { transform: [{ translateX: 80 * s }] },
+                    ]}
+                  >
                   <TouchableOpacity
                     onPress={() => {
                       if (!thumbnails[report.id]) return;
@@ -295,44 +326,6 @@ export default function ReportsScreen() {
           </View>
         </View>
       </ScrollView>
-
-      <Modal transparent visible={showCategoryMenu} animationType="fade">
-        <TouchableOpacity style={styles.menuOverlay} onPress={() => setShowCategoryMenu(false)}>
-          <View style={styles.menuCard}>
-            {CATEGORIES.map((item) => (
-              <TouchableOpacity
-                key={item}
-                style={styles.menuItem}
-                onPress={() => {
-                  setCategory(item);
-                  setShowCategoryMenu(false);
-                }}
-              >
-                <Text style={styles.menuText}>{item}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      <Modal transparent visible={showStatusMenu} animationType="fade">
-        <TouchableOpacity style={styles.menuOverlay} onPress={() => setShowStatusMenu(false)}>
-          <View style={styles.menuCard}>
-            {STATUSES.map((item) => (
-              <TouchableOpacity
-                key={item}
-                style={styles.menuItem}
-                onPress={() => {
-                  setStatus(item);
-                  setShowStatusMenu(false);
-                }}
-              >
-                <Text style={styles.menuText}>{item}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </TouchableOpacity>
-      </Modal>
 
       <Modal transparent visible={Boolean(viewerUri)} animationType="fade">
         <View style={styles.viewerOverlay}>
@@ -429,13 +422,14 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, fontFamily: "Montserrat_700Bold", outlineStyle: "none" as any },
   filterBox: {
-    minWidth: 140,
-    borderWidth: 1,
-    borderColor: "#d6d6d6",
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
+  minWidth: 180,
+  height: 48,
+  borderWidth: 1,
+  borderColor: "#d6d6d6",
+  borderRadius: 6,
+  paddingHorizontal: 12,
+  justifyContent: "center",
+},
   dateBox: {
     minWidth: 160,
     borderWidth: 1,
@@ -445,7 +439,12 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   dateInner: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
-  filterLabel: { fontFamily: "Montserrat_700Bold", color: "#777", marginBottom: 4 },
+  filterLabel: {
+  fontFamily: "Montserrat_700Bold",
+  color: "#777",
+  fontSize: 12,
+  marginBottom: 2,
+},
   filterText: { fontFamily: "Montserrat_700Bold", color: "#111" },
   buttonColumn: { justifyContent: "center" },
   smallButton: {
@@ -479,7 +478,7 @@ const styles = StyleSheet.create({
   td: { fontFamily: "Montserrat_700Bold", color: "#222" },
   idCol: { width: "8%" },
   detailsCol: { width: "22%" },
-  locationCol: { width: "15%", paddingRight: 18 },
+  locationCol: { width: "15%", paddingRight: 15 },
   categoryCol: { width: "12%", paddingLeft: 10 },
   reportedCol: { width: "14%" },
   dateCol: { width: "12%" },
@@ -531,4 +530,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
+
+dropdown: {
+  flex: 1,
+  justifyContent: "center",
+},
+
+dropdownPlaceholder: {
+  fontFamily: "Montserrat_700Bold",
+  color: "#111",
+},
+
+dropdownText: {
+  fontFamily: "Montserrat_700Bold",
+  color: "#111",
+},
+
 });
