@@ -620,37 +620,27 @@ export default function UsersScreen() {
             <Search size={20 * s} color="#000" />
           </View>
 
-          <TouchableOpacity style={styles.filterBox} onPress={() => {
-            setRoleFilter((prev) => {
-              if (!isSuperAdmin) {
-                return prev === "All Roles" ? "User" : "All Roles";
-              }
-              return prev === "All Roles"
-                ? "User"
-                : prev === "User"
-                  ? "Admin"
-                  : prev === "Admin"
-                    ? "Super Admin"
-                    : "All Roles";
-            });
-            setUserPage(1);
-          }}>
-            <Text style={[styles.filterLabel, { fontSize: 16 * s }]}>Roles</Text>
-            <Text style={[styles.filterText, { fontSize: 16 * s }]}>{roleFilter}⌄</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.filterBox}
-            onPress={() => {
-              setStatusFilter((prev) =>
-                prev === "All Statuses" ? "Active" : prev === "Active" ? "Flagged" : "All Statuses",
-              );
+          <FilterDropdown
+            label="Roles"
+            value={roleFilter}
+            options={isSuperAdmin ? ["All Roles", "User", "Admin", "Super Admin"] : ["All Roles", "User"]}
+            s={s}
+            onChange={(value: string) => {
+              setRoleFilter(value);
               setUserPage(1);
             }}
-          >
-            <Text style={[styles.filterLabel, { fontSize: 16 * s }]}>Status</Text>
-            <Text style={[styles.filterText, { fontSize: 16 * s }]}>{statusFilter}⌄</Text>
-          </TouchableOpacity>
+          />
+
+          <FilterDropdown
+            label="Status"
+            value={statusFilter}
+            options={["All Statuses", "Active", "Flagged"]}
+            s={s}
+            onChange={(value: string) => {
+              setStatusFilter(value);
+              setUserPage(1);
+            }}
+          />
 
           <DateRangeFilter
             label="Date Registered"
@@ -1441,6 +1431,79 @@ export default function UsersScreen() {
 }
 
 /**
+ * Purpose: Renders a visible, selectable dropdown for table filters.
+ * How it works: Opens an anchored option panel, applies the selected value, and closes the panel.
+ */
+function FilterDropdown({ label, value, options, s, onChange }: any) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  return (
+    <View
+      style={[
+        styles.dropdownContainer,
+        isOpen ? styles.dropdownContainerOpen : null,
+      ]}
+    >
+      <TouchableOpacity
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityLabel={`${label} filter. Selected: ${value}`}
+        accessibilityState={{ expanded: isOpen }}
+        style={styles.filterBox}
+        onPress={() => setIsOpen((open) => !open)}
+      >
+        <Text style={[styles.filterLabel, { fontSize: 16 * s }]}>{label}</Text>
+        <View style={styles.dropdownValueRow}>
+          <Text
+            numberOfLines={1}
+            style={[styles.filterText, styles.dropdownSelectedText, { fontSize: 16 * s }]}
+          >
+            {value}
+          </Text>
+          <Text style={[styles.dropdownArrow, { fontSize: 18 * s }]}>⌄</Text>
+        </View>
+      </TouchableOpacity>
+
+      {isOpen ? (
+        <View style={styles.dropdownMenu} accessibilityRole="menu">
+          {options.map((option: string, index: number) => {
+            const isSelected = option === value;
+
+            return (
+              <TouchableOpacity
+                key={option}
+                activeOpacity={0.75}
+                accessibilityRole="menuitem"
+                style={[
+                  styles.dropdownOption,
+                  index < options.length - 1 ? styles.dropdownOptionBorder : null,
+                  isSelected ? styles.dropdownOptionSelected : null,
+                ]}
+                onPress={() => {
+                  onChange(option);
+                  setIsOpen(false);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.dropdownOptionText,
+                    { fontSize: 15 * s },
+                    isSelected ? styles.dropdownOptionTextSelected : null,
+                  ]}
+                >
+                  {option}
+                </Text>
+                {isSelected ? <Check size={16 * s} color="#34733B" /> : null}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+/**
  * Purpose: Renders a consistent labeled field for administrator creation forms.
  * How it works:
  * 1. Label, placeholder, value, and change handler are supplied by the parent form.
@@ -1583,6 +1646,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 14,
+    position: "relative",
+    zIndex: 50,
+    overflow: "visible",
   },
 
   searchBox: {
@@ -1604,8 +1670,18 @@ const styles = StyleSheet.create({
     outlineStyle: "none" as any,
   },
 
-  filterBox: {
+  dropdownContainer: {
     flex: 1,
+    position: "relative",
+    zIndex: 20,
+  },
+
+  dropdownContainerOpen: {
+    zIndex: 1000,
+  },
+
+  filterBox: {
+    width: "100%",
     height: 58,
     borderWidth: 1,
     borderColor: "#d6d6d6",
@@ -1613,23 +1689,6 @@ const styles = StyleSheet.create({
     backgroundColor: "#f7f7f7",
     justifyContent: "center",
     paddingHorizontal: 16,
-  },
-
-  dateBox: {
-    flex: 1.25,
-    height: 58,
-    borderWidth: 1,
-    borderColor: "#d6d6d6",
-    borderRadius: 6,
-    backgroundColor: "#f7f7f7",
-    justifyContent: "center",
-    paddingHorizontal: 16,
-  },
-
-  dateInner: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
   },
 
   filterLabel: {
@@ -1641,6 +1700,71 @@ const styles = StyleSheet.create({
   filterText: {
     fontFamily: "Montserrat_700Bold",
     color: "#000",
+  },
+
+  dropdownValueRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+
+  dropdownSelectedText: {
+    flex: 1,
+  },
+
+  dropdownArrow: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#000",
+    lineHeight: 18,
+  },
+
+  dropdownMenu: {
+    position: "absolute",
+    top: 62,
+    left: 0,
+    right: 0,
+    backgroundColor: "#ffffff",
+    borderWidth: 1,
+    borderColor: "#cfcfcf",
+    borderRadius: 6,
+    overflow: "hidden",
+    zIndex: 2000,
+    elevation: 12,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.16,
+    shadowRadius: 10,
+  },
+
+  dropdownOption: {
+    minHeight: 44,
+    paddingHorizontal: 14,
+    paddingVertical: 11,
+    backgroundColor: "#ffffff",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+
+  dropdownOptionBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: "#ececec",
+  },
+
+  dropdownOptionSelected: {
+    backgroundColor: "#EEF7EE",
+  },
+
+  dropdownOptionText: {
+    flex: 1,
+    fontFamily: "Montserrat_700Bold",
+    color: "#111111",
+  },
+
+  dropdownOptionTextSelected: {
+    color: "#34733B",
   },
 
   smallButton: {
@@ -1666,6 +1790,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: "hidden",
     backgroundColor: "#fff",
+    position: "relative",
+    zIndex: 1,
   },
 
   table: { minWidth: 980 },
