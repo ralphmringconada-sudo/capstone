@@ -994,7 +994,7 @@ export default function UsersScreen() {
                       <Text style={[styles.activityTh, styles.activityModuleCol, { fontSize: 14 * s }]}>
                         Module
                       </Text>
-                      <Text style={[styles.activityTh, styles.activityRecordCol, { fontSize: 14 * s }]}>
+                      <Text style={[styles.activityTh, styles.activityRecordCol, { fontSize: 14 * s, transform: [{ translateX: -10 * s }] }]}>
                         Affected Record
                       </Text>
                       <Text style={[styles.activityTh, styles.activityDetailsCol, { fontSize: 14 * s }]}>
@@ -1033,7 +1033,7 @@ export default function UsersScreen() {
                           </Text>
                         </View>
 
-                        <Text style={[styles.activityTd, styles.activityRecordCol, { fontSize: 14 * s }]}>
+                        <Text style={[styles.activityTd, styles.activityRecordCol, { fontSize: 14 * s, transform: [{ translateX: -10 * s }] }]}>
                           {item.recordId}
                         </Text>
 
