@@ -143,13 +143,17 @@ export default function HomeScreen() {
     if (!tab) return true;
     if (!tab.statuses.includes(event.status)) return false;
 
-    if (activeEventTab === 'PENDING' || activeEventTab === 'REJECTED') {
+    if (activeEventTab === 'PENDING') {
       return event.submittedByUid === user?.uid;
     }
     if (activeEventTab === 'ACCEPTED') {
       return event.status === 'Upcoming' || event.status === 'Ongoing' || event.status === 'Completed';
     }
-    if (event.status === 'Pending' || event.status === 'Rejected') {
+    // ALL: hide rejected events; pending only for the submitter.
+    if (event.status === 'Rejected') {
+      return false;
+    }
+    if (event.status === 'Pending') {
       return event.submittedByUid === user?.uid;
     }
     return true;

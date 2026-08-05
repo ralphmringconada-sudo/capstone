@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,63 +11,51 @@ import {
   KeyboardAvoidingView,
   Platform,
   ActivityIndicator,
-  Alert,
+  ScrollView,
 } from 'react-native';
-import { Shadow } from 'react-native-shadow-2';
-import { useRouter, Stack } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { FIREBASE_SETUP_MESSAGE } from '@/config/firebase';
-import { useGoogleAuth } from '@/hooks/useGoogleAuth';
 import { validateLoginForm } from '@/utils/validation';
-import { PasswordInput } from '@/components/PasswordInput';
 
 /**
- * Purpose: Authenticates returning users through email credentials or Google.
- * How it works: 1) validates input/configuration. 2) starts the selected provider flow. 3) updates auth context. 4) navigates home.
- * Technologies Used: React Native, Expo Router, Expo AuthSession, Google OAuth, Firebase Authentication, React Context.
- * Why this implementation: Both providers converge on one authenticated application session and consistent feedback.
+ * Purpose: Authenticates returning users with email and password.
+ * How it works: 1) validates fields. 2) signs in through auth context. 3) navigates home on success.
+ * Technologies Used: React Native, Expo Router, Firebase Authentication via AuthContext.
+ * Why this implementation: Email login only — Google AuthSession was crashing standalone Android builds on mount.
  */
 export default function LoginScreen() {
   const router = useRouter();
-  const { login, loginGoogle, isFirebaseConfigured } = useAuth();
-  const { request, response, promptAsync, isGoogleConfigured } = useGoogleAuth();
+  const { login, isFirebaseConfigured } = useAuth();
 
-  /*
-   * Form and workflow state: credentials remain controlled locally, while separate
-   * pending flags prevent overlapping email and Google authentication attempts.
-   */
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
-  // Locks synchronously before React re-renders, preventing rapid taps from starting duplicate authentication requests.
+  const [showPassword, setShowPassword] = useState(false);
   const submissionLockRef = useRef(false);
 
-  /**
-   * Purpose: Validates and submits an email/password login.
-   * How it works: 1) validates fields. 2) calls auth context. 3) routes on success. 4) exposes mapped errors.
-   * Technologies Used: React state, Firebase Authentication, Firebase Firestore, Expo Router.
-   * Why this implementation: Client validation and centralized auth services keep the screen focused on workflow feedback.
-   */
   const handleSignIn = async () => {
     if (submissionLockRef.current) return;
     setError('');
-    /* Validation: reject incomplete or malformed credentials before contacting Firebase. */
+
     const validationError = validateLoginForm(email, password);
     if (validationError) {
       setError(validationError);
       return;
     }
 
+    if (!isFirebaseConfigured) {
+      setError(FIREBASE_SETUP_MESSAGE);
+      return;
+    }
+
     submissionLockRef.current = true;
     setIsSubmitting(true);
-    /* Async authentication flow: lock both login controls until Firebase completes or fails. */
     try {
-      await login(email, password);
+      await login(email.trim(), password);
       router.replace('/home');
     } catch (err) {
-      /* Error handling: show safe service-mapped feedback without exposing Firebase internals. */
       setError(err instanceof Error ? err.message : 'Unable to sign in.');
     } finally {
       submissionLockRef.current = false;
@@ -75,105 +63,32 @@ export default function LoginScreen() {
     }
   };
 
-  /**
-   * Purpose: Opens the external Google authentication prompt.
-   * How it works: 1) checks client configuration. 2) marks OAuth pending. 3) launches AuthSession.
-   * Technologies Used: Expo AuthSession, Google OAuth, React Native Alert.
-   * Why this implementation: Configuration is verified before leaving the app for an external provider flow.
-   */
-  const handleGoogleSignIn = async () => {
-    if (submissionLockRef.current) return;
-    if (!isGoogleConfigured) {
-      Alert.alert(
-        'Google Sign-In Not Configured',
-        'Add your Google Web Client ID to the .env file to enable Google sign-in.',
-      );
-      return;
-    }
-
-    setError('');
-    submissionLockRef.current = true;
-    setIsGoogleSubmitting(true);
-    try {
-      await promptAsync();
-    } catch {
-      submissionLockRef.current = false;
-      setError('Unable to open Google sign-in.');
-      setIsGoogleSubmitting(false);
-    }
-  };
-
-  /*
-   * OAuth lifecycle: inspect the asynchronous AuthSession response, exchange a
-   * successful ID token through auth context, and always clear provider loading state.
-   */
-  useEffect(() => {
-    if (response?.type !== 'success') {
-      if (response?.type === 'error' || response?.type === 'dismiss') {
-        submissionLockRef.current = false;
-        setIsGoogleSubmitting(false);
-      }
-      return;
-    }
-
-    const idToken = response.params.id_token;
-    if (!idToken) {
-      submissionLockRef.current = false;
-      setError('Google sign-in failed. Please try again.');
-      setIsGoogleSubmitting(false);
-      return;
-    }
-
-    /* Async authentication flow: complete Firebase login only after Google returns a valid ID token. */
-    (async () => {
-      try {
-        await loginGoogle(idToken);
-        router.replace('/home');
-      } catch (err) {
-        /* Error handling: retain the login form and display provider-specific failure feedback. */
-        setError(err instanceof Error ? err.message : 'Unable to sign in with Google.');
-      } finally {
-        submissionLockRef.current = false;
-        setIsGoogleSubmitting(false);
-      }
-    })();
-  }, [response, loginGoogle, router]);
-
-  const isBusy = isSubmitting || isGoogleSubmitting;
-
   return (
     <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="dark-content" backgroundColor="#9FC37F" />
-      
-      <Stack.Screen options={{ headerShown: false }} />
+      <StatusBar barStyle="dark-content" backgroundColor="#E1F0B9" />
 
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.content}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.flex}
       >
-        
-        <View style={styles.topBar}>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Image 
-              source={require('@/assets/images/back_arrow.png')} 
-              style={styles.backArrowImage}
-              resizeMode="contain"
-            />
+            <Text style={styles.backText}>← Back</Text>
           </TouchableOpacity>
-        </View>
 
-        <View style={styles.header}>
-          <Image 
-            source={require('@/assets/images/Ecobantay_Logo.png')} 
+          <Image
+            source={require('@/assets/images/Ecobantay_Logo.png')}
             style={styles.brandImage}
             resizeMode="contain"
           />
           <Text style={styles.subtitle}>Please enter your credentials</Text>
-        </View>
-
-        <View style={styles.formSection}>
-          
-          <Text style={styles.pageTitle}>LOGIN</Text>
+          <Text style={styles.pageTitle} numberOfLines={1} allowFontScaling={false}>
+            LOGIN
+          </Text>
 
           <TextInput
             style={styles.input}
@@ -183,259 +98,156 @@ export default function LoginScreen() {
             onChangeText={setEmail}
             keyboardType="email-address"
             autoCapitalize="none"
-            editable={!isBusy}
+            autoCorrect={false}
+            editable={!isSubmitting}
           />
 
-          <PasswordInput
-            containerStyle={styles.inputMargin}
-            placeholder="Password"
-            placeholderTextColor="#83a96e"
-            value={password}
-            onChangeText={setPassword}
-            editable={!isBusy}
-          />
+          <View style={styles.passwordRow}>
+            <TextInput
+              style={[styles.input, styles.passwordInput]}
+              placeholder="Password"
+              placeholderTextColor="#83a96e"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              editable={!isSubmitting}
+            />
+            <TouchableOpacity
+              style={styles.showButton}
+              onPress={() => setShowPassword((value) => !value)}
+            >
+              <Text style={styles.showText}>{showPassword ? 'Hide' : 'Show'}</Text>
+            </TouchableOpacity>
+          </View>
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
-          {!isFirebaseConfigured ? (
-            <Text style={styles.configText}>{FIREBASE_SETUP_MESSAGE}</Text>
-          ) : null}
 
-          <View style={styles.loginButtonContainer}>
-            <Shadow 
-              distance={2} 
-              startColor={'rgba(0, 0, 0, 0.25)'} 
-              offset={[0, 2]} 
-              style={{ width: '100%' }}
-            >
-              <TouchableOpacity
-                activeOpacity={0.8}
-                style={[styles.button, isBusy && styles.buttonDisabled]}
-                onPress={handleSignIn}
-                disabled={isBusy}
-              >
-                {isSubmitting ? (
-                  <ActivityIndicator color="#ffffff" />
-                ) : (
-                  <Text style={styles.buttonText}>Log In</Text>
-                )}
-              </TouchableOpacity>
-            </Shadow>
-          </View>
+          <TouchableOpacity
+            activeOpacity={0.85}
+            style={[styles.button, isSubmitting && styles.buttonDisabled]}
+            onPress={handleSignIn}
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <ActivityIndicator color="#ffffff" />
+            ) : (
+              <Text style={styles.buttonText}>Log In</Text>
+            )}
+          </TouchableOpacity>
 
-          <View style={styles.linksContainer}>
-            <Text style={styles.helperText}>
-              Don't have an account? <Text style={styles.linkText} onPress={() => router.navigate('/signup')}>create one!</Text>
+          <Text style={styles.helperText}>
+            Don't have an account?{' '}
+            <Text style={styles.linkText} onPress={() => router.push('/signup')}>
+              create one!
             </Text>
-            <Text style={styles.helperText}>
-              Did you{' '}
-              <Text style={styles.linkText} onPress={() => router.navigate('/forgot-password')}>
-                forget your password?
-              </Text>
-            </Text>
-          </View>
-
-          <View style={styles.googleButtonContainer}>
-            <Shadow 
-              distance={2} 
-              startColor={'rgba(0, 0, 0, 0.1)'} 
-              offset={[0, 2]} 
-              style={{ alignSelf: 'center', borderRadius: 24 }}
-            >
-              <TouchableOpacity
-                activeOpacity={0.8}
-                style={[styles.googleButton, (isBusy || !request) && styles.buttonDisabled]}
-                onPress={handleGoogleSignIn}
-                disabled={isBusy || !request}
-              >
-                {isGoogleSubmitting ? (
-                  <ActivityIndicator color="#000000" />
-                ) : (
-                  <>
-                    <Image 
-                      source={require('@/assets/images/google_logo.png')} 
-                      style={styles.googleIconImage}
-                      resizeMode="contain"
-                    />
-                    <Text style={styles.googleButtonText}>Sign in with Google</Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </Shadow>
-          </View>
-        </View>
-
-        <View style={styles.footer}>
-          <Text style={styles.footerText}>
-            property of the local government unit of{'\n'}Valencia, Negros Oriental, Philippines
           </Text>
-        </View>
-
+          <Text style={styles.helperText}>
+            Forgot password?{' '}
+            <Text style={styles.linkText} onPress={() => router.push('/forgot-password')}>
+              Reset here
+            </Text>
+          </Text>
+        </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#E1F0B9',
-  },
+  container: { flex: 1, backgroundColor: '#E1F0B9' },
+  flex: { flex: 1 },
   content: {
-    flex: 1,
+    flexGrow: 1,
     paddingHorizontal: 24,
-    paddingTop: 20, 
-    paddingBottom: 32,
-    justifyContent: 'space-between',
-  },
-  topBar: {
-    width: '100%',
-    alignItems: 'flex-start',
-    marginBottom: -15, 
-    marginTop: 15, 
-  },
-  backButton: {
-    padding: 8,
-    marginLeft: -8, 
-  },
-  backArrowImage: {
-    width: 24,
-    height: 24,
-    tintColor: '#3f5c2b',
-  },
-  header: {
+    paddingTop: 24,
+    paddingBottom: 40,
     alignItems: 'center',
-    marginTop: -20, 
   },
-  brandImage: {
-    width: 320,            
-    height: 90,            
-    transform: [{ translateX: -10 }], 
-  },
+  backButton: { alignSelf: 'flex-start', paddingVertical: 8, marginBottom: 8 },
+  backText: { fontFamily: 'Montserrat-Bold', color: '#3f5c2b', fontSize: 16 },
+  brandImage: { width: 280, height: 80, marginBottom: 4 },
   subtitle: {
     fontFamily: 'Montserrat-Regular',
     color: '#3f5c2b',
     fontSize: 14,
-    marginTop: -4, 
-  },
-  formSection: {
-    width: '100%',
-    maxWidth: 320,
-    alignSelf: 'center',
-    alignItems: 'center',
+    marginBottom: 16,
   },
   pageTitle: {
-    fontFamily: 'Montserrat-Bold',
+    fontFamily: 'Montserrat-Semi-Bold',
     color: '#407e41',
     fontSize: 28,
-    letterSpacing: 1,
-    marginBottom: 0,
+    lineHeight: 36,
+    marginBottom: 20,
+    textAlign: 'center',
+    includeFontPadding: false,
   },
   input: {
     width: '100%',
+    maxWidth: 320,
     backgroundColor: '#3f5c2b',
     color: '#ffffff',
-    height: 44, 
+    height: 48,
     paddingHorizontal: 16,
-    paddingVertical: 0,
     borderRadius: 6,
     fontSize: 16,
     fontFamily: 'Montserrat-Regular',
-    textAlignVertical: 'center', 
-    includeFontPadding: false,
+    marginBottom: 12,
   },
-  inputMargin: {
-    marginTop: 10, 
+  passwordRow: {
+    width: '100%',
+    maxWidth: 320,
+    position: 'relative',
+    marginBottom: 12,
+  },
+  passwordInput: {
+    marginBottom: 0,
+    paddingRight: 64,
+  },
+  showButton: {
+    position: 'absolute',
+    right: 12,
+    top: 0,
+    height: 48,
+    justifyContent: 'center',
+  },
+  showText: {
+    fontFamily: 'Montserrat-Bold',
+    fontSize: 12,
+    color: '#c2dc68',
   },
   errorText: {
-    marginTop: 12,
     color: '#8b1e1e',
     fontFamily: 'Montserrat-Regular',
-    fontSize: 12,
+    fontSize: 13,
     textAlign: 'center',
-    lineHeight: 16,
-  },
-  configText: {
-    marginTop: 12,
-    color: '#5a3d00',
-    fontFamily: 'Montserrat-Regular',
-    fontSize: 11,
-    textAlign: 'center',
-    lineHeight: 15,
-    paddingHorizontal: 8,
-  },
-  loginButtonContainer: {
-    width: '100%',
-    marginTop: 40,
-    maxWidth: 260, 
+    marginBottom: 12,
+    maxWidth: 320,
   },
   button: {
     width: '100%',
+    maxWidth: 260,
     backgroundColor: '#3B703C',
     height: 48,
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 2,
-    borderBottomLeftRadius: 2,
-    borderBottomRightRadius: 10,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+    marginTop: 16,
   },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
+  buttonDisabled: { opacity: 0.7 },
   buttonText: {
-    fontFamily: 'Montserrat-Bold', 
+    fontFamily: 'Montserrat-Bold',
     color: '#ffffff',
-    fontSize: 20,
-    letterSpacing: 2,
-    includeFontPadding: false,
-  },
-  linksContainer: {
-    marginTop: 8, 
-    alignItems: 'center',
+    fontSize: 18,
   },
   helperText: {
     fontFamily: 'Montserrat-Regular',
     color: '#3f5c2b',
-    fontSize: 12,
-    marginTop: 4,
-    lineHeight: 16,
+    fontSize: 13,
+    marginTop: 14,
+    textAlign: 'center',
   },
   linkText: {
     textDecorationLine: 'underline',
-  },
-  googleButtonContainer: {
-    marginTop: 32,
-  },
-  googleButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#ffffff',
-    height: 44,
-    paddingHorizontal: 24,
-    borderRadius: 24, 
-    minWidth: 220,
-  },
-  googleIconImage: {
-    width: 20, 
-    height: 20,
-    marginRight: 12,
-  },
-  googleButtonText: {
     fontFamily: 'Montserrat-Bold',
-    fontSize: 12,
-    color: '#000000',
-    includeFontPadding: false,
-  },
-  footer: {
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  footerText: {
-    fontFamily: 'Montserrat-Regular', 
-    textAlign: 'center',
-    color: '#3f5c2b',
-    fontSize: 10,
-    paddingHorizontal: 40,
   },
 });

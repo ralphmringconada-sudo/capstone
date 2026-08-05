@@ -36,11 +36,13 @@ import InteractiveLocationMap from "@/components/InteractiveLocationMap";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
   createEvent,
+  fetchEventParticipants,
   fetchEvents,
   updateEventStatus,
 } from "@/services/adminDataService";
 import { uploadAdminEventImage } from "@/services/eventImageService";
-import type { AdminEvent } from "@/types/admin";
+import type { AdminEvent, EventParticipant } from "@/types/admin";
+import { formatDateTime } from "@/utils/format";
 
 type EventStatus = AdminEvent["status"];
 type EventTab = "All Events" | "Pending Approval" | "Rejected";
@@ -119,6 +121,8 @@ export default function EventsScreen() {
   const [selectionMenu, setSelectionMenu] = useState<"category" | "status" | "sort" | null>(null);
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [selectedEvent, setSelectedEvent] = useState<AdminEvent | null>(null);
+  const [eventParticipants, setEventParticipants] = useState<EventParticipant[]>([]);
+  const [loadingParticipants, setLoadingParticipants] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newCategory, setNewCategory] = useState("Clean-up");
   const [newDescription, setNewDescription] = useState("");
@@ -130,6 +134,8 @@ export default function EventsScreen() {
   const [newCoordinates, setNewCoordinates] = useState(VALENCIA_DEFAULT);
   const [isCreating, setIsCreating] = useState(false);
   const [isModerating, setIsModerating] = useState(false);
+  const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
+  const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const creatingRef = useRef(false);
   const moderatingRef = useRef(false);
   const pageSize = 5;
@@ -314,13 +320,35 @@ export default function EventsScreen() {
     }, 800);
   };
 
+  const openEventDetails = async (event: AdminEvent) => {
+    setSelectedEvent(event);
+    setEventParticipants([]);
+    setLoadingParticipants(true);
+    try {
+      setEventParticipants(await fetchEventParticipants(event.id));
+    } catch (error) {
+      Alert.alert(
+        "Participants unavailable",
+        error instanceof Error ? error.message : "Failed to load participants.",
+      );
+    } finally {
+      setLoadingParticipants(false);
+    }
+  };
+
+  const closeEventDetails = () => {
+    setSelectedEvent(null);
+    setEventParticipants([]);
+    setLoadingParticipants(false);
+  };
+
   const moderateEvent = async (nextStatus: EventStatus) => {
     if (!selectedEvent || !admin || moderatingRef.current) return;
     moderatingRef.current = true;
     setIsModerating(true);
     try {
       await updateEventStatus(selectedEvent.id, nextStatus, admin);
-      setSelectedEvent(null);
+      closeEventDetails();
       await reloadEvents();
     } catch (error) {
       Alert.alert("Event update failed", error instanceof Error ? error.message : "Failed to update event.");
@@ -335,9 +363,10 @@ export default function EventsScreen() {
       <ScrollView
         style={styles.page}
         contentContainerStyle={{
-          paddingHorizontal: width * 0.025,
+          paddingHorizontal: 20,
           paddingTop: height * 0.018,
           paddingBottom: 30,
+          width: "100%",
         }}
         showsVerticalScrollIndicator={false}
       >
@@ -426,32 +455,86 @@ export default function EventsScreen() {
               }}
               placeholder="Search events..."
               placeholderTextColor="#777"
-              style={[styles.searchInput, { fontSize: 14 * s }]}
+              style={[styles.searchInput, { fontSize: 15 * s }]}
             />
             <Search size={19 * s} color="#555" />
           </View>
 
-          <TouchableOpacity style={styles.filterBox} onPress={() => setSelectionMenu("category")}>
-            <Text style={[styles.filterLabel, { fontSize: 11 * s }]}>Event Type</Text>
-            <View style={styles.filterValueRow}>
-              <Text style={[styles.filterValue, { fontSize: 13 * s }]}>{category}</Text>
-              <ChevronDown size={16 * s} color="#333" />
-            </View>
-          </TouchableOpacity>
+          <View style={styles.dropdownContainer}>
+  <TouchableOpacity
+    style={styles.filterBox}
+    onPress={() => {
+      setShowCategoryDropdown(!showCategoryDropdown);
+      setShowStatusDropdown(false);
+    }}
+  >
+    <Text style={styles.filterLabel}>Event Type</Text>
 
-          <TouchableOpacity style={styles.filterBox} onPress={() => setSelectionMenu("status")}>
-            <Text style={[styles.filterLabel, { fontSize: 11 * s }]}>Status</Text>
-            <View style={styles.filterValueRow}>
-              <Text style={[styles.filterValue, { fontSize: 13 * s }]}>{status}</Text>
-              <ChevronDown size={16 * s} color="#333" />
-            </View>
-          </TouchableOpacity>
+    <View style={styles.filterValueRow}>
+      <Text style={styles.filterValue}>{category}</Text>
+      <ChevronDown size={16} color="#333" />
+    </View>
+  </TouchableOpacity>
+
+  {showCategoryDropdown && (
+    <View style={styles.dropdownMenu}>
+      {CATEGORY_OPTIONS.map((item) => (
+        <TouchableOpacity
+          key={item}
+          style={styles.dropdownItem}
+          onPress={() => {
+            setCategory(item);
+            setPage(1);
+            setShowCategoryDropdown(false);
+          }}
+        >
+          <Text style={styles.dropdownText}>{item}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  )}
+</View>
+
+          <View style={styles.dropdownContainer}>
+  <TouchableOpacity
+    style={styles.filterBox}
+    onPress={() => {
+      setShowStatusDropdown(!showStatusDropdown);
+      setShowCategoryDropdown(false);
+    }}
+  >
+    <Text style={styles.filterLabel}>Status</Text>
+
+    <View style={styles.filterValueRow}>
+      <Text style={styles.filterValue}>{status}</Text>
+      <ChevronDown size={16} color="#333" />
+    </View>
+  </TouchableOpacity>
+
+  {showStatusDropdown && (
+    <View style={styles.dropdownMenu}>
+      {STATUS_OPTIONS.map((item) => (
+        <TouchableOpacity
+          key={item}
+          style={styles.dropdownItem}
+          onPress={() => {
+            setStatus(item);
+            setPage(1);
+            setShowStatusDropdown(false);
+          }}
+        >
+          <Text style={styles.dropdownText}>{item}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  )}
+</View>
 
           {activeTab === "All Events" ? (
             <View style={styles.filterBox}>
-              <Text style={[styles.filterLabel, { fontSize: 11 * s }]}>Date Range</Text>
+              <Text style={[styles.filterLabel, { fontSize: 12 * s }]}>Date Range</Text>
               <View style={styles.filterValueRow}>
-                <Text style={[styles.filterValue, { fontSize: 12 * s }]}>
+                <Text style={[styles.filterValue, { fontSize: 16 * s }]}>
                   May 20, 2026 - Jun 26, 2026
                 </Text>
                 <CalendarDays size={16 * s} color="#333" />
@@ -474,8 +557,8 @@ export default function EventsScreen() {
         </View>
 
         <View style={styles.tablePanel}>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={styles.table}>
+          <ScrollView horizontal={width < 1100} showsHorizontalScrollIndicator={width < 1100}>
+            <View style={[styles.table, width >= 1100 ? styles.tableFullWidth : null]}>
               <View style={styles.tableHeader}>
                 {activeTab === "All Events" && <Text style={[styles.th, styles.idColumn]}>ID</Text>}
                 <Text style={[styles.th, styles.detailsColumn]}>Event Details</Text>
@@ -489,18 +572,24 @@ export default function EventsScreen() {
                   <Text style={[styles.th, styles.statusColumn]}>Status</Text>
                 )}
                 <Text style={[styles.th, styles.participantsColumn]}>Participants</Text>
-                <Text style={[styles.th, styles.actionColumn]}>Action</Text>
+                <Text style={[styles.th, styles.actionColumn, { transform: [{ translateX: 50 }] }]}>Action</Text>
               </View>
 
               {visibleEvents.length ? (
                 visibleEvents.map((event) => (
                   <View key={event.id} style={styles.tableRow}>
                     {activeTab === "All Events" && (
-                      <Text style={[styles.cellText, styles.idColumn]}>#{event.id}</Text>
+                      <Text style={[styles.cellText, styles.idColumn]} numberOfLines={1}>
+                        #{event.id.slice(0, 8)}
+                      </Text>
                     )}
                     <View style={[styles.detailsCell, styles.detailsColumn]}>
                       <View style={styles.eventThumbnail}>
-                        <CalendarDays size={18} color="#7d8c7c" />
+                        {event.imageUrl ? (
+                          <Image source={{ uri: event.imageUrl }} style={styles.eventThumbnailImage} />
+                        ) : (
+                          <CalendarDays size={18} color="#7d8c7c" />
+                        )}
                       </View>
                       <View style={styles.eventCopy}>
                         <Text numberOfLines={1} style={styles.eventTitle}>{event.title}</Text>
@@ -540,13 +629,13 @@ export default function EventsScreen() {
                       </View>
                     )}
                     <View style={styles.participantsColumn}>
-                      <Text style={styles.smallText}>
+                      <Text style={[styles.smallText, { transform: [{ translateX: 25 }] }]}>
                         {event.participants} / {event.capacity}
                       </Text>
-                      <Text style={styles.smallText}>Expected</Text>
+                      <Text style={[styles.smallText, { transform: [{ translateX: 18 }] }]}>Expected</Text>
                     </View>
                     <View style={styles.actionColumn}>
-                      <TouchableOpacity style={styles.viewButton} onPress={() => setSelectedEvent(event)}>
+                      <TouchableOpacity style={styles.viewButton} onPress={() => void openEventDetails(event)}>
                         <Eye size={13} color="#377b3d" />
                         <Text style={styles.viewButtonText}>View Event</Text>
                       </TouchableOpacity>
@@ -736,19 +825,22 @@ export default function EventsScreen() {
         </View>
       </Modal>
 
-      <Modal visible={selectedEvent !== null} transparent animationType="fade" onRequestClose={() => setSelectedEvent(null)}>
+      <Modal visible={selectedEvent !== null} transparent animationType="fade" onRequestClose={closeEventDetails}>
         <View style={styles.modalOverlay}>
           {selectedEvent && (
-            <View style={styles.detailsModal}>
+            <ScrollView style={styles.detailsModalScroll} contentContainerStyle={styles.detailsModal}>
               <View style={styles.modalHeader}>
                 <View style={styles.modalTitleWrap}>
                   <Text style={styles.modalTitle}>{selectedEvent.title}</Text>
                   <Text style={styles.modalSubtitle}>#{selectedEvent.id}</Text>
                 </View>
-                <Pressable style={styles.closeButton} onPress={() => setSelectedEvent(null)}>
+                <Pressable style={styles.closeButton} onPress={closeEventDetails}>
                   <X size={20} color="#222" />
                 </Pressable>
               </View>
+              {selectedEvent.imageUrl ? (
+                <Image source={{ uri: selectedEvent.imageUrl }} style={styles.detailsHeroImage} />
+              ) : null}
               <Text style={styles.detailsDescription}>{selectedEvent.description}</Text>
               <InteractiveLocationMap
                 coordinates={selectedEvent.coordinates}
@@ -769,6 +861,36 @@ export default function EventsScreen() {
                 value={`${selectedEvent.participants} of ${selectedEvent.capacity}`}
               />
               <DetailRow label="Submitted By" value={selectedEvent.submittedBy} />
+
+              <Text style={styles.participantsHeading}>Participant List</Text>
+              {loadingParticipants ? (
+                <Text style={styles.smallText}>Loading participants...</Text>
+              ) : eventParticipants.length === 0 ? (
+                <Text style={styles.smallText}>No users have joined this event yet.</Text>
+              ) : (
+                eventParticipants.map((participant) => {
+                  const joined = participant.joinedAt
+                    ? formatDateTime(participant.joinedAt)
+                    : null;
+                  return (
+                    <View key={participant.uid} style={styles.participantRow}>
+                      <View style={styles.submitterIcon}>
+                        <UserRound size={13} color="#ffffff" />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.eventTitle}>{participant.name}</Text>
+                        <Text style={styles.smallText}>{participant.email}</Text>
+                        {joined ? (
+                          <Text style={styles.smallText}>
+                            Joined {joined.date} · {joined.time}
+                          </Text>
+                        ) : null}
+                      </View>
+                    </View>
+                  );
+                })
+              )}
+
               <View style={styles.moderationActions}>
                 {selectedEvent.status === "Pending" && (
                   <>
@@ -809,13 +931,13 @@ export default function EventsScreen() {
                 )}
                 <TouchableOpacity
                   style={[styles.cancelButton, isModerating && { opacity: 0.6 }]}
-                  onPress={() => !isModerating && setSelectedEvent(null)}
+                  onPress={() => !isModerating && closeEventDetails()}
                   disabled={isModerating}
                 >
                   <Text style={styles.cancelText}>Close</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+            </ScrollView>
           )}
         </View>
       </Modal>
@@ -1144,18 +1266,29 @@ const styles = StyleSheet.create({
   },
   searchInput: { flex: 1, color: "#222", outlineStyle: "none" } as never,
   filterBox: {
-    flex: 1,
-    minWidth: 150,
-    height: 54,
-    borderRadius: 8,
-    backgroundColor: "#f4f4f4",
-    borderWidth: 1,
-    borderColor: "#dddddd",
-    paddingHorizontal: 12,
-    justifyContent: "center",
-  },
-  filterLabel: { fontFamily: "Montserrat_700Bold", color: "#555", marginBottom: 3 },
-  filterValueRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  flex: 1,
+  minWidth: 150,
+  height: 54,          // same as search box
+  borderRadius: 8,
+  backgroundColor: "#f4f4f4",
+  borderWidth: 1,
+  borderColor: "#dddddd",
+  paddingHorizontal: 12,
+  paddingVertical: 6,  // keeps content centered without increasing height
+  justifyContent: "center",
+},
+  filterLabel: {
+  fontFamily: "Montserrat_700Bold",
+  color: "#555",
+  marginBottom: 1, // was 3
+  fontSize: 11,
+},
+  filterValueRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  minHeight: 18,
+},
   filterValue: { fontFamily: "Montserrat_700Bold", color: "#252525", flexShrink: 1 },
   resetButton: {
     height: 38,
@@ -1175,7 +1308,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     overflow: "hidden",
   },
-  table: { minWidth: 1250 },
+  table: { minWidth: 980 },
+  tableFullWidth: { minWidth: "100%", width: "100%" },
   tableHeader: {
     height: 50,
     flexDirection: "row",
@@ -1184,7 +1318,7 @@ const styles = StyleSheet.create({
     borderBottomColor: "#d7d7d7",
     paddingHorizontal: 16,
   },
-  th: { fontSize: 13, color: "#202020", fontFamily: "Montserrat_700Bold" },
+  th: { fontSize: 14, color: "#202020", fontFamily: "Montserrat_700Bold" },
   tableRow: {
     minHeight: 78,
     flexDirection: "row",
@@ -1193,16 +1327,50 @@ const styles = StyleSheet.create({
     borderBottomColor: "#dddddd",
     paddingHorizontal: 16,
   },
-  idColumn: { width: 105 },
-  detailsColumn: { width: 245 },
-  submittedColumn: { width: 150 },
-  categoryColumn: { width: 145 },
-  dateColumn: { width: 150 },
-  locationColumn: { width: 155 },
-  statusColumn: { width: 110 },
-  participantsColumn: { width: 105 },
-  actionColumn: { width: 115, alignItems: "center" },
-  cellText: { fontSize: 12, fontFamily: "Montserrat_700Bold", color: "#242424" },
+  idColumn: { flex: 0.8, minWidth: 90 },
+
+detailsColumn: {
+  flex: 2,
+  minWidth: 240,
+},
+
+submittedColumn: {
+  flex: 1.3,
+  minWidth: 150,
+},
+
+categoryColumn: {
+  flex: 1.2,
+  minWidth: 130,
+},
+
+dateColumn: {
+  flex: 1.2,
+  minWidth: 130,
+},
+
+locationColumn: {
+  flex: 2,
+  minWidth: 180,
+},
+
+statusColumn: {
+  flex: 1,
+  minWidth: 110,
+},
+
+participantsColumn: {
+  flex: 1,
+  minWidth: 110,
+},
+
+actionColumn: {
+  flex: 1,
+  minWidth: 130,
+  alignItems: "center",
+  justifyContent: "center",
+},
+  cellText: { fontSize: 14, fontFamily: "Montserrat_700Bold", color: "#242424" },
   detailsCell: { flexDirection: "row", alignItems: "center", gap: 9 },
   submittedCell: { flexDirection: "row", alignItems: "center", gap: 8 },
   submitterIcon: {
@@ -1220,14 +1388,19 @@ const styles = StyleSheet.create({
     backgroundColor: "#d9ddda",
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
+  },
+  eventThumbnailImage: {
+    width: 42,
+    height: 42,
   },
   eventCopy: { flex: 1, paddingRight: 6 },
-  eventTitle: { fontSize: 12, fontFamily: "Montserrat_700Bold", color: "#1c1c1c" },
-  eventDescription: { fontSize: 9, color: "#555", lineHeight: 12, marginTop: 2 },
+  eventTitle: { fontSize: 14, fontFamily: "Montserrat_700Bold", color: "#1c1c1c" },
+  eventDescription: { fontSize: 12, color: "#555", lineHeight: 12, marginTop: 2 },
   badge: { alignSelf: "flex-start", paddingVertical: 4, paddingHorizontal: 7, borderRadius: 5 },
-  badgeText: { fontSize: 10, color: "#2e502f", fontFamily: "Montserrat_700Bold" },
-  dateText: { fontSize: 11, fontFamily: "Montserrat_700Bold", color: "#222" },
-  smallText: { fontSize: 9, color: "#555", marginTop: 2 },
+  badgeText: { fontSize: 12, color: "#2e502f", fontFamily: "Montserrat_700Bold" },
+  dateText: { fontSize: 13, fontFamily: "Montserrat_700Bold", color: "#222" },
+  smallText: { fontSize: 12, color: "#555", marginTop: 2 },
   viewButton: {
     borderWidth: 1,
     borderColor: "#4b9b52",
@@ -1238,7 +1411,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 4,
   },
-  viewButtonText: { fontSize: 9, color: "#34733B", fontFamily: "Montserrat_700Bold" },
+  viewButtonText: { fontSize: 12, color: "#34733B", fontFamily: "Montserrat_700Bold" },
   emptyRow: { height: 120, alignItems: "center", justifyContent: "center" },
   emptyText: { fontSize: 14, color: "#777", fontFamily: "Montserrat_700Bold" },
   pagination: {
@@ -1248,7 +1421,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
-  paginationText: { fontSize: 11, fontFamily: "Montserrat_700Bold", color: "#333" },
+  paginationText: { fontSize: 12, fontFamily: "Montserrat_700Bold", color: "#333" },
   pageControls: { flexDirection: "row", gap: 5 },
   pageButton: {
     width: 27,
@@ -1270,7 +1443,36 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   formModal: { width: "100%", maxWidth: 880, backgroundColor: "#fff", borderRadius: 14, padding: 24 },
-  detailsModal: { width: "100%", maxWidth: 520, backgroundColor: "#fff", borderRadius: 14, padding: 24 },
+  detailsModalScroll: {
+    width: "94%",
+    maxWidth: 720,
+    maxHeight: "90%",
+    backgroundColor: "#fff",
+    borderRadius: 14,
+  },
+  detailsModal: { padding: 28, paddingBottom: 32 },
+  detailsHeroImage: {
+    width: "100%",
+    height: 180,
+    borderRadius: 10,
+    marginBottom: 12,
+    backgroundColor: "#d9ddda",
+  },
+  participantsHeading: {
+    marginTop: 16,
+    marginBottom: 10,
+    fontSize: 15,
+    color: "#1c1c1c",
+    fontFamily: "Montserrat_700Bold",
+  },
+  participantRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: "#ececec",
+  },
   modalHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -1421,7 +1623,7 @@ const styles = StyleSheet.create({
   },
   selectedOption: { backgroundColor: "#edf5e7" },
   optionText: { fontSize: 13, color: "#222", fontFamily: "Montserrat_700Bold" },
-  detailsDescription: { fontSize: 13, lineHeight: 20, color: "#555", marginBottom: 16 },
+  detailsDescription: { fontSize: 14, lineHeight: 20, color: "#555", marginBottom: 16 },
   detailRow: {
     minHeight: 43,
     borderTopWidth: 1,
@@ -1429,6 +1631,40 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
   },
-  detailLabel: { width: 120, fontSize: 12, color: "#555", fontFamily: "Montserrat_700Bold" },
-  detailValue: { flex: 1, fontSize: 12, color: "#222", fontFamily: "Montserrat_700Bold" },
+  detailLabel: { width: 120, fontSize: 13, color: "#555", fontFamily: "Montserrat_700Bold" },
+  detailValue: { flex: 1, fontSize: 13, color: "#222", fontFamily: "Montserrat_700Bold" },
+
+  dropdownContainer: {
+  flex: 1,
+  minWidth: 150,
+  position: "relative",
+  zIndex: 100,
+},
+
+dropdownMenu: {
+  position: "absolute",
+  top: 58,
+  left: 0,
+  right: 0,
+  backgroundColor: "#fff",
+  borderRadius: 8,
+  borderWidth: 1,
+  borderColor: "#ddd",
+  elevation: 8,
+  shadowColor: "#000",
+  shadowOpacity: 0.15,
+  shadowRadius: 8,
+  shadowOffset: { width: 0, height: 3 },
+},
+
+dropdownItem: {
+  paddingVertical: 12,
+  paddingHorizontal: 14,
+},
+
+dropdownText: {
+  fontSize: 13,
+  fontFamily: "Montserrat_700Bold",
+  color: "#222",
+},
 });

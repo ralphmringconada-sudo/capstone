@@ -17,8 +17,70 @@ import InteractiveLocationMap from "@/components/InteractiveLocationMap";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { fetchReportById, updateReportStatus } from "@/services/adminDataService";
 import { resolveReportImageUrls } from "@/services/reportImageService";
-import type { Report } from "@/types/admin";
+import type { Report, ReportStatusHistoryEntry } from "@/types/admin";
 import { formatDateTime } from "@/utils/format";
+
+/**
+ * Purpose: Builds a displayable status timeline from persisted history or report timestamps.
+ * How it works: Uses statusHistory when present; otherwise seeds Pending from createdAt and
+ * the current status from updatedAt so older reports still show a usable trail.
+ */
+function buildStatusHistoryRows(report: Report): Array<{
+  status: string;
+  atLabel: string;
+  remarks: string;
+  active: boolean;
+}> {
+  const history = [...(report.statusHistory || [])].sort((a, b) =>
+    (a.at || "").localeCompare(b.at || ""),
+  );
+
+  const rows: ReportStatusHistoryEntry[] = history.length
+    ? history
+    : [
+        {
+          status: "Pending",
+          at: report.createdAt,
+          remarks: "Report submitted by user",
+        },
+        ...(report.status !== "Pending"
+          ? [
+              {
+                status: report.status,
+                at: report.updatedAt || report.createdAt,
+                remarks:
+                  report.status === "In Review"
+                    ? "Report moved to review"
+                    : report.status === "Resolved"
+                      ? "Report resolved by admin"
+                      : "Report rejected by admin",
+              } satisfies ReportStatusHistoryEntry,
+            ]
+          : []),
+      ];
+
+  // Deduplicate consecutive identical statuses while keeping chronological order.
+  const uniqueRows: ReportStatusHistoryEntry[] = [];
+  for (const entry of rows) {
+    const previous = uniqueRows[uniqueRows.length - 1];
+    if (previous && previous.status === entry.status && previous.at === entry.at) {
+      continue;
+    }
+    uniqueRows.push(entry);
+  }
+
+  return uniqueRows.map((entry) => {
+    const stamped = entry.at ? formatDateTime(entry.at) : null;
+    return {
+      status: entry.status,
+      atLabel: stamped ? `${stamped.date} · ${stamped.time}` : "—",
+      remarks:
+        entry.remarks ||
+        (entry.byName ? `Updated by ${entry.byName}` : "Status updated"),
+      active: true,
+    };
+  });
+}
 
 /**
  * Purpose: Presents complete report evidence and consequential administrator actions.
@@ -144,10 +206,13 @@ export default function ReportDetailsScreen() {
       <ScrollView
         style={styles.page}
         contentContainerStyle={{
-          paddingHorizontal: width * 0.025,
+          paddingHorizontal: 24,
           paddingTop: height * 0.035,
           paddingBottom: 48,
           flexGrow: 1,
+          width: "100%",
+          maxWidth: 1600,
+          alignSelf: "center",
         }}
         showsVerticalScrollIndicator
         persistentScrollbar
@@ -229,47 +294,42 @@ export default function ReportDetailsScreen() {
             <View style={[styles.panel, { padding: 18 * s, marginTop: 22 * s }]}>
               <SectionTitle icon={History} title="Status History" s={s} />
 
-              {[
-  ["Pending", "May 20, 2026 · 9:10 AM", "Report submitted by user"],
-  ["In Review", "—", "Pending"],
-  ["Resolved", "—", "Pending"],
-  ["Rejected", "—", "Pending"],
-].map((item, index) => (
-  <View key={index} style={[styles.historyRow, { minHeight: 42 * s }]}>
-    <View style={styles.historyDotCol}>
-      <View
-        style={[
-          styles.dot,
-          index === 0 ? styles.activeDot : styles.inactiveDot,
-        ]}
-      />
-    </View>
+              {buildStatusHistoryRows(report).map((item, index) => (
+                <View key={`${item.status}-${item.atLabel}-${index}`} style={[styles.historyRow, { minHeight: 42 * s }]}>
+                  <View style={styles.historyDotCol}>
+                    <View
+                      style={[
+                        styles.dot,
+                        item.active ? styles.activeDot : styles.inactiveDot,
+                      ]}
+                    />
+                  </View>
 
-    <View style={styles.historyStatusCol}>
-      <Text
-        style={[
-          styles.badge,
-          historyBadgeColor(item[0]),
-          {
-            fontSize: 16 * s,
-            paddingHorizontal: 9 * s,
-            paddingVertical: 5 * s,
-          },
-        ]}
-      >
-        {item[0]}
-      </Text>
-    </View>
+                  <View style={styles.historyStatusCol}>
+                    <Text
+                      style={[
+                        styles.badge,
+                        historyBadgeColor(item.status),
+                        {
+                          fontSize: 16 * s,
+                          paddingHorizontal: 9 * s,
+                          paddingVertical: 5 * s,
+                        },
+                      ]}
+                    >
+                      {item.status}
+                    </Text>
+                  </View>
 
-    <Text style={[styles.historyDateCol, { fontSize: 16 * s }]}>
-      {item[1]}
-    </Text>
+                  <Text style={[styles.historyDateCol, { fontSize: 16 * s }]}>
+                    {item.atLabel}
+                  </Text>
 
-    <Text style={[styles.historyRemarksCol, { fontSize: 16 * s }]}>
-      {item[2]}
-    </Text>
-  </View>
-))}
+                  <Text style={[styles.historyRemarksCol, { fontSize: 16 * s }]}>
+                    {item.remarks}
+                  </Text>
+                </View>
+              ))}
             </View>
           </View>
 
@@ -489,12 +549,15 @@ const styles = StyleSheet.create({
   grid: {
     flexDirection: "row",
     width: "100%",
+    alignItems: "flex-start",
   },
   leftColumn: {
-    flex: 1.15,
+    flex: 1.2,
+    minWidth: 0,
   },
   rightColumn: {
     flex: 1,
+    minWidth: 0,
   },
   panel: {
     borderWidth: 1,

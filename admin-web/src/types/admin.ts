@@ -32,6 +32,14 @@ export type AppUser = {
 
 export type ReportStatus = 'Pending' | 'In Review' | 'Resolved' | 'Rejected';
 
+export type ReportStatusHistoryEntry = {
+  status: ReportStatus;
+  at: string;
+  by?: string;
+  byName?: string;
+  remarks?: string;
+};
+
 export type Report = {
   id: string;
   title: string;
@@ -44,6 +52,7 @@ export type Report = {
   status: ReportStatus;
   createdAt: string;
   updatedAt?: string;
+  statusHistory?: ReportStatusHistoryEntry[];
   images?: string[];
   imagePaths?: string[];
   urgent?: boolean;
@@ -53,6 +62,13 @@ export type Report = {
   city?: string;
   barangay?: string;
   imageMetadata?: Record<string, unknown>;
+};
+
+export type EventParticipant = {
+  uid: string;
+  name: string;
+  email: string;
+  joinedAt: string;
 };
 
 export type AdminEvent = {

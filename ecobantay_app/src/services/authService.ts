@@ -168,6 +168,15 @@ export async function registerWithEmail(input: {
  * Technologies Used: Firebase Authentication and Firebase Firestore.
  * Why this implementation: The app requires both valid credentials and profile data before starting a session.
  */
+/** Blocks administrator Firebase accounts from establishing a mobile citizen session. */
+export async function assertNotAdminAccount(uid: string) {
+  const adminSnap = await getDoc(doc(getDbInstance(), 'admins', uid));
+  if (adminSnap.exists()) {
+    await signOut(auth());
+    throw new Error('Admin accounts must use the EcoBantay Admin website, not the mobile app.');
+  }
+}
+
 export async function loginWithEmail(email: string, password: string): Promise<UserProfile> {
   const trimmedEmail = email.trim().toLowerCase();
 
@@ -177,6 +186,7 @@ export async function loginWithEmail(email: string, password: string): Promise<U
      * Protection intentionally hides whether a submitted address already exists.
      */
     const credential = await signInWithEmailAndPassword(auth(), trimmedEmail, password);
+    await assertNotAdminAccount(credential.user.uid);
     const profile = await getUserProfile(credential.user.uid);
 
     /*
@@ -194,7 +204,8 @@ export async function loginWithEmail(email: string, password: string): Promise<U
   } catch (error: unknown) {
     if (
       error instanceof Error &&
-      error.message.includes('profile was not found in the database')
+      (error.message.includes('profile was not found in the database') ||
+        error.message.includes('Admin accounts must use'))
     ) {
       throw error;
     }
@@ -214,6 +225,7 @@ export async function loginWithGoogle(idToken: string): Promise<UserProfile> {
   try {
     /* Authentication API call: exchange the Google token for a Firebase session. */
     const authCredential = await signInWithCredential(auth(), credential);
+    await assertNotAdminAccount(authCredential.user.uid);
     const profile = await getUserProfile(authCredential.user.uid);
 
     /* Validation: Google login is only allowed for an already registered application profile. */
@@ -229,10 +241,12 @@ export async function loginWithGoogle(idToken: string): Promise<UserProfile> {
 
     return profile;
   } catch (error: unknown) {
-    if (error instanceof Error && error.message.startsWith('Account does not exist')) {
-      throw error;
-    }
-    if (error instanceof Error && error.message.startsWith('This account was not registered')) {
+    if (
+      error instanceof Error &&
+      (error.message.startsWith('Account does not exist') ||
+        error.message.startsWith('This account was not registered') ||
+        error.message.includes('Admin accounts must use'))
+    ) {
       throw error;
     }
     throw mapServiceError(error);

@@ -12,6 +12,7 @@ import {
   limit,
   setDoc,
   writeBatch,
+  arrayUnion,
 } from 'firebase/firestore';
 import {
   createUserWithEmailAndPassword,
@@ -27,7 +28,16 @@ import {
 import { getApps, initializeApp } from 'firebase/app';
 import { auth, db } from '@/config/firebase';
 import { firebaseConfig } from '@/config/firebaseConfig';
-import type { ActivityLog, AdminEvent, AdminProfile, AppUser, Report, ReportStatus } from '@/types/admin';
+import type {
+  ActivityLog,
+  AdminEvent,
+  AdminProfile,
+  AppUser,
+  EventParticipant,
+  Report,
+  ReportStatus,
+  ReportStatusHistoryEntry,
+} from '@/types/admin';
 
 /**
  * Purpose: Loads the administrator profile used for portal authorization.
@@ -154,6 +164,27 @@ export async function updateEventStatus(
 }
 
 /**
+ * Purpose: Loads citizens who joined a specific event.
+ * How it works: Reads the events/{id}/participants subcollection used by the mobile app.
+ * Technologies Used: Cloud Firestore subcollection queries.
+ * Why this implementation: Admins need the participant roster, not only the counter on the event doc.
+ */
+export async function fetchEventParticipants(eventId: string): Promise<EventParticipant[]> {
+  const snapshot = await getDocs(collection(db, 'events', eventId, 'participants'));
+  return snapshot.docs
+    .map((item) => {
+      const data = item.data() as Partial<EventParticipant>;
+      return {
+        uid: data.uid || item.id,
+        name: data.name || 'Unknown participant',
+        email: data.email || 'No email',
+        joinedAt: data.joinedAt || '',
+      };
+    })
+    .sort((first, second) => (second.joinedAt || '').localeCompare(first.joinedAt || ''));
+}
+
+/**
  * Purpose: Retrieves one environmental report by its persistent identifier.
  * How it works:
  * 1. A direct reports document reference is read from Firestore.
@@ -185,10 +216,32 @@ export async function updateReportStatus(
   const reportRef = doc(db, 'reports', reportId);
   const activityRef = doc(collection(db, 'admin_activity_logs'));
   const now = new Date().toISOString();
+  const historyEntry: ReportStatusHistoryEntry = {
+    status,
+    at: now,
+    by: admin.uid,
+    byName: admin.fullName,
+    remarks: details,
+  };
+
+  // Ensure older reports get a Pending seed when history first starts being written.
+  const existing = await getDoc(reportRef);
+  const existingHistory = (existing.data()?.statusHistory as ReportStatusHistoryEntry[] | undefined) || [];
+  const seedPending: ReportStatusHistoryEntry[] = existingHistory.some((entry) => entry.status === 'Pending')
+    ? []
+    : [
+        {
+          status: 'Pending',
+          at: (existing.data()?.createdAt as string | undefined) || now,
+          remarks: 'Report submitted by user',
+        },
+      ];
+
   const batch = writeBatch(db);
   batch.update(reportRef, {
     status,
     updatedAt: now,
+    statusHistory: arrayUnion(...seedPending, historyEntry),
   });
   batch.set(activityRef, {
     adminUid: admin.uid,
@@ -353,7 +406,39 @@ export async function deleteAppUserAccount(token: string, userId: string) {
  * Why this implementation: Firebase-managed recovery avoids handling reset secrets in the application.
  */
 export async function sendAdminPasswordReset(email: string) {
-  await sendPasswordResetEmail(auth, email.trim().toLowerCase());
+  const normalized = email.trim().toLowerCase();
+  // Auth-only: do not query Firestore here — forgot-password runs while logged out,
+  // and admins collection reads require an authenticated session.
+  await sendPasswordResetEmail(auth, normalized);
+}
+
+/**
+ * Purpose: Lets a super admin trigger Firebase password reset for another admin.
+ * How it works: Validates the target admin profile, then sends Firebase's reset email.
+ */
+export async function sendAdminPasswordResetForAdmin(
+  adminId: string,
+  actor: AdminProfile,
+) {
+  if (actor.role !== 'super_admin') {
+    throw new Error('Only super admins can reset administrator passwords.');
+  }
+  const target = await getAdminProfile(adminId);
+  if (!target?.email) {
+    throw new Error('Administrator account was not found.');
+  }
+  if (target.role === 'super_admin' && target.uid !== actor.uid) {
+    throw new Error('You cannot reset another super admin password from here.');
+  }
+  await sendPasswordResetEmail(auth, target.email.trim().toLowerCase());
+  await logAdminActivity({
+    adminUid: actor.uid,
+    adminName: actor.fullName,
+    action: 'Sent Admin Password Reset',
+    module: 'Users',
+    recordId: adminId,
+    details: `Sent password reset email to ${target.email}`,
+  });
 }
 
 /**
