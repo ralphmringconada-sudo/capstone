@@ -63,7 +63,11 @@ export default function IntroductionScreen() {
         {/* Bottom Section: Logo Placeholder & Footer */}
         <View style={styles.footer}>
           {/* White Circle Logo Placeholder */}
-          <View style={styles.logoPlaceholder} />
+          <Image
+            source={require('@/assets/images/Valencia_Logo.png')}
+            style={styles.logoPlaceholder}
+            resizeMode="contain"
+          />
           
           {/* Footer Text */}
           <Text style={styles.footerText}>
