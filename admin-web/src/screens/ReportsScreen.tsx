@@ -14,6 +14,7 @@ import {
   ClipboardList,
   Clock,
   Check,
+  ChevronDown,
   Eye,
   Search,
   Filter,
@@ -148,32 +149,124 @@ export default function ReportsScreen() {
           </View>
 
           <View style={styles.filterBox}>
-            <Dropdown
-              style={styles.dropdown}
-              placeholderStyle={[styles.dropdownPlaceholder, { fontSize: 15 * s }]}
-              selectedTextStyle={[styles.dropdownText, { fontSize: 15 * s }]}
-              data={categoryData}
-              labelField="label"
-              valueField="value"
-              value={category}
-              placeholder="Select Category"
-              onChange={(item) => setCategory(item.value)}
+  <Dropdown
+    style={styles.dropdown}
+    containerStyle={styles.dropdownMenu}
+    placeholderStyle={[
+      styles.dropdownPlaceholder,
+      { fontSize: 15 * s },
+    ]}
+    selectedTextStyle={[
+      styles.dropdownText,
+      { fontSize: 15 * s },
+    ]}
+    itemTextStyle={styles.dropdownItemText}
+    activeColor="#EEF7EA"
+    data={categoryData}
+    labelField="label"
+    valueField="value"
+    value={category}
+    placeholder="Select Category"
+    maxHeight={280}
+    onChange={(item) => setCategory(item.value)}
+    renderRightIcon={() => (
+      <ChevronDown
+        size={17 * s}
+        color="#3F3F3F"
+        strokeWidth={2}
+      />
+    )}
+    renderItem={(item) => {
+      const selected = item.value === category;
+
+      return (
+        <View
+          style={[
+            styles.dropdownItem,
+            selected && styles.dropdownItemSelected,
+          ]}
+        >
+          <Text
+            style={[
+              styles.dropdownItemText,
+              selected && styles.dropdownItemTextSelected,
+            ]}
+          >
+            {item.label}
+          </Text>
+
+          {selected && (
+            <Check
+              size={15}
+              color="#34733B"
+              strokeWidth={2.5}
             />
-          </View>
+          )}
+        </View>
+      );
+    }}
+  />
+</View>
 
           <View style={styles.filterBox}>
-            <Dropdown
-              style={styles.dropdown}
-              placeholderStyle={[styles.dropdownPlaceholder, { fontSize: 15 * s }]}
-              selectedTextStyle={[styles.dropdownText, { fontSize: 15 * s }]}
-              data={statusData}
-              labelField="label"
-              valueField="value"
-              value={status}
-              placeholder="Select Status"
-              onChange={(item) => setStatus(item.value)}
+  <Dropdown
+    style={styles.dropdown}
+    containerStyle={styles.dropdownMenu}
+    placeholderStyle={[
+      styles.dropdownPlaceholder,
+      { fontSize: 15 * s },
+    ]}
+    selectedTextStyle={[
+      styles.dropdownText,
+      { fontSize: 15 * s },
+    ]}
+    itemTextStyle={styles.dropdownItemText}
+    activeColor="#EEF7EA"
+    data={statusData}
+    labelField="label"
+    valueField="value"
+    value={status}
+    placeholder="Select Status"
+    maxHeight={280}
+    onChange={(item) => setStatus(item.value)}
+    renderRightIcon={() => (
+      <ChevronDown
+        size={17 * s}
+        color="#3F3F3F"
+        strokeWidth={2}
+      />
+    )}
+    renderItem={(item) => {
+      const selected = item.value === status;
+
+      return (
+        <View
+          style={[
+            styles.dropdownItem,
+            selected && styles.dropdownItemSelected,
+          ]}
+        >
+          <Text
+            style={[
+              styles.dropdownItemText,
+              selected && styles.dropdownItemTextSelected,
+            ]}
+          >
+            {item.label}
+          </Text>
+
+          {selected && (
+            <Check
+              size={15}
+              color="#34733B"
+              strokeWidth={2.5}
             />
-          </View>
+          )}
+        </View>
+      );
+    }}
+  />
+</View>
 
           <DateRangeFilter
             label="Date Reported"
@@ -210,8 +303,8 @@ export default function ReportsScreen() {
             <Text style={[styles.th, styles.categoryCol, { fontSize: 18 * s }]}>Category</Text>
             <Text style={[styles.th, styles.reportedCol, { fontSize: 18 * s }]}>Reported By</Text>
             <Text style={[styles.th, styles.dateCol, { fontSize: 18 * s }]}>Date Reported</Text>
-            <Text style={[styles.th, styles.statusCol, { fontSize: 18 * s }]}>Status</Text>
-            <Text style={[styles.th, styles.actionCol, { fontSize: 18 * s }]}>Action</Text>
+            <Text style={[styles.th, styles.statusCol, { fontSize: 18 * s, transform: [{ translateX: 15 }] }]}>Status</Text>
+            <Text style={[styles.th, styles.actionCol, { fontSize: 18 * s, transform: [{ translateX: 40 }] }]}>Action</Text>
           </View>
 
           {filteredReports.map((report) => {
@@ -268,13 +361,31 @@ export default function ReportsScreen() {
                 </View>
 
                 <View style={[styles.actionCol, styles.actions]}>
-                  <TouchableOpacity
-                    onPress={() => router.navigate({ pathname: "/report-details", params: { id: report.id } })}
-                    style={styles.iconButton}
-                  >
-                    <Eye size={20 * s} color="#000" />
-                  </TouchableOpacity>
-                </View>
+  <TouchableOpacity
+    onPress={() =>
+      router.navigate({
+        pathname: "/report-details",
+        params: { id: report.id },
+      })
+    }
+    style={styles.viewReportButton}
+  >
+    <Eye
+      size={14 * s}
+      color="#34733B"
+      strokeWidth={2.2}
+    />
+
+    <Text
+      style={[
+        styles.viewReportButtonText,
+        { fontSize: 12 * s },
+      ]}
+    >
+      View Report
+    </Text>
+  </TouchableOpacity>
+</View>
               </View>
             );
           })}
@@ -383,15 +494,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   searchInput: { flex: 1, fontFamily: "Montserrat_700Bold", outlineStyle: "none" as any },
+
   filterBox: {
   minWidth: 180,
   height: 48,
   borderWidth: 1,
-  borderColor: "#d6d6d6",
-  borderRadius: 6,
+  borderColor: "#D6D6D6",
+  borderRadius: 7,
   paddingHorizontal: 12,
   justifyContent: "center",
-},
+  backgroundColor: "#FFFFFF",
+  cursor: "pointer",
+} as any,
+
   dateBox: {
     minWidth: 160,
     borderWidth: 1,
@@ -400,6 +515,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
+  
   dateInner: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   filterLabel: {
   fontFamily: "Montserrat_700Bold",
@@ -440,15 +556,88 @@ const styles = StyleSheet.create({
   },
   th: { fontFamily: "Montserrat_700Bold", color: "#111" },
   td: { fontFamily: "Montserrat_700Bold", color: "#222" },
-  idCol: { flex: 0.8, minWidth: 90 },
-  detailsCol: { flex: 2.2, minWidth: 240 },
-  locationCol: { flex: 1.4, minWidth: 150, paddingRight: 12 },
-  categoryCol: { flex: 1.1, minWidth: 130 },
-  reportedCol: { flex: 1.3, minWidth: 150 },
-  dateCol: { flex: 1.1, minWidth: 120 },
-  statusCol: { flex: 1, minWidth: 110 },
-  actionCol: { flex: 0.7, minWidth: 70 },
-  reportDetails: { flexDirection: "row", alignItems: "center", gap: 10 },
+  idCol: {
+  flex: 0.75,
+  minWidth: 85,
+  paddingRight: 8,
+},
+
+detailsCol: {
+  flex: 1.25,
+  minWidth: 210,
+  paddingLeft: 14,
+  paddingRight: 4,
+},
+
+locationCol: {
+  flex: 1.45,
+  minWidth: 150,
+  paddingLeft: 4,
+  paddingRight: 10,
+},
+
+categoryCol: {
+  flex: 1.1,
+  minWidth: 125,
+},
+
+reportedCol: {
+  flex: 1.3,
+  minWidth: 145,
+},
+
+dateCol: {
+  flex: 1.1,
+  minWidth: 120,
+},
+
+statusCol: {
+  flex: 1,
+  minWidth: 105,
+},
+
+actionCol: {
+  flex: 0.9,
+  minWidth: 115,
+  alignItems: "center",
+  justifyContent: "center",
+},
+
+  reportDetails: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 10,
+},
+
+viewReportButton: {
+  minHeight: 30,
+
+  borderWidth: 1,
+  borderColor: "#4B9B52",
+  borderRadius: 6,
+
+  backgroundColor: "#FFFFFF",
+
+  paddingHorizontal: 9,
+  paddingVertical: 5,
+
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "center",
+
+  gap: 5,
+
+  cursor: "pointer",
+} as any,
+
+viewReportButtonText: {
+  color: "#34733B",
+
+  fontFamily: "Montserrat_700Bold",
+
+  whiteSpace: "nowrap",
+} as any,
+
   imageBox: { backgroundColor: "#ddd", borderRadius: 6, overflow: "hidden" },
   reportTextBox: { flex: 1 },
   reportTitle: { fontFamily: "Montserrat_700Bold", color: "#111" },
@@ -457,7 +646,6 @@ const styles = StyleSheet.create({
   badgeWrap: { alignItems: "flex-start" },
   badge: { borderRadius: 5, overflow: "hidden", fontFamily: "Montserrat_700Bold" },
   actions: { flexDirection: "row", gap: 8 },
-  iconButton: { padding: 6 },
   paginationRow: { flexDirection: "row", justifyContent: "space-between" },
   showing: { fontFamily: "Montserrat_700Bold", color: "#555" },
   menuOverlay: {
@@ -495,19 +683,72 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 
+// =====================================================
+// DROPDOWNS
+// =====================================================
+
 dropdown: {
   flex: 1,
+  width: "100%",
+  height: "100%",
   justifyContent: "center",
-},
+  cursor: "pointer",
+  outlineStyle: "none",
+} as any,
 
 dropdownPlaceholder: {
   fontFamily: "Montserrat_700Bold",
-  color: "#111",
+  color: "#555555",
 },
 
 dropdownText: {
   fontFamily: "Montserrat_700Bold",
-  color: "#111",
+  color: "#222222",
+},
+
+dropdownMenu: {
+  marginTop: 5,
+  backgroundColor: "#FFFFFF",
+  borderWidth: 1,
+  borderColor: "#D3D3D3",
+  borderRadius: 8,
+  overflow: "hidden",
+  shadowColor: "#000000",
+  shadowOffset: {
+    width: 0,
+    height: 5,
+  },
+  shadowOpacity: 0.14,
+  shadowRadius: 10,
+  elevation: 10,
+},
+
+dropdownItem: {
+  minHeight: 43,
+  paddingHorizontal: 13,
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  backgroundColor: "#FFFFFF",
+  borderBottomWidth: StyleSheet.hairlineWidth,
+  borderBottomColor: "#ECECEC",
+  cursor: "pointer",
+} as any,
+
+dropdownItemSelected: {
+  backgroundColor: "#EEF7EA",
+},
+
+dropdownItemText: {
+  flex: 1,
+  fontSize: 13,
+  color: "#333333",
+  fontFamily: "Montserrat_700Bold",
+},
+
+dropdownItemTextSelected: {
+  color: "#276C30",
+  fontFamily: "Montserrat_700Bold",
 },
 
 });
