@@ -29,19 +29,9 @@ import { resolveReportImageUrls } from "@/services/reportImageService";
 import { isWithinDateRange } from "@/utils/dateRange";
 import { formatDateTime } from "@/utils/format";
 import type { Report } from "@/types/admin";
-import { Dropdown } from "react-native-element-dropdown";
 
 const CATEGORIES = ["All Categories", "Deforestation", "Forest Fires", "Illegal Logging", "Waste Dumping", "Other"];
 const STATUSES = ["All Statuses", "Pending", "In Review", "Resolved", "Rejected"];
-const categoryData = CATEGORIES.map((item) => ({
-  label: item,
-  value: item,
-}));
-
-const statusData = STATUSES.map((item) => ({
-  label: item,
-  value: item,
-}));
 /**
  * Purpose: Enables administrators to search, review, and inspect environmental reports.
  * How it works:
@@ -56,6 +46,7 @@ export default function ReportsScreen() {
   const { width, height } = useWindowDimensions();
   const s = Math.min(width / 1920, height / 1080);
   const { reports, stats } = useAdminData();
+  const [openFilter, setOpenFilter] = useState<"category" | "status" | null>(null);
 
   /*
    * Filter state derives the visible report set, menu state controls filter dialogs,
@@ -116,14 +107,15 @@ export default function ReportsScreen() {
   return (
     <AdminLayout activePage="Reports">
       <ScrollView
-        style={styles.page}
-        contentContainerStyle={{
-          paddingHorizontal: width * 0.025,
-          paddingTop: height * 0.035,
-          paddingBottom: 30,
-        }}
-        showsVerticalScrollIndicator={false}
-      >
+  style={styles.page}
+  contentContainerStyle={{
+    paddingHorizontal: width * 0.025,
+    paddingTop: height * 0.035,
+    paddingBottom: 30,
+  }}
+  showsVerticalScrollIndicator={false}
+  keyboardShouldPersistTaps="handled"
+>
         <Text style={[styles.pageTitle, { fontSize: 42 * s }]}>REPORTS</Text>
         <Text style={[styles.subtitle, { fontSize: 18 * s }]}>
           Manage and review all environmental reports submitted by users
@@ -148,125 +140,39 @@ export default function ReportsScreen() {
             <Search size={20 * s} color="#000" />
           </View>
 
-          <View style={styles.filterBox}>
-  <Dropdown
-    style={styles.dropdown}
-    containerStyle={styles.dropdownMenu}
-    placeholderStyle={[
-      styles.dropdownPlaceholder,
-      { fontSize: 15 * s },
-    ]}
-    selectedTextStyle={[
-      styles.dropdownText,
-      { fontSize: 15 * s },
-    ]}
-    itemTextStyle={styles.dropdownItemText}
-    activeColor="#EEF7EA"
-    data={categoryData}
-    labelField="label"
-    valueField="value"
-    value={category}
-    placeholder="Select Category"
-    maxHeight={280}
-    onChange={(item) => setCategory(item.value)}
-    renderRightIcon={() => (
-      <ChevronDown
-        size={17 * s}
-        color="#3F3F3F"
-        strokeWidth={2}
-      />
-    )}
-    renderItem={(item) => {
-      const selected = item.value === category;
+          <FilterDropdown
+            label="Category"
+            value={category}
+            options={CATEGORIES}
+            s={s}
+            isOpen={openFilter === "category"}
+            onToggle={() =>
+              setOpenFilter((current) =>
+                current === "category" ? null : "category",
+              )
+            }
+            onClose={() => setOpenFilter(null)}
+            onChange={(value: string) => {
+              setCategory(value);
+            }}
+          />
 
-      return (
-        <View
-          style={[
-            styles.dropdownItem,
-            selected && styles.dropdownItemSelected,
-          ]}
-        >
-          <Text
-            style={[
-              styles.dropdownItemText,
-              selected && styles.dropdownItemTextSelected,
-            ]}
-          >
-            {item.label}
-          </Text>
-
-          {selected && (
-            <Check
-              size={15}
-              color="#34733B"
-              strokeWidth={2.5}
-            />
-          )}
-        </View>
-      );
-    }}
-  />
-</View>
-
-          <View style={styles.filterBox}>
-  <Dropdown
-    style={styles.dropdown}
-    containerStyle={styles.dropdownMenu}
-    placeholderStyle={[
-      styles.dropdownPlaceholder,
-      { fontSize: 15 * s },
-    ]}
-    selectedTextStyle={[
-      styles.dropdownText,
-      { fontSize: 15 * s },
-    ]}
-    itemTextStyle={styles.dropdownItemText}
-    activeColor="#EEF7EA"
-    data={statusData}
-    labelField="label"
-    valueField="value"
-    value={status}
-    placeholder="Select Status"
-    maxHeight={280}
-    onChange={(item) => setStatus(item.value)}
-    renderRightIcon={() => (
-      <ChevronDown
-        size={17 * s}
-        color="#3F3F3F"
-        strokeWidth={2}
-      />
-    )}
-    renderItem={(item) => {
-      const selected = item.value === status;
-
-      return (
-        <View
-          style={[
-            styles.dropdownItem,
-            selected && styles.dropdownItemSelected,
-          ]}
-        >
-          <Text
-            style={[
-              styles.dropdownItemText,
-              selected && styles.dropdownItemTextSelected,
-            ]}
-          >
-            {item.label}
-          </Text>
-
-          {selected && (
-            <Check
-              size={15}
-              color="#34733B"
-              strokeWidth={2.5}
-            />
-          )}
-        </View>
-      );
-    }}
-  />
-</View>
+          <FilterDropdown
+            label="Status"
+            value={status}
+            options={STATUSES}
+            s={s}
+            isOpen={openFilter === "status"}
+            onToggle={() =>
+              setOpenFilter((current) =>
+                current === "status" ? null : "status",
+              )
+            }
+            onClose={() => setOpenFilter(null)}
+            onChange={(value: string) => {
+              setStatus(value);
+            }}
+          />
 
           <DateRangeFilter
             label="Date Reported"
@@ -283,6 +189,7 @@ export default function ReportsScreen() {
                 setSearch("");
                 setCategory("All Categories");
                 setStatus("All Statuses");
+                setOpenFilter(null);
                 setFromDate("");
                 setToDate("");
               }}
@@ -379,7 +286,7 @@ export default function ReportsScreen() {
     <Text
       style={[
         styles.viewReportButtonText,
-        { fontSize: 12 * s },
+        { fontSize: 15 * s },
       ]}
     >
       View Report
@@ -438,6 +345,125 @@ export default function ReportsScreen() {
   );
 }
 
+
+function FilterDropdown({
+  label,
+  value,
+  options,
+  s,
+  isOpen,
+  onToggle,
+  onClose,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  s: number;
+  isOpen: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <View
+      style={[
+        styles.dropdownContainer,
+        isOpen && styles.dropdownContainerOpen,
+      ]}
+    >
+      <TouchableOpacity
+        activeOpacity={0.82}
+        accessibilityRole="button"
+        accessibilityLabel={`${label} filter. Selected: ${value}`}
+        accessibilityState={{ expanded: isOpen }}
+        style={[
+          styles.filterBox,
+          isOpen && styles.filterBoxOpen,
+        ]}
+        onPress={onToggle}
+      >
+        <Text
+          style={[
+            styles.filterLabel,
+            { fontSize: 11 * s },
+          ]}
+        >
+          {label}
+        </Text>
+
+        <View style={styles.filterValueRow}>
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.filterValue,
+              { fontSize: 15 * s },
+              isOpen && styles.filterValueOpen,
+            ]}
+          >
+            {value}
+          </Text>
+
+          <ChevronDown
+            size={16 * s}
+            color={isOpen ? "#34733B" : "#333333"}
+            strokeWidth={2}
+            style={{
+              transform: [
+                {
+                  rotate: isOpen ? "180deg" : "0deg",
+                },
+              ],
+            }}
+          />
+        </View>
+      </TouchableOpacity>
+
+      {isOpen ? (
+        <View style={styles.dropdownMenu}>
+          {options.map((option) => {
+            const selected = option === value;
+
+            return (
+              <TouchableOpacity
+                key={option}
+                activeOpacity={0.75}
+                accessibilityRole="menuitem"
+                style={[
+                  styles.dropdownItem,
+                  selected && styles.dropdownItemSelected,
+                ]}
+                onPress={() => {
+                  onChange(option);
+                  onClose();
+                }}
+              >
+                <Text
+                  style={[
+                    styles.dropdownText,
+                    { fontSize: 16 * s },
+                    selected && styles.dropdownTextSelected,
+                  ]}
+                >
+                  {option}
+                </Text>
+
+                {selected ? (
+                  <Check
+                    size={16 * s}
+                    color="#34733B"
+                    strokeWidth={2.5}
+                  />
+                ) : null}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 /**
  * Purpose: Maps report categories to consistent table badge colors.
  * How it works:
@@ -474,38 +500,61 @@ const styles = StyleSheet.create({
   subtitle: { fontFamily: "Montserrat_700Bold", color: "#555", marginTop: 6 },
   cards: { flexDirection: "row" },
   filterPanel: {
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#d6d6d6",
-    borderRadius: 8,
+    borderColor: "#D3D3D3",
+    borderRadius: 9,
     flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 12,
+    alignItems: "center",
+    gap: 14,
     flexWrap: "wrap",
+    position: "relative",
+    zIndex: 50,
+    overflow: "visible",
   },
   searchBox: {
-    flex: 1.4,
+    flex: 1.15,
     minWidth: 180,
+    height: 54,
     borderWidth: 1,
-    borderColor: "#d6d6d6",
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    height: 48,
+    borderColor: "#DDDDDD",
+    borderRadius: 8,
+    backgroundColor: "#F4F4F4",
+    paddingHorizontal: 14,
     flexDirection: "row",
     alignItems: "center",
   },
   searchInput: { flex: 1, fontFamily: "Montserrat_700Bold", outlineStyle: "none" as any },
 
+  dropdownContainer: {
+    flex: 1,
+    minWidth: 150,
+    position: "relative",
+    zIndex: 100,
+    overflow: "visible",
+  },
+
+  dropdownContainerOpen: {
+    zIndex: 1000,
+  },
+
   filterBox: {
-  minWidth: 180,
-  height: 48,
-  borderWidth: 1,
-  borderColor: "#D6D6D6",
-  borderRadius: 7,
-  paddingHorizontal: 12,
-  justifyContent: "center",
-  backgroundColor: "#FFFFFF",
-  cursor: "pointer",
-} as any,
+    width: "100%",
+    height: 54,
+    borderRadius: 8,
+    backgroundColor: "#F4F4F4",
+    borderWidth: 1,
+    borderColor: "#DDDDDD",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    justifyContent: "center",
+    cursor: "pointer",
+  } as any,
+
+  filterBoxOpen: {
+    borderColor: "#34733B",
+    backgroundColor: "#F8FBF7",
+  },
 
   dateBox: {
     minWidth: 160,
@@ -518,25 +567,45 @@ const styles = StyleSheet.create({
   
   dateInner: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   filterLabel: {
-  fontFamily: "Montserrat_700Bold",
-  color: "#777",
-  fontSize: 12,
-  marginBottom: 2,
-},
-  filterText: { fontFamily: "Montserrat_700Bold", color: "#111" },
-  buttonColumn: { justifyContent: "center" },
-  smallButton: {
-    borderWidth: 1,
-    borderColor: "#9DE5A0",
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    height: 40,
+    fontFamily: "Montserrat_700Bold",
+    color: "#555555",
+    marginBottom: 1,
+  },
+
+  filterValueRow: {
+    minHeight: 18,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    justifyContent: "space-between",
+    gap: 8,
   },
+
+  filterValue: {
+    flex: 1,
+    flexShrink: 1,
+    fontFamily: "Montserrat_700Bold",
+    color: "#252525",
+  },
+
+  filterValueOpen: {
+    color: "#34733B",
+  },
+  buttonColumn: { justifyContent: "center" },
+  smallButton: {
+    height: 38,
+    minWidth: 82,
+    paddingHorizontal: 13,
+    borderWidth: 1,
+    borderColor: "#86BE8D",
+    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    cursor: "pointer",
+  } as any,
   buttonText: { fontFamily: "Montserrat_700Bold", color: "#34733B" },
-  tablePanel: { borderWidth: 1, borderColor: "#d6d6d6", borderRadius: 8, overflow: "hidden" },
+  tablePanel: { borderWidth: 1, borderColor: "#d6d6d6", borderRadius: 8, overflow: "hidden", position: "relative", zIndex: 1 },
   table: { minWidth: 1100 },
   tableFullWidth: { minWidth: "100%", width: "100%" },
   tableHeader: {
@@ -685,47 +754,34 @@ viewReportButtonText: {
 
 // =====================================================
 // DROPDOWNS
+// Matches Events / Users
 // =====================================================
 
-dropdown: {
-  flex: 1,
-  width: "100%",
-  height: "100%",
-  justifyContent: "center",
-  cursor: "pointer",
-  outlineStyle: "none",
-} as any,
-
-dropdownPlaceholder: {
-  fontFamily: "Montserrat_700Bold",
-  color: "#555555",
-},
-
-dropdownText: {
-  fontFamily: "Montserrat_700Bold",
-  color: "#222222",
-},
-
 dropdownMenu: {
-  marginTop: 5,
+  position: "absolute",
+  top: 58,
+  left: 0,
+  right: 0,
   backgroundColor: "#FFFFFF",
-  borderWidth: 1,
-  borderColor: "#D3D3D3",
   borderRadius: 8,
+  borderWidth: 1,
+  borderColor: "#D5D5D5",
   overflow: "hidden",
+  zIndex: 2000,
+  elevation: 10,
   shadowColor: "#000000",
+  shadowOpacity: 0.14,
+  shadowRadius: 9,
   shadowOffset: {
     width: 0,
-    height: 5,
+    height: 4,
   },
-  shadowOpacity: 0.14,
-  shadowRadius: 10,
-  elevation: 10,
 },
 
 dropdownItem: {
-  minHeight: 43,
-  paddingHorizontal: 13,
+  minHeight: 42,
+  paddingVertical: 11,
+  paddingHorizontal: 14,
   flexDirection: "row",
   alignItems: "center",
   justifyContent: "space-between",
@@ -736,19 +792,17 @@ dropdownItem: {
 } as any,
 
 dropdownItemSelected: {
-  backgroundColor: "#EEF7EA",
+  backgroundColor: "#F1F8EE",
 },
 
-dropdownItemText: {
+dropdownText: {
   flex: 1,
-  fontSize: 13,
-  color: "#333333",
   fontFamily: "Montserrat_700Bold",
+  color: "#222222",
 },
 
-dropdownItemTextSelected: {
-  color: "#276C30",
-  fontFamily: "Montserrat_700Bold",
+dropdownTextSelected: {
+  color: "#34733B",
 },
 
 });

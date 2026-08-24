@@ -1017,6 +1017,7 @@ const confirmRejectEvent = async () => {
           showsVerticalScrollIndicator={
             false
           }
+          keyboardShouldPersistTaps="handled"
         >
           {/* =============================================== */}
           {/* HEADER */}
@@ -1282,9 +1283,12 @@ const confirmRejectEvent = async () => {
               }
             >
               <TouchableOpacity
-                style={
-                  styles.filterBox
-                }
+                activeOpacity={0.82}
+                style={[
+                  styles.filterBox,
+                  showCategoryDropdown &&
+                    styles.filterBoxOpen,
+                ]}
                 onPress={() => {
                   setShowCategoryDropdown(
                     !showCategoryDropdown
@@ -1309,16 +1313,32 @@ const confirmRejectEvent = async () => {
                   }
                 >
                   <Text
-                    style={
-                      styles.filterValue
-                    }
+                    style={[
+                      styles.filterValue,
+                      showCategoryDropdown &&
+                        styles.filterValueOpen,
+                    ]}
                   >
                     {category}
                   </Text>
 
                   <ChevronDown
                     size={16}
-                    color="#333"
+                    color={
+                      showCategoryDropdown
+                        ? "#34733B"
+                        : "#333333"
+                    }
+                    style={{
+                      transform: [
+                        {
+                          rotate:
+                            showCategoryDropdown
+                              ? "180deg"
+                              : "0deg",
+                        },
+                      ],
+                    }}
                   />
                 </View>
               </TouchableOpacity>
@@ -1330,39 +1350,63 @@ const confirmRejectEvent = async () => {
                   }
                 >
                   {CATEGORY_OPTIONS.map(
-                    (item) => (
-                      <TouchableOpacity
-                        key={
-                          item
-                        }
-                        style={
-                          styles.dropdownItem
-                        }
-                        onPress={() => {
-                          setCategory(
+                    (item) => {
+                      const selected =
+                        category === item;
+
+                      return (
+                        <TouchableOpacity
+                          key={
                             item
-                          );
-
-                          setPage(
-                            1
-                          );
-
-                          setShowCategoryDropdown(
-                            false
-                          );
-                        }}
-                      >
-                        <Text
-                          style={
-                            styles.dropdownText
                           }
+                          activeOpacity={
+                            0.75
+                          }
+                          style={[
+                            styles.dropdownItem,
+                            selected &&
+                              styles.dropdownItemSelected,
+                          ]}
+                          onPress={() => {
+                            setCategory(
+                              item
+                            );
+
+                            setPage(
+                              1
+                            );
+
+                            setShowCategoryDropdown(
+                              false
+                            );
+                          }}
                         >
-                          {
-                            item
-                          }
-                        </Text>
-                      </TouchableOpacity>
-                    )
+                          <Text
+                            style={[
+                              styles.dropdownText,
+                              selected &&
+                                styles.dropdownTextSelected,
+                            ]}
+                          >
+                            {
+                              item
+                            }
+                          </Text>
+
+                          {selected && (
+                            <Check
+                              size={
+                                16
+                              }
+                              color="#34733B"
+                              strokeWidth={
+                                2.5
+                              }
+                            />
+                          )}
+                        </TouchableOpacity>
+                      );
+                    }
                   )}
                 </View>
               )}
@@ -1376,9 +1420,12 @@ const confirmRejectEvent = async () => {
               }
             >
               <TouchableOpacity
-                style={
-                  styles.filterBox
-                }
+                activeOpacity={0.82}
+                style={[
+                  styles.filterBox,
+                  showStatusDropdown &&
+                    styles.filterBoxOpen,
+                ]}
                 onPress={() => {
                   setShowStatusDropdown(
                     !showStatusDropdown
@@ -1403,16 +1450,32 @@ const confirmRejectEvent = async () => {
                   }
                 >
                   <Text
-                    style={
-                      styles.filterValue
-                    }
+                    style={[
+                      styles.filterValue,
+                      showStatusDropdown &&
+                        styles.filterValueOpen,
+                    ]}
                   >
                     {status}
                   </Text>
 
                   <ChevronDown
                     size={16}
-                    color="#333"
+                    color={
+                      showStatusDropdown
+                        ? "#34733B"
+                        : "#333333"
+                    }
+                    style={{
+                      transform: [
+                        {
+                          rotate:
+                            showStatusDropdown
+                              ? "180deg"
+                              : "0deg",
+                        },
+                      ],
+                    }}
                   />
                 </View>
               </TouchableOpacity>
@@ -1424,39 +1487,63 @@ const confirmRejectEvent = async () => {
                   }
                 >
                   {STATUS_OPTIONS.map(
-                    (item) => (
-                      <TouchableOpacity
-                        key={
-                          item
-                        }
-                        style={
-                          styles.dropdownItem
-                        }
-                        onPress={() => {
-                          setStatus(
+                    (item) => {
+                      const selected =
+                        status === item;
+
+                      return (
+                        <TouchableOpacity
+                          key={
                             item
-                          );
-
-                          setPage(
-                            1
-                          );
-
-                          setShowStatusDropdown(
-                            false
-                          );
-                        }}
-                      >
-                        <Text
-                          style={
-                            styles.dropdownText
                           }
+                          activeOpacity={
+                            0.75
+                          }
+                          style={[
+                            styles.dropdownItem,
+                            selected &&
+                              styles.dropdownItemSelected,
+                          ]}
+                          onPress={() => {
+                            setStatus(
+                              item
+                            );
+
+                            setPage(
+                              1
+                            );
+
+                            setShowStatusDropdown(
+                              false
+                            );
+                          }}
                         >
-                          {
-                            item
-                          }
-                        </Text>
-                      </TouchableOpacity>
-                    )
+                          <Text
+                            style={[
+                              styles.dropdownText,
+                              selected &&
+                                styles.dropdownTextSelected,
+                            ]}
+                          >
+                            {
+                              item
+                            }
+                          </Text>
+
+                          {selected && (
+                            <Check
+                              size={
+                                16
+                              }
+                              color="#34733B"
+                              strokeWidth={
+                                2.5
+                              }
+                            />
+                          )}
+                        </TouchableOpacity>
+                      );
+                    }
                   )}
                 </View>
               )}
@@ -1528,7 +1615,7 @@ const confirmRejectEvent = async () => {
                       styles.filterValue,
                       {
                         fontSize:
-                          13 * s,
+                          14 * s,
                       },
                     ]}
                   >
@@ -1536,7 +1623,7 @@ const confirmRejectEvent = async () => {
                   </Text>
 
                   <ChevronDown
-                    size={16 * s}
+                    size={12 * s}
                     color="#333"
                   />
                 </View>
@@ -4707,6 +4794,19 @@ const styles =
       paddingVertical: 6,
       justifyContent:
         "center",
+      cursor: "pointer",
+    } as any,
+
+    filterBoxOpen: {
+      borderColor:
+        "#34733B",
+      backgroundColor:
+        "#F8FBF7",
+    },
+
+    filterValueOpen: {
+      color:
+        "#34733B",
     },
 
     filterLabel: {
@@ -5801,6 +5901,8 @@ rejectConfirmText: {
       position:
         "relative",
       zIndex: 100,
+      overflow:
+        "visible",
     },
 
     dropdownMenu: {
@@ -5810,32 +5912,60 @@ rejectConfirmText: {
       left: 0,
       right: 0,
       backgroundColor:
-        "#fff",
+        "#ffffff",
       borderRadius: 8,
       borderWidth: 1,
       borderColor:
-        "#ddd",
-      elevation: 8,
+        "#d5d5d5",
+      overflow:
+        "hidden",
+      zIndex: 1000,
+      elevation: 10,
       shadowColor:
-        "#000",
-      shadowOpacity: 0.15,
-      shadowRadius: 8,
+        "#000000",
+      shadowOpacity: 0.14,
+      shadowRadius: 9,
       shadowOffset: {
         width: 0,
-        height: 3,
+        height: 4,
       },
     },
 
     dropdownItem: {
-      paddingVertical: 12,
+      minHeight: 42,
+      paddingVertical: 11,
       paddingHorizontal: 14,
+      flexDirection:
+        "row",
+      alignItems:
+        "center",
+      justifyContent:
+        "space-between",
+      backgroundColor:
+        "#ffffff",
+      borderBottomWidth:
+        StyleSheet.hairlineWidth,
+      borderBottomColor:
+        "#ececec",
+      cursor: "pointer",
+    } as any,
+
+    dropdownItemSelected: {
+      backgroundColor:
+        "#F1F8EE",
     },
 
     dropdownText: {
+      flex: 1,
       fontSize: 13,
       fontFamily:
         "Montserrat_700Bold",
-      color: "#222",
+      color: "#222222",
+    },
+
+    dropdownTextSelected: {
+      color:
+        "#34733B",
     },
 
     // =====================================================

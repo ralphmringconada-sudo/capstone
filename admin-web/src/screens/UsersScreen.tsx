@@ -14,6 +14,7 @@ import {
 import {
   Calendar,
   Check,
+  ChevronDown,
   Eye,
   Filter,
   Search,
@@ -139,6 +140,7 @@ export default function UsersScreen() {
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("All Roles");
   const [statusFilter, setStatusFilter] = useState("All Statuses");
+  const [openFilter, setOpenFilter] = useState<"role" | "status" | null>(null);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
   const [userPage, setUserPage] = useState(1);
@@ -548,6 +550,7 @@ export default function UsersScreen() {
           paddingBottom: 30,
         }}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         <View style={styles.topRow}>
           <View>
@@ -623,8 +626,19 @@ export default function UsersScreen() {
           <FilterDropdown
             label="Roles"
             value={roleFilter}
-            options={isSuperAdmin ? ["All Roles", "User", "Admin", "Super Admin"] : ["All Roles", "User"]}
+            options={
+              isSuperAdmin
+                ? ["All Roles", "User", "Admin", "Super Admin"]
+                : ["All Roles", "User"]
+            }
             s={s}
+            isOpen={openFilter === "role"}
+            onToggle={() =>
+              setOpenFilter((current) =>
+                current === "role" ? null : "role",
+              )
+            }
+            onClose={() => setOpenFilter(null)}
             onChange={(value: string) => {
               setRoleFilter(value);
               setUserPage(1);
@@ -636,6 +650,13 @@ export default function UsersScreen() {
             value={statusFilter}
             options={["All Statuses", "Active", "Flagged"]}
             s={s}
+            isOpen={openFilter === "status"}
+            onToggle={() =>
+              setOpenFilter((current) =>
+                current === "status" ? null : "status",
+              )
+            }
+            onClose={() => setOpenFilter(null)}
             onChange={(value: string) => {
               setStatusFilter(value);
               setUserPage(1);
@@ -663,6 +684,7 @@ export default function UsersScreen() {
               setSearch("");
               setRoleFilter("All Roles");
               setStatusFilter("All Statuses");
+              setOpenFilter(null);
               setFromDate("");
               setToDate("");
               setUserPage(1);
@@ -1430,44 +1452,83 @@ export default function UsersScreen() {
   );
 }
 
-/**
- * Purpose: Renders a visible, selectable dropdown for table filters.
- * How it works: Opens an anchored option panel, applies the selected value, and closes the panel.
- */
-function FilterDropdown({ label, value, options, s, onChange }: any) {
-  const [isOpen, setIsOpen] = useState(false);
-
+function FilterDropdown({
+  label,
+  value,
+  options,
+  s,
+  isOpen,
+  onToggle,
+  onClose,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  s: number;
+  isOpen: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  onChange: (value: string) => void;
+}) {
   return (
     <View
       style={[
         styles.dropdownContainer,
-        isOpen ? styles.dropdownContainerOpen : null,
+        isOpen && styles.dropdownContainerOpen,
       ]}
     >
       <TouchableOpacity
-        activeOpacity={0.8}
+        activeOpacity={0.82}
         accessibilityRole="button"
         accessibilityLabel={`${label} filter. Selected: ${value}`}
         accessibilityState={{ expanded: isOpen }}
-        style={styles.filterBox}
-        onPress={() => setIsOpen((open) => !open)}
+        style={[
+          styles.filterBox,
+          isOpen && styles.filterBoxOpen,
+        ]}
+        onPress={onToggle}
       >
-        <Text style={[styles.filterLabel, { fontSize: 16 * s }]}>{label}</Text>
-        <View style={styles.dropdownValueRow}>
+        <Text
+          style={[
+            styles.filterLabel,
+            { fontSize: 11 * s },
+          ]}
+        >
+          {label}
+        </Text>
+
+        <View style={styles.filterValueRow}>
           <Text
             numberOfLines={1}
-            style={[styles.filterText, styles.dropdownSelectedText, { fontSize: 16 * s }]}
+            style={[
+              styles.filterValue,
+              { fontSize: 16 * s },
+              isOpen && styles.filterValueOpen,
+            ]}
           >
             {value}
           </Text>
-          <Text style={[styles.dropdownArrow, { fontSize: 18 * s }]}>⌄</Text>
+
+          <ChevronDown
+            size={16 * s}
+            color={isOpen ? "#34733B" : "#333333"}
+            strokeWidth={2}
+            style={{
+              transform: [
+                {
+                  rotate: isOpen ? "180deg" : "0deg",
+                },
+              ],
+            }}
+          />
         </View>
       </TouchableOpacity>
 
       {isOpen ? (
-        <View style={styles.dropdownMenu} accessibilityRole="menu">
-          {options.map((option: string, index: number) => {
-            const isSelected = option === value;
+        <View style={styles.dropdownMenu}>
+          {options.map((option) => {
+            const selected = option === value;
 
             return (
               <TouchableOpacity
@@ -1475,25 +1536,31 @@ function FilterDropdown({ label, value, options, s, onChange }: any) {
                 activeOpacity={0.75}
                 accessibilityRole="menuitem"
                 style={[
-                  styles.dropdownOption,
-                  index < options.length - 1 ? styles.dropdownOptionBorder : null,
-                  isSelected ? styles.dropdownOptionSelected : null,
+                  styles.dropdownItem,
+                  selected && styles.dropdownItemSelected,
                 ]}
                 onPress={() => {
                   onChange(option);
-                  setIsOpen(false);
+                  onClose();
                 }}
               >
                 <Text
                   style={[
-                    styles.dropdownOptionText,
-                    { fontSize: 15 * s },
-                    isSelected ? styles.dropdownOptionTextSelected : null,
+                    styles.dropdownText,
+                    { fontSize: 16 * s },
+                    selected && styles.dropdownTextSelected,
                   ]}
                 >
                   {option}
                 </Text>
-                {isSelected ? <Check size={16 * s} color="#34733B" /> : null}
+
+                {selected ? (
+                  <Check
+                    size={16 * s}
+                    color="#34733B"
+                    strokeWidth={2.5}
+                  />
+                ) : null}
               </TouchableOpacity>
             );
           })}
@@ -1574,27 +1641,12 @@ function ProfileInfoItem({ icon: Icon, label, value, s }: any) {
   );
 }
 
-/**
- * Purpose: Maps an account role to a consistent profile and table badge.
- * How it works:
- * 1. Super-admin and standard-admin roles receive dedicated colors.
- * 2. Citizen users receive the default role presentation.
- * Technologies Used: TypeScript conditionals and React Native style objects.
- * Why this implementation: Visual role distinction supports faster privilege recognition.
- */
 function roleColor(role: string) {
   if (role === "Admin") return { backgroundColor: "#C7DDFF", color: "#315BC9" };
   return { backgroundColor: "#BFEBC5", color: "#168A18" };
 }
 
-/**
- * Purpose: Maps report status values shown in account activity to semantic colors.
- * How it works:
- * 1. Pending, in-review, and resolved statuses select dedicated styles.
- * 2. Remaining statuses use the rejection style.
- * Technologies Used: TypeScript conditionals and React Native style objects.
- * Why this implementation: The same workflow meaning remains recognizable across modules.
- */
+
 function statusColor(status: string) {
   if (status === "Pending") return { backgroundColor: "#FFF0B8", color: "#D99A00" };
   if (status === "In Review") return { backgroundColor: "#C7DDFF", color: "#315BC9" };
@@ -1639,28 +1691,30 @@ const styles = StyleSheet.create({
   },
 
   filterPanel: {
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#d6d6d6",
-    borderRadius: 8,
+    borderColor: "#D3D3D3",
+    borderRadius: 9,
     flexDirection: "row",
     alignItems: "center",
     gap: 14,
+    flexWrap: "wrap",
     position: "relative",
     zIndex: 50,
     overflow: "visible",
   },
 
   searchBox: {
-    flex: 1.1,
-    height: 58,
+    flex: 1.15,
+    minWidth: 180,
+    height: 54,
     borderWidth: 1,
-    borderColor: "#d6d6d6",
-    borderRadius: 6,
-    backgroundColor: "#f7f7f7",
+    borderColor: "#DDDDDD",
+    borderRadius: 8,
+    backgroundColor: "#F4F4F4",
+    paddingHorizontal: 14,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
   },
 
   searchInput: {
@@ -1670,10 +1724,17 @@ const styles = StyleSheet.create({
     outlineStyle: "none" as any,
   },
 
+  // =====================================================
+  // USERS FILTER DROPDOWNS
+  // Matches the Events page dropdown style
+  // =====================================================
+
   dropdownContainer: {
     flex: 1,
+    minWidth: 150,
     position: "relative",
-    zIndex: 20,
+    zIndex: 100,
+    overflow: "visible",
   },
 
   dropdownContainerOpen: {
@@ -1682,102 +1743,108 @@ const styles = StyleSheet.create({
 
   filterBox: {
     width: "100%",
-    height: 58,
+    height: 54,
+    borderRadius: 8,
+    backgroundColor: "#F4F4F4",
     borderWidth: 1,
-    borderColor: "#d6d6d6",
-    borderRadius: 6,
-    backgroundColor: "#f7f7f7",
+    borderColor: "#DDDDDD",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     justifyContent: "center",
-    paddingHorizontal: 16,
+    cursor: "pointer",
+  } as any,
+
+  filterBoxOpen: {
+    borderColor: "#34733B",
+    backgroundColor: "#F8FBF7",
   },
 
   filterLabel: {
     fontFamily: "Montserrat_700Bold",
-    color: "#777",
-    marginBottom: 5,
+    color: "#555555",
+    marginBottom: 1,
   },
 
-  filterText: {
-    fontFamily: "Montserrat_700Bold",
-    color: "#000",
-  },
-
-  dropdownValueRow: {
+  filterValueRow: {
+    minHeight: 18,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
   },
 
-  dropdownSelectedText: {
+  filterValue: {
     flex: 1,
+    flexShrink: 1,
+    fontFamily: "Montserrat_700Bold",
+    color: "#252525",
   },
 
-  dropdownArrow: {
-    fontFamily: "Montserrat_700Bold",
-    color: "#000",
-    lineHeight: 18,
+  filterValueOpen: {
+    color: "#34733B",
   },
 
   dropdownMenu: {
     position: "absolute",
-    top: 62,
+    top: 58,
     left: 0,
     right: 0,
-    backgroundColor: "#ffffff",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: "#cfcfcf",
-    borderRadius: 6,
+    borderColor: "#D5D5D5",
     overflow: "hidden",
     zIndex: 2000,
-    elevation: 12,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.16,
-    shadowRadius: 10,
+    elevation: 10,
+    shadowColor: "#000000",
+    shadowOpacity: 0.14,
+    shadowRadius: 9,
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
   },
 
-  dropdownOption: {
-    minHeight: 44,
-    paddingHorizontal: 14,
+  dropdownItem: {
+    minHeight: 42,
     paddingVertical: 11,
-    backgroundColor: "#ffffff",
+    paddingHorizontal: 14,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 10,
+    backgroundColor: "#FFFFFF",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#ECECEC",
+    cursor: "pointer",
+  } as any,
+
+  dropdownItemSelected: {
+    backgroundColor: "#F1F8EE",
   },
 
-  dropdownOptionBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: "#ececec",
-  },
-
-  dropdownOptionSelected: {
-    backgroundColor: "#EEF7EE",
-  },
-
-  dropdownOptionText: {
+  dropdownText: {
     flex: 1,
     fontFamily: "Montserrat_700Bold",
-    color: "#111111",
+    color: "#222222",
   },
 
-  dropdownOptionTextSelected: {
+  dropdownTextSelected: {
     color: "#34733B",
   },
 
   smallButton: {
-    height: 36,
+    height: 38,
     minWidth: 82,
+    paddingHorizontal: 13,
     borderWidth: 1,
-    borderColor: "#34733B",
-    borderRadius: 5,
+    borderColor: "#86BE8D",
+    borderRadius: 8,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-  },
+    gap: 5,
+    cursor: "pointer",
+  } as any,
 
   buttonText: {
     fontFamily: "Montserrat_700Bold",
