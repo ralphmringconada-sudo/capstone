@@ -704,7 +704,7 @@ export default function UsersScreen() {
             <Text style={[styles.th, styles.emailCol, { fontSize: 18 * s }]}>Email</Text>
             <Text style={[styles.th, styles.roleCol, { fontSize: 18 * s }]}>Role</Text>
             <Text style={[styles.th, styles.dateCol, { fontSize: 18 * s }]}>Date Registered</Text>
-            <Text style={[styles.th, styles.actionCol, { fontSize: 18 * s }]}>Action</Text>
+            <Text style={[styles.th, styles.actionCol, { fontSize: 18 * s,  transform: [{ translateX: 85 * s }]}]}>Action</Text>
           </View>
 
           {visibleTableUsers.map((u, index) => {

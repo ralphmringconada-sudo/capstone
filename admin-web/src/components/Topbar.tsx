@@ -2,14 +2,6 @@ import { Pressable, View, Text, StyleSheet } from "react-native";
 import { Bell, Menu, UserCircle } from "lucide-react-native";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 
-/**
- * Purpose: Displays global controls and the identity of the active administrator.
- * How it works:
- * 1. The authentication context supplies the current admin profile.
- * 2. The profile name and role are translated into a readable header identity.
- * Technologies Used: React, React Native Web, Lucide React Native, and React Context.
- * Why this implementation: Persistent identity helps administrators verify which account and role are active.
- */
 export default function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
   const { admin } = useAdminAuth();
 
