@@ -33,7 +33,7 @@ export default function IntroductionScreen() {
             onPress={() => router.push('/login')}
           >
             <Image 
-              source={require('@/assets/images/Login.jpg')} // Path to your local image
+              source={require('@/assets/images/Login.png')} // Path to your local image
               style={styles.buttonImage}
               resizeMode="contain"
             />
@@ -54,7 +54,7 @@ export default function IntroductionScreen() {
               REGISTER 
             </Text> */}
             <Image 
-              source={require('@/assets/images/register.jpg')} // Path to your local image
+              source={require('@/assets/images/register.png')} // Path to your local image
               style={styles.buttonImage}
               resizeMode="contain"
             />
@@ -66,6 +66,7 @@ export default function IntroductionScreen() {
         </View>
 
         <View style={styles.footer}>
+          {/* White Circle Logo Placeholder */}
           <Image
             source={require('@/assets/images/Valencia_Logo.png')}
             style={styles.logoPlaceholder}
