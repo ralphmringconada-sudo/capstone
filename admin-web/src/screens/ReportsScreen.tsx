@@ -7,7 +7,6 @@ import {
   View,
   TouchableOpacity,
   useWindowDimensions,
-  Alert,
   Image,
   Modal,
 } from "react-native";
@@ -15,50 +14,39 @@ import {
   ClipboardList,
   Clock,
   Check,
+  ChevronDown,
   Eye,
-  Trash2,
   Search,
-  Calendar,
   Filter,
   X,
 } from "lucide-react-native";
 import { router } from "expo-router";
 import AdminLayout from "../components/AdminLayout";
 import DashboardCard from "../components/DashboardCard";
+import DateRangeFilter from "@/components/DateRangeFilter";
 import { useAdminData } from "@/hooks/useAdminData";
-import { useAdminAuth } from "@/context/AdminAuthContext";
-import { deleteReport } from "@/services/adminDataService";
 import { resolveReportImageUrls } from "@/services/reportImageService";
+import { isWithinDateRange } from "@/utils/dateRange";
 import { formatDateTime } from "@/utils/format";
 import type { Report } from "@/types/admin";
-import { Dropdown } from "react-native-element-dropdown";
 
 const CATEGORIES = ["All Categories", "Deforestation", "Forest Fires", "Illegal Logging", "Waste Dumping", "Other"];
 const STATUSES = ["All Statuses", "Pending", "In Review", "Resolved", "Rejected"];
-const categoryData = CATEGORIES.map((item) => ({
-  label: item,
-  value: item,
-}));
-
-const statusData = STATUSES.map((item) => ({
-  label: item,
-  value: item,
-}));
 /**
- * Purpose: Enables administrators to search, review, inspect, and delete environmental reports.
+ * Purpose: Enables administrators to search, review, and inspect environmental reports.
  * How it works:
  * 1. Shared Firestore-backed data supplies reports and summary statistics.
  * 2. Memoized text, category, and status filters derive the visible table.
  * 3. Evidence thumbnails are resolved for visible records and opened in a modal.
- * 4. Report details and audited deletion actions are available from each row.
+ * 4. Report details are available from each row (deletion is disabled).
  * Technologies Used: React hooks, React Native Web, Expo Router, Cloud Firestore services, and image URL handling.
  * Why this implementation: A unified workspace supports efficient report triage without duplicating backend state.
  */
 export default function ReportsScreen() {
   const { width, height } = useWindowDimensions();
   const s = Math.min(width / 1920, height / 1080);
-  const { reports, stats, reload } = useAdminData();
-  const { admin } = useAdminAuth();
+  const { reports, stats } = useAdminData();
+  const [openFilter, setOpenFilter] = useState<"category" | "status" | null>(null);
 
   /*
    * Filter state derives the visible report set, menu state controls filter dialogs,
@@ -67,12 +55,13 @@ export default function ReportsScreen() {
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("All Categories");
   const [status, setStatus] = useState("All Statuses");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [viewerUri, setViewerUri] = useState<string | null>(null);
   const [viewerReport, setViewerReport] = useState<Report | null>(null);
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
 
   const filteredReports = useMemo(() => {
-    // Apply all user-selected criteria in one derived list without mutating Firestore data.
     const queryText = search.trim().toLowerCase();
     return reports.filter((report) => {
       const matchesSearch =
@@ -85,9 +74,10 @@ export default function ReportsScreen() {
 
       const matchesCategory = category === "All Categories" || report.category === category;
       const matchesStatus = status === "All Statuses" || report.status === status;
-      return matchesSearch && matchesCategory && matchesStatus;
+      const matchesDate = isWithinDateRange(report.createdAt, fromDate, toDate);
+      return matchesSearch && matchesCategory && matchesStatus && matchesDate;
     });
-  }, [reports, search, category, status]);
+  }, [reports, search, category, status, fromDate, toDate]);
 
   /**
    * Purpose: Resolves and caches a representative evidence image for one report row.
@@ -114,48 +104,18 @@ export default function ReportsScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filteredReports]);
 
-  /**
-   * Purpose: Confirms and executes permanent deletion of an environmental report.
-   * How it works:
-   * 1. An authenticated administrator is required before the confirmation appears.
-   * 2. The destructive alert requires an explicit confirmation.
-   * 3. Firestore deletion and audit logging complete before shared data reloads.
-   * Technologies Used: React Native alerts, Cloud Firestore services, React Context, and asynchronous JavaScript.
-   * Why this implementation: Explicit confirmation and audit attribution reduce untraceable destructive actions.
-   */
-  const handleDelete = (report: Report) => {
-    // The current administrator is required for both authorization context and audit attribution.
-    if (!admin) return;
-    Alert.alert("Delete Report", `Permanently delete "${report.title}"?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          // Delete only after the user confirms the irreversible report action.
-          try {
-            await deleteReport(report.id, admin);
-            await reload();
-          // Keep the table intact and report backend or Firestore failures to the administrator.
-          } catch (err) {
-            Alert.alert("Error", err instanceof Error ? err.message : "Failed to delete report.");
-          }
-        },
-      },
-    ]);
-  };
-
   return (
     <AdminLayout activePage="Reports">
       <ScrollView
-        style={styles.page}
-        contentContainerStyle={{
-          paddingHorizontal: width * 0.025,
-          paddingTop: height * 0.035,
-          paddingBottom: 30,
-        }}
-        showsVerticalScrollIndicator={false}
-      >
+  style={styles.page}
+  contentContainerStyle={{
+    paddingHorizontal: width * 0.025,
+    paddingTop: height * 0.035,
+    paddingBottom: 30,
+  }}
+  showsVerticalScrollIndicator={false}
+  keyboardShouldPersistTaps="handled"
+>
         <Text style={[styles.pageTitle, { fontSize: 42 * s }]}>REPORTS</Text>
         <Text style={[styles.subtitle, { fontSize: 18 * s }]}>
           Manage and review all environmental reports submitted by users
@@ -180,43 +140,47 @@ export default function ReportsScreen() {
             <Search size={20 * s} color="#000" />
           </View>
 
-          <View style={styles.filterBox}>
-            <Dropdown
-              style={styles.dropdown}
-              placeholderStyle={[styles.dropdownPlaceholder, { fontSize: 15 * s }]}
-              selectedTextStyle={[styles.dropdownText, { fontSize: 15 * s }]}
-              data={categoryData}
-              labelField="label"
-              valueField="value"
-              value={category}
-              placeholder="Select Category"
-              onChange={(item) => setCategory(item.value)}
-            />
-          </View>
+          <FilterDropdown
+            label="Category"
+            value={category}
+            options={CATEGORIES}
+            s={s}
+            isOpen={openFilter === "category"}
+            onToggle={() =>
+              setOpenFilter((current) =>
+                current === "category" ? null : "category",
+              )
+            }
+            onClose={() => setOpenFilter(null)}
+            onChange={(value: string) => {
+              setCategory(value);
+            }}
+          />
 
-          <View style={styles.filterBox}>
-            <Dropdown
-              style={styles.dropdown}
-              placeholderStyle={[styles.dropdownPlaceholder, { fontSize: 15 * s }]}
-              selectedTextStyle={[styles.dropdownText, { fontSize: 15 * s }]}
-              data={statusData}
-              labelField="label"
-              valueField="value"
-              value={status}
-              placeholder="Select Status"
-              onChange={(item) => setStatus(item.value)}
-            />
-          </View>
+          <FilterDropdown
+            label="Status"
+            value={status}
+            options={STATUSES}
+            s={s}
+            isOpen={openFilter === "status"}
+            onToggle={() =>
+              setOpenFilter((current) =>
+                current === "status" ? null : "status",
+              )
+            }
+            onClose={() => setOpenFilter(null)}
+            onChange={(value: string) => {
+              setStatus(value);
+            }}
+          />
 
-          <View style={styles.dateBox}>
-            <Text style={[styles.filterLabel, { fontSize: 13 * s }]}>Results</Text>
-            <View style={styles.dateInner}>
-              <Text style={[styles.filterText, { fontSize: 15 * s }]}>
-                {filteredReports.length} of {reports.length}
-              </Text>
-              <Calendar size={18 * s} color="#000" />
-            </View>
-          </View>
+          <DateRangeFilter
+            label="Date Reported"
+            fromDate={fromDate}
+            toDate={toDate}
+            onChangeFrom={setFromDate}
+            onChangeTo={setToDate}
+          />
 
           <View style={styles.buttonColumn}>
             <TouchableOpacity
@@ -225,6 +189,9 @@ export default function ReportsScreen() {
                 setSearch("");
                 setCategory("All Categories");
                 setStatus("All Statuses");
+                setOpenFilter(null);
+                setFromDate("");
+                setToDate("");
               }}
             >
               <Filter size={14 * s} color="#34733B" />
@@ -234,15 +201,17 @@ export default function ReportsScreen() {
         </View>
 
         <View style={[styles.tablePanel, { marginTop: height * 0.02 }]}>
+          <ScrollView horizontal={width < 1100} showsHorizontalScrollIndicator={width < 1100}>
+            <View style={[styles.table, width >= 1100 ? styles.tableFullWidth : null]}>
           <View style={[styles.tableHeader, { height: 48 * s }]}>
             <Text style={[styles.th, styles.idCol, { fontSize: 18 * s }]}>ID</Text>
-            <Text style={[styles.th, styles.detailsCol, { fontSize: 18 * s, transform: [{ translateX: 100* s }] }]}>Report Details</Text>
+            <Text style={[styles.th, styles.detailsCol, { fontSize: 18 * s }]}>Report Details</Text>
             <Text style={[styles.th, styles.locationCol, { fontSize: 18 * s }]}>Location</Text>
             <Text style={[styles.th, styles.categoryCol, { fontSize: 18 * s }]}>Category</Text>
             <Text style={[styles.th, styles.reportedCol, { fontSize: 18 * s }]}>Reported By</Text>
             <Text style={[styles.th, styles.dateCol, { fontSize: 18 * s }]}>Date Reported</Text>
-            <Text style={[styles.th, styles.statusCol, { fontSize: 18 * s }]}>Status</Text>
-            <Text style={[styles.th, styles.actionCol, { fontSize: 18 * s, transform: [{ translateX: 35 * s }] }]}>Action</Text>
+            <Text style={[styles.th, styles.statusCol, { fontSize: 18 * s, transform: [{ translateX: 15 }] }]}>Status</Text>
+            <Text style={[styles.th, styles.actionCol, { fontSize: 18 * s, transform: [{ translateX: 40 }] }]}>Action</Text>
           </View>
 
           {filteredReports.map((report) => {
@@ -251,13 +220,7 @@ export default function ReportsScreen() {
               <View key={report.id} style={[styles.tableRow, { minHeight: 88 * s }]}>
                 <Text style={[styles.td, styles.idCol, { fontSize: 18 * s }]}>#{report.id.slice(0, 8)}</Text>
 
-                <View
-                    style={[
-                      styles.detailsCol,
-                      styles.reportDetails,
-                      { transform: [{ translateX: 80 * s }] },
-                    ]}
-                  >
+                <View style={[styles.detailsCol, styles.reportDetails]}>
                   <TouchableOpacity
                     onPress={() => {
                       if (!thumbnails[report.id]) return;
@@ -305,19 +268,36 @@ export default function ReportsScreen() {
                 </View>
 
                 <View style={[styles.actionCol, styles.actions]}>
-                  <TouchableOpacity
-                    onPress={() => router.navigate({ pathname: "/report-details", params: { id: report.id } })}
-                    style={styles.iconButton}
-                  >
-                    <Eye size={20 * s} color="#000" />
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={() => handleDelete(report)} style={styles.iconButton}>
-                    <Trash2 size={20 * s} color="#D83030" />
-                  </TouchableOpacity>
-                </View>
+  <TouchableOpacity
+    onPress={() =>
+      router.navigate({
+        pathname: "/report-details",
+        params: { id: report.id },
+      })
+    }
+    style={styles.viewReportButton}
+  >
+    <Eye
+      size={14 * s}
+      color="#34733B"
+      strokeWidth={2.2}
+    />
+
+    <Text
+      style={[
+        styles.viewReportButtonText,
+        { fontSize: 15 * s },
+      ]}
+    >
+      View Report
+    </Text>
+  </TouchableOpacity>
+</View>
               </View>
             );
           })}
+            </View>
+          </ScrollView>
 
           <View style={[styles.paginationRow, { padding: 18 * s }]}>
             <Text style={[styles.showing, { fontSize: 16 * s }]}>
@@ -365,6 +345,125 @@ export default function ReportsScreen() {
   );
 }
 
+
+function FilterDropdown({
+  label,
+  value,
+  options,
+  s,
+  isOpen,
+  onToggle,
+  onClose,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  s: number;
+  isOpen: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <View
+      style={[
+        styles.dropdownContainer,
+        isOpen && styles.dropdownContainerOpen,
+      ]}
+    >
+      <TouchableOpacity
+        activeOpacity={0.82}
+        accessibilityRole="button"
+        accessibilityLabel={`${label} filter. Selected: ${value}`}
+        accessibilityState={{ expanded: isOpen }}
+        style={[
+          styles.filterBox,
+          isOpen && styles.filterBoxOpen,
+        ]}
+        onPress={onToggle}
+      >
+        <Text
+          style={[
+            styles.filterLabel,
+            { fontSize: 11 * s },
+          ]}
+        >
+          {label}
+        </Text>
+
+        <View style={styles.filterValueRow}>
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.filterValue,
+              { fontSize: 15 * s },
+              isOpen && styles.filterValueOpen,
+            ]}
+          >
+            {value}
+          </Text>
+
+          <ChevronDown
+            size={16 * s}
+            color={isOpen ? "#34733B" : "#333333"}
+            strokeWidth={2}
+            style={{
+              transform: [
+                {
+                  rotate: isOpen ? "180deg" : "0deg",
+                },
+              ],
+            }}
+          />
+        </View>
+      </TouchableOpacity>
+
+      {isOpen ? (
+        <View style={styles.dropdownMenu}>
+          {options.map((option) => {
+            const selected = option === value;
+
+            return (
+              <TouchableOpacity
+                key={option}
+                activeOpacity={0.75}
+                accessibilityRole="menuitem"
+                style={[
+                  styles.dropdownItem,
+                  selected && styles.dropdownItemSelected,
+                ]}
+                onPress={() => {
+                  onChange(option);
+                  onClose();
+                }}
+              >
+                <Text
+                  style={[
+                    styles.dropdownText,
+                    { fontSize: 16 * s },
+                    selected && styles.dropdownTextSelected,
+                  ]}
+                >
+                  {option}
+                </Text>
+
+                {selected ? (
+                  <Check
+                    size={16 * s}
+                    color="#34733B"
+                    strokeWidth={2.5}
+                  />
+                ) : null}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 /**
  * Purpose: Maps report categories to consistent table badge colors.
  * How it works:
@@ -401,35 +500,62 @@ const styles = StyleSheet.create({
   subtitle: { fontFamily: "Montserrat_700Bold", color: "#555", marginTop: 6 },
   cards: { flexDirection: "row" },
   filterPanel: {
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#d6d6d6",
-    borderRadius: 8,
+    borderColor: "#D3D3D3",
+    borderRadius: 9,
     flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 12,
+    alignItems: "center",
+    gap: 14,
     flexWrap: "wrap",
+    position: "relative",
+    zIndex: 50,
+    overflow: "visible",
   },
   searchBox: {
-    flex: 1.4,
+    flex: 1.15,
     minWidth: 180,
+    height: 54,
     borderWidth: 1,
-    borderColor: "#d6d6d6",
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    height: 48,
+    borderColor: "#DDDDDD",
+    borderRadius: 8,
+    backgroundColor: "#F4F4F4",
+    paddingHorizontal: 14,
     flexDirection: "row",
     alignItems: "center",
   },
   searchInput: { flex: 1, fontFamily: "Montserrat_700Bold", outlineStyle: "none" as any },
+
+  dropdownContainer: {
+    flex: 1,
+    minWidth: 150,
+    position: "relative",
+    zIndex: 100,
+    overflow: "visible",
+  },
+
+  dropdownContainerOpen: {
+    zIndex: 1000,
+  },
+
   filterBox: {
-  minWidth: 180,
-  height: 48,
-  borderWidth: 1,
-  borderColor: "#d6d6d6",
-  borderRadius: 6,
-  paddingHorizontal: 12,
-  justifyContent: "center",
-},
+    width: "100%",
+    height: 54,
+    borderRadius: 8,
+    backgroundColor: "#F4F4F4",
+    borderWidth: 1,
+    borderColor: "#DDDDDD",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    justifyContent: "center",
+    cursor: "pointer",
+  } as any,
+
+  filterBoxOpen: {
+    borderColor: "#34733B",
+    backgroundColor: "#F8FBF7",
+  },
+
   dateBox: {
     minWidth: 160,
     borderWidth: 1,
@@ -438,27 +564,50 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
+  
   dateInner: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   filterLabel: {
-  fontFamily: "Montserrat_700Bold",
-  color: "#777",
-  fontSize: 12,
-  marginBottom: 2,
-},
-  filterText: { fontFamily: "Montserrat_700Bold", color: "#111" },
-  buttonColumn: { justifyContent: "center" },
-  smallButton: {
-    borderWidth: 1,
-    borderColor: "#9DE5A0",
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    height: 40,
+    fontFamily: "Montserrat_700Bold",
+    color: "#555555",
+    marginBottom: 1,
+  },
+
+  filterValueRow: {
+    minHeight: 18,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    justifyContent: "space-between",
+    gap: 8,
   },
+
+  filterValue: {
+    flex: 1,
+    flexShrink: 1,
+    fontFamily: "Montserrat_700Bold",
+    color: "#252525",
+  },
+
+  filterValueOpen: {
+    color: "#34733B",
+  },
+  buttonColumn: { justifyContent: "center" },
+  smallButton: {
+    height: 38,
+    minWidth: 82,
+    paddingHorizontal: 13,
+    borderWidth: 1,
+    borderColor: "#86BE8D",
+    borderRadius: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    cursor: "pointer",
+  } as any,
   buttonText: { fontFamily: "Montserrat_700Bold", color: "#34733B" },
-  tablePanel: { borderWidth: 1, borderColor: "#d6d6d6", borderRadius: 8, overflow: "hidden" },
+  tablePanel: { borderWidth: 1, borderColor: "#d6d6d6", borderRadius: 8, overflow: "hidden", position: "relative", zIndex: 1 },
+  table: { minWidth: 1100 },
+  tableFullWidth: { minWidth: "100%", width: "100%" },
   tableHeader: {
     flexDirection: "row",
     alignItems: "center",
@@ -476,15 +625,88 @@ const styles = StyleSheet.create({
   },
   th: { fontFamily: "Montserrat_700Bold", color: "#111" },
   td: { fontFamily: "Montserrat_700Bold", color: "#222" },
-  idCol: { width: "8%" },
-  detailsCol: { width: "22%" },
-  locationCol: { width: "15%", paddingRight: 15 },
-  categoryCol: { width: "12%", paddingLeft: 10 },
-  reportedCol: { width: "14%" },
-  dateCol: { width: "12%" },
-  statusCol: { width: "10%" },
-  actionCol: { width: "8%" },
-  reportDetails: { flexDirection: "row", alignItems: "center", gap: 10 },
+  idCol: {
+  flex: 0.75,
+  minWidth: 85,
+  paddingRight: 8,
+},
+
+detailsCol: {
+  flex: 1.25,
+  minWidth: 210,
+  paddingLeft: 14,
+  paddingRight: 4,
+},
+
+locationCol: {
+  flex: 1.45,
+  minWidth: 150,
+  paddingLeft: 4,
+  paddingRight: 10,
+},
+
+categoryCol: {
+  flex: 1.1,
+  minWidth: 125,
+},
+
+reportedCol: {
+  flex: 1.3,
+  minWidth: 145,
+},
+
+dateCol: {
+  flex: 1.1,
+  minWidth: 120,
+},
+
+statusCol: {
+  flex: 1,
+  minWidth: 105,
+},
+
+actionCol: {
+  flex: 0.9,
+  minWidth: 115,
+  alignItems: "center",
+  justifyContent: "center",
+},
+
+  reportDetails: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 10,
+},
+
+viewReportButton: {
+  minHeight: 30,
+
+  borderWidth: 1,
+  borderColor: "#4B9B52",
+  borderRadius: 6,
+
+  backgroundColor: "#FFFFFF",
+
+  paddingHorizontal: 9,
+  paddingVertical: 5,
+
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "center",
+
+  gap: 5,
+
+  cursor: "pointer",
+} as any,
+
+viewReportButtonText: {
+  color: "#34733B",
+
+  fontFamily: "Montserrat_700Bold",
+
+  whiteSpace: "nowrap",
+} as any,
+
   imageBox: { backgroundColor: "#ddd", borderRadius: 6, overflow: "hidden" },
   reportTextBox: { flex: 1 },
   reportTitle: { fontFamily: "Montserrat_700Bold", color: "#111" },
@@ -493,7 +715,6 @@ const styles = StyleSheet.create({
   badgeWrap: { alignItems: "flex-start" },
   badge: { borderRadius: 5, overflow: "hidden", fontFamily: "Montserrat_700Bold" },
   actions: { flexDirection: "row", gap: 8 },
-  iconButton: { padding: 6 },
   paginationRow: { flexDirection: "row", justifyContent: "space-between" },
   showing: { fontFamily: "Montserrat_700Bold", color: "#555" },
   menuOverlay: {
@@ -531,19 +752,57 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
 
-dropdown: {
-  flex: 1,
-  justifyContent: "center",
+// =====================================================
+// DROPDOWNS
+// Matches Events / Users
+// =====================================================
+
+dropdownMenu: {
+  position: "absolute",
+  top: 58,
+  left: 0,
+  right: 0,
+  backgroundColor: "#FFFFFF",
+  borderRadius: 8,
+  borderWidth: 1,
+  borderColor: "#D5D5D5",
+  overflow: "hidden",
+  zIndex: 2000,
+  elevation: 10,
+  shadowColor: "#000000",
+  shadowOpacity: 0.14,
+  shadowRadius: 9,
+  shadowOffset: {
+    width: 0,
+    height: 4,
+  },
 },
 
-dropdownPlaceholder: {
-  fontFamily: "Montserrat_700Bold",
-  color: "#111",
+dropdownItem: {
+  minHeight: 42,
+  paddingVertical: 11,
+  paddingHorizontal: 14,
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  backgroundColor: "#FFFFFF",
+  borderBottomWidth: StyleSheet.hairlineWidth,
+  borderBottomColor: "#ECECEC",
+  cursor: "pointer",
+} as any,
+
+dropdownItemSelected: {
+  backgroundColor: "#F1F8EE",
 },
 
 dropdownText: {
+  flex: 1,
   fontFamily: "Montserrat_700Bold",
-  color: "#111",
+  color: "#222222",
+},
+
+dropdownTextSelected: {
+  color: "#34733B",
 },
 
 });

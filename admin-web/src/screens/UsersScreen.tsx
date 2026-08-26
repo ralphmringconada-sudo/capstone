@@ -14,6 +14,7 @@ import {
 import {
   Calendar,
   Check,
+  ChevronDown,
   Eye,
   Filter,
   Search,
@@ -28,6 +29,7 @@ import {
 import { auth } from "@/config/firebase";
 import AdminLayout from "../components/AdminLayout";
 import DashboardCard from "../components/DashboardCard";
+import DateRangeFilter from "@/components/DateRangeFilter";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { useAdminData } from "@/hooks/useAdminData";
 import {
@@ -38,6 +40,7 @@ import {
   updateAdminProfileInfo,
   updateAppUserProfile,
 } from "@/services/adminDataService";
+import { isWithinDateRange } from "@/utils/dateRange";
 import { formatDateTime, getUserDisplayName } from "@/utils/format";
 import type { ActivityLog } from "@/types/admin";
 
@@ -136,6 +139,10 @@ export default function UsersScreen() {
   const [isSendingReset, setIsSendingReset] = useState(false);
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("All Roles");
+  const [statusFilter, setStatusFilter] = useState("All Statuses");
+  const [openFilter, setOpenFilter] = useState<"role" | "status" | null>(null);
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [userPage, setUserPage] = useState(1);
   const [activityPage, setActivityPage] = useState(1);
   const usersPerPage = 6;
@@ -152,15 +159,16 @@ export default function UsersScreen() {
   );
 
   /*
-   * Establish the management boundary once for all profile controls:
-   * any admin may manage citizens, while only a super admin may manage standard admins.
+   * Edit/delete account controls are super-admin only.
+   * Standard admins may view citizen profiles but cannot edit them.
    */
   const selectedRole = selectedUser?.[4];
   const isSelectedCitizen = selectedRole === "User";
   const isSelectedStandardAdmin = selectedRole === "Admin";
   const canManageSelected =
     Boolean(selectedUser) &&
-    (isSelectedCitizen || (isSuperAdmin && isSelectedStandardAdmin));
+    isSuperAdmin &&
+    (isSelectedCitizen || isSelectedStandardAdmin);
 
   /**
    * Purpose: Resolves the contact number for the account currently displayed.
@@ -180,9 +188,14 @@ export default function UsersScreen() {
     return admins.find((item) => item.uid === uid)?.contactNumber || "Not set";
   };
 
-  // Derive visible accounts from search and role criteria while preserving the source list.
+  // Derive visible accounts from search, role, status, and registration date range.
   const filteredTableUsers = useMemo(() => {
     const queryText = search.trim().toLowerCase();
+    const createdAtByUid = new Map<string, string>([
+      ...appUsers.map((user) => [user.uid, user.createdAt] as const),
+      ...admins.map((adminRow) => [adminRow.uid, adminRow.createdAt] as const),
+    ]);
+
     return tableUsers.filter((u) => {
       const matchesSearch =
         !queryText ||
@@ -190,9 +203,15 @@ export default function UsersScreen() {
         u[3].toLowerCase().includes(queryText) ||
         u[2].toLowerCase().includes(queryText);
       const matchesRole = roleFilter === "All Roles" || u[4] === roleFilter;
-      return matchesSearch && matchesRole;
+      const isFlagged = flaggedUserIds.has(u[7]);
+      const matchesStatus =
+        statusFilter === "All Statuses" ||
+        (statusFilter === "Flagged" && isFlagged) ||
+        (statusFilter === "Active" && !isFlagged);
+      const matchesDate = isWithinDateRange(createdAtByUid.get(u[7]), fromDate, toDate);
+      return matchesSearch && matchesRole && matchesStatus && matchesDate;
     });
-  }, [tableUsers, search, roleFilter]);
+  }, [tableUsers, search, roleFilter, statusFilter, fromDate, toDate, appUsers, admins, flaggedUserIds]);
 
   const userPageCount = Math.max(1, Math.ceil(filteredTableUsers.length / usersPerPage));
   const currentUserPage = Math.min(userPage, userPageCount);
@@ -531,6 +550,7 @@ export default function UsersScreen() {
           paddingBottom: 30,
         }}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
         <View style={styles.topRow}>
           <View>
@@ -603,54 +623,88 @@ export default function UsersScreen() {
             <Search size={20 * s} color="#000" />
           </View>
 
-          <TouchableOpacity style={styles.filterBox} onPress={() => {
-            setRoleFilter((prev) => {
-              if (!isSuperAdmin) {
-                return prev === "All Roles" ? "User" : "All Roles";
-              }
-              return prev === "All Roles"
-                ? "User"
-                : prev === "User"
-                  ? "Admin"
-                  : prev === "Admin"
-                    ? "Super Admin"
-                    : "All Roles";
-            });
-            setUserPage(1);
-          }}>
-            <Text style={[styles.filterLabel, { fontSize: 16 * s }]}>Roles</Text>
-            <Text style={[styles.filterText, { fontSize: 16 * s }]}>{roleFilter}⌄</Text>
-          </TouchableOpacity>
+          <FilterDropdown
+            label="Roles"
+            value={roleFilter}
+            options={
+              isSuperAdmin
+                ? ["All Roles", "User", "Admin", "Super Admin"]
+                : ["All Roles", "User"]
+            }
+            s={s}
+            isOpen={openFilter === "role"}
+            onToggle={() =>
+              setOpenFilter((current) =>
+                current === "role" ? null : "role",
+              )
+            }
+            onClose={() => setOpenFilter(null)}
+            onChange={(value: string) => {
+              setRoleFilter(value);
+              setUserPage(1);
+            }}
+          />
 
-          <View style={styles.filterBox}>
-            <Text style={[styles.filterLabel, { fontSize: 16 * s }]}>Status</Text>
-            <Text style={[styles.filterText, { fontSize: 16 * s }]}>All Statuses⌄</Text>
-          </View>
+          <FilterDropdown
+            label="Status"
+            value={statusFilter}
+            options={["All Statuses", "Active", "Flagged"]}
+            s={s}
+            isOpen={openFilter === "status"}
+            onToggle={() =>
+              setOpenFilter((current) =>
+                current === "status" ? null : "status",
+              )
+            }
+            onClose={() => setOpenFilter(null)}
+            onChange={(value: string) => {
+              setStatusFilter(value);
+              setUserPage(1);
+            }}
+          />
 
-          <View style={styles.dateBox}>
-            <Text style={[styles.filterLabel, { fontSize: 16 * s }]}>Date Registered</Text>
-            <View style={styles.dateInner}>
-              <Text style={[styles.filterText, { fontSize: 16 * s }]}>
-                May 20, 2026-May 26, 2026
-              </Text>
-              <Calendar size={18 * s} color="#000" />
-            </View>
-          </View>
+          <DateRangeFilter
+            label="Date Registered"
+            fromDate={fromDate}
+            toDate={toDate}
+            onChangeFrom={(value) => {
+              setFromDate(value);
+              setUserPage(1);
+            }}
+            onChangeTo={(value) => {
+              setToDate(value);
+              setUserPage(1);
+            }}
+            style={{ flex: 1.6 }}
+          />
 
-          <TouchableOpacity style={styles.smallButton}>
+          <TouchableOpacity
+            style={styles.smallButton}
+            onPress={() => {
+              setSearch("");
+              setRoleFilter("All Roles");
+              setStatusFilter("All Statuses");
+              setOpenFilter(null);
+              setFromDate("");
+              setToDate("");
+              setUserPage(1);
+            }}
+          >
             <Filter size={14 * s} color="#34733B" />
-            <Text style={[styles.buttonText, { fontSize: 16 * s }]}>Filter</Text>
+            <Text style={[styles.buttonText, { fontSize: 16 * s }]}>Reset</Text>
           </TouchableOpacity>
         </View>
 
         <View style={[styles.tablePanel, { marginTop: height * 0.02 }]}>
+          <ScrollView horizontal={width < 1100} showsHorizontalScrollIndicator={width < 1100}>
+            <View style={[styles.table, width >= 1100 ? styles.tableFullWidth : null]}>
           <View style={[styles.tableHeader, { height: 48 * s }]}>
             <Text style={[styles.th, styles.idCol, { fontSize: 18 * s }]}>ID</Text>
             <Text style={[styles.th, styles.userCol, { fontSize: 18 * s }]}>User</Text>
             <Text style={[styles.th, styles.emailCol, { fontSize: 18 * s }]}>Email</Text>
             <Text style={[styles.th, styles.roleCol, { fontSize: 18 * s }]}>Role</Text>
             <Text style={[styles.th, styles.dateCol, { fontSize: 18 * s }]}>Date Registered</Text>
-            <Text style={[styles.th, styles.actionCol, { fontSize: 18 * s, transform: [{ translateX: 12 * s }] }]}>Action</Text>
+            <Text style={[styles.th, styles.actionCol, { fontSize: 18 * s,  transform: [{ translateX: 85 * s }]}]}>Action</Text>
           </View>
 
           {visibleTableUsers.map((u, index) => {
@@ -740,6 +794,8 @@ export default function UsersScreen() {
               </View>
             );
           })}
+            </View>
+          </ScrollView>
 
           <View style={[styles.paginationRow, { padding: 18 * s }]}>
             <Text style={[styles.showing, { fontSize: 16 * s }]}>
@@ -1396,6 +1452,124 @@ export default function UsersScreen() {
   );
 }
 
+function FilterDropdown({
+  label,
+  value,
+  options,
+  s,
+  isOpen,
+  onToggle,
+  onClose,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: string[];
+  s: number;
+  isOpen: boolean;
+  onToggle: () => void;
+  onClose: () => void;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <View
+      style={[
+        styles.dropdownContainer,
+        isOpen && styles.dropdownContainerOpen,
+      ]}
+    >
+      <TouchableOpacity
+        activeOpacity={0.82}
+        accessibilityRole="button"
+        accessibilityLabel={`${label} filter. Selected: ${value}`}
+        accessibilityState={{ expanded: isOpen }}
+        style={[
+          styles.filterBox,
+          isOpen && styles.filterBoxOpen,
+        ]}
+        onPress={onToggle}
+      >
+        <Text
+          style={[
+            styles.filterLabel,
+            { fontSize: 11 * s },
+          ]}
+        >
+          {label}
+        </Text>
+
+        <View style={styles.filterValueRow}>
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.filterValue,
+              { fontSize: 16 * s },
+              isOpen && styles.filterValueOpen,
+            ]}
+          >
+            {value}
+          </Text>
+
+          <ChevronDown
+            size={16 * s}
+            color={isOpen ? "#34733B" : "#333333"}
+            strokeWidth={2}
+            style={{
+              transform: [
+                {
+                  rotate: isOpen ? "180deg" : "0deg",
+                },
+              ],
+            }}
+          />
+        </View>
+      </TouchableOpacity>
+
+      {isOpen ? (
+        <View style={styles.dropdownMenu}>
+          {options.map((option) => {
+            const selected = option === value;
+
+            return (
+              <TouchableOpacity
+                key={option}
+                activeOpacity={0.75}
+                accessibilityRole="menuitem"
+                style={[
+                  styles.dropdownItem,
+                  selected && styles.dropdownItemSelected,
+                ]}
+                onPress={() => {
+                  onChange(option);
+                  onClose();
+                }}
+              >
+                <Text
+                  style={[
+                    styles.dropdownText,
+                    { fontSize: 16 * s },
+                    selected && styles.dropdownTextSelected,
+                  ]}
+                >
+                  {option}
+                </Text>
+
+                {selected ? (
+                  <Check
+                    size={16 * s}
+                    color="#34733B"
+                    strokeWidth={2.5}
+                  />
+                ) : null}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 /**
  * Purpose: Renders a consistent labeled field for administrator creation forms.
  * How it works:
@@ -1467,27 +1641,12 @@ function ProfileInfoItem({ icon: Icon, label, value, s }: any) {
   );
 }
 
-/**
- * Purpose: Maps an account role to a consistent profile and table badge.
- * How it works:
- * 1. Super-admin and standard-admin roles receive dedicated colors.
- * 2. Citizen users receive the default role presentation.
- * Technologies Used: TypeScript conditionals and React Native style objects.
- * Why this implementation: Visual role distinction supports faster privilege recognition.
- */
 function roleColor(role: string) {
   if (role === "Admin") return { backgroundColor: "#C7DDFF", color: "#315BC9" };
   return { backgroundColor: "#BFEBC5", color: "#168A18" };
 }
 
-/**
- * Purpose: Maps report status values shown in account activity to semantic colors.
- * How it works:
- * 1. Pending, in-review, and resolved statuses select dedicated styles.
- * 2. Remaining statuses use the rejection style.
- * Technologies Used: TypeScript conditionals and React Native style objects.
- * Why this implementation: The same workflow meaning remains recognizable across modules.
- */
+
 function statusColor(status: string) {
   if (status === "Pending") return { backgroundColor: "#FFF0B8", color: "#D99A00" };
   if (status === "In Review") return { backgroundColor: "#C7DDFF", color: "#315BC9" };
@@ -1532,25 +1691,30 @@ const styles = StyleSheet.create({
   },
 
   filterPanel: {
-    backgroundColor: "#fff",
+    backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#d6d6d6",
-    borderRadius: 8,
+    borderColor: "#D3D3D3",
+    borderRadius: 9,
     flexDirection: "row",
     alignItems: "center",
     gap: 14,
+    flexWrap: "wrap",
+    position: "relative",
+    zIndex: 50,
+    overflow: "visible",
   },
 
   searchBox: {
-    flex: 1.1,
-    height: 58,
+    flex: 1.15,
+    minWidth: 180,
+    height: 54,
     borderWidth: 1,
-    borderColor: "#d6d6d6",
-    borderRadius: 6,
-    backgroundColor: "#f7f7f7",
+    borderColor: "#DDDDDD",
+    borderRadius: 8,
+    backgroundColor: "#F4F4F4",
+    paddingHorizontal: 14,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
   },
 
   searchInput: {
@@ -1560,56 +1724,127 @@ const styles = StyleSheet.create({
     outlineStyle: "none" as any,
   },
 
-  filterBox: {
+  // =====================================================
+  // USERS FILTER DROPDOWNS
+  // Matches the Events page dropdown style
+  // =====================================================
+
+  dropdownContainer: {
     flex: 1,
-    height: 58,
-    borderWidth: 1,
-    borderColor: "#d6d6d6",
-    borderRadius: 6,
-    backgroundColor: "#f7f7f7",
-    justifyContent: "center",
-    paddingHorizontal: 16,
+    minWidth: 150,
+    position: "relative",
+    zIndex: 100,
+    overflow: "visible",
   },
 
-  dateBox: {
-    flex: 1.25,
-    height: 58,
-    borderWidth: 1,
-    borderColor: "#d6d6d6",
-    borderRadius: 6,
-    backgroundColor: "#f7f7f7",
-    justifyContent: "center",
-    paddingHorizontal: 16,
+  dropdownContainerOpen: {
+    zIndex: 1000,
   },
 
-  dateInner: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
+  filterBox: {
+    width: "100%",
+    height: 54,
+    borderRadius: 8,
+    backgroundColor: "#F4F4F4",
+    borderWidth: 1,
+    borderColor: "#DDDDDD",
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    justifyContent: "center",
+    cursor: "pointer",
+  } as any,
+
+  filterBoxOpen: {
+    borderColor: "#34733B",
+    backgroundColor: "#F8FBF7",
   },
 
   filterLabel: {
     fontFamily: "Montserrat_700Bold",
-    color: "#777",
-    marginBottom: 5,
+    color: "#555555",
+    marginBottom: 1,
   },
 
-  filterText: {
+  filterValueRow: {
+    minHeight: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+
+  filterValue: {
+    flex: 1,
+    flexShrink: 1,
     fontFamily: "Montserrat_700Bold",
-    color: "#000",
+    color: "#252525",
+  },
+
+  filterValueOpen: {
+    color: "#34733B",
+  },
+
+  dropdownMenu: {
+    position: "absolute",
+    top: 58,
+    left: 0,
+    right: 0,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#D5D5D5",
+    overflow: "hidden",
+    zIndex: 2000,
+    elevation: 10,
+    shadowColor: "#000000",
+    shadowOpacity: 0.14,
+    shadowRadius: 9,
+    shadowOffset: {
+      width: 0,
+      height: 4,
+    },
+  },
+
+  dropdownItem: {
+    minHeight: 42,
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "#FFFFFF",
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: "#ECECEC",
+    cursor: "pointer",
+  } as any,
+
+  dropdownItemSelected: {
+    backgroundColor: "#F1F8EE",
+  },
+
+  dropdownText: {
+    flex: 1,
+    fontFamily: "Montserrat_700Bold",
+    color: "#222222",
+  },
+
+  dropdownTextSelected: {
+    color: "#34733B",
   },
 
   smallButton: {
-    height: 36,
+    height: 38,
     minWidth: 82,
+    paddingHorizontal: 13,
     borderWidth: 1,
-    borderColor: "#34733B",
-    borderRadius: 5,
+    borderColor: "#86BE8D",
+    borderRadius: 8,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 6,
-  },
+    gap: 5,
+    cursor: "pointer",
+  } as any,
 
   buttonText: {
     fontFamily: "Montserrat_700Bold",
@@ -1622,7 +1857,12 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: "hidden",
     backgroundColor: "#fff",
+    position: "relative",
+    zIndex: 1,
   },
+
+  table: { minWidth: 980 },
+  tableFullWidth: { minWidth: "100%", width: "100%" },
 
   tableHeader: {
     backgroundColor: "#ffffff",
@@ -1651,12 +1891,12 @@ const styles = StyleSheet.create({
     color: "#000",
   },
 
-  idCol: { width: "14%" },
-  userCol: { width: "24%" },
-  emailCol: { width: "22%" },
-  roleCol: { width: "12%" },
-  dateCol: { width: "16%" },
-  actionCol: { width: "12%" },
+  idCol: { flex: 0.8, minWidth: 90 },
+  userCol: { flex: 1.8, minWidth: 200 },
+  emailCol: { flex: 1.6, minWidth: 180 },
+  roleCol: { flex: 1, minWidth: 120 },
+  dateCol: { flex: 1.2, minWidth: 140 },
+  actionCol: { flex: 1.4, minWidth: 180 },
 
   userInfo: {
     flexDirection: "row",

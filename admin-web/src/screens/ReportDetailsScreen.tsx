@@ -1,5 +1,16 @@
 import { useEffect, useState } from "react";
-import { ScrollView, StyleSheet, Text, View, Image, useWindowDimensions, TouchableOpacity, ActivityIndicator, Linking } from "react-native";
+import {
+  Alert,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  Image,
+  useWindowDimensions,
+  TouchableOpacity,
+  ActivityIndicator,
+  Linking,
+} from "react-native";
 import {
   ArrowLeft,
   ClipboardList,
@@ -141,25 +152,11 @@ export default function ReportDetailsScreen() {
    * Technologies Used: React state, Cloud Firestore services, React Context, and asynchronous JavaScript.
    * Why this implementation: Reloading from the data source confirms the persisted moderation result.
    */
-  const handleStatusUpdate = async (status: Report["status"], details: string) => {
-    // Require both the target record and actor before a consequential report update.
+  const applyStatusUpdate = async (status: Report["status"], details: string) => {
     if (!report || !admin || isUpdating) return;
-
-    // Terminal statuses cannot be changed again.
-    if (report.status === "Resolved" || report.status === "Rejected") {
-      setError("This report is already closed and cannot be updated.");
-      return;
-    }
-
-    // In Review can only move forward to Resolved or Rejected.
-    if (report.status === "In Review" && status === "In Review") {
-      setError("This report is already in review.");
-      return;
-    }
 
     setIsUpdating(true);
     setError("");
-    // Persist the audited status decision before replacing the local report snapshot.
     try {
       await updateReportStatus(report.id, status, admin, details);
       const refreshed = await fetchReportById(report.id);
@@ -167,12 +164,49 @@ export default function ReportDetailsScreen() {
       if (refreshed) {
         setImageUrls(await resolveReportImageUrls(refreshed));
       }
-    // Leave the current evidence visible while reporting a failed moderation action.
+      if (typeof window !== "undefined" && typeof window.alert === "function") {
+        window.alert(`Status updated: report marked as ${status}.`);
+      } else {
+        Alert.alert("Status updated", `Report marked as ${status}.`);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update report.");
     } finally {
       setIsUpdating(false);
     }
+  };
+
+  const handleStatusUpdate = (status: Report["status"], details: string) => {
+    if (!report || !admin || isUpdating) return;
+
+    if (report.status === "Resolved" || report.status === "Rejected") {
+      setError("This report is already closed and cannot be updated.");
+      return;
+    }
+
+    if (report.status === "In Review" && status === "In Review") {
+      setError("This report is already in review.");
+      return;
+    }
+
+    const title = "Confirm status change";
+    const message = `Mark this report as "${status}"?`;
+    const run = () => {
+      void applyStatusUpdate(status, details);
+    };
+
+    // Prefer window.confirm on web so the popup is reliable in browsers.
+    if (typeof window !== "undefined" && typeof window.confirm === "function") {
+      if (window.confirm(`${title}\n\n${message}`)) {
+        run();
+      }
+      return;
+    }
+
+    Alert.alert(title, message, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Confirm", onPress: run },
+    ]);
   };
 
   if (isLoading) {
@@ -300,7 +334,7 @@ export default function ReportDetailsScreen() {
                     <View
                       style={[
                         styles.dot,
-                        item.active ? styles.activeDot : styles.inactiveDot,
+                        historyDotColor(item.status),
                       ]}
                     />
                   </View>
@@ -422,30 +456,6 @@ export default function ReportDetailsScreen() {
                   disabled={isUpdating}
                 />
               ) : null}
-
-              <ActionButton
-                text="Delete Report"
-                color="#8B1E1E"
-                icon={X}
-                s={s}
-                onPress={async () => {
-                  // Require an existing report and authenticated audit actor before deletion.
-                  if (!report || !admin || isUpdating) return;
-                  setIsUpdating(true);
-                  try {
-                    // Load and execute the Firestore deletion service, then leave the removed record.
-                    const { deleteReport } = await import("@/services/adminDataService");
-                    await deleteReport(report.id, admin);
-                    router.replace("/reports");
-                  // Preserve the detail view and present any deletion or audit failure.
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : "Failed to delete report.");
-                  } finally {
-                    setIsUpdating(false);
-                  }
-                }}
-                disabled={isUpdating}
-              />
             </View>
           </View>
         </View>
@@ -524,6 +534,20 @@ function historyBadgeColor(status: string) {
   if (status === "In Review") return styles.reviewBadge;
   if (status === "Resolved") return styles.resolvedBadge;
   return styles.rejectedBadge;
+}
+
+/** Timeline dots use the same semantic colors as status badges. */
+function historyDotColor(status: string) {
+  if (status === "Pending") {
+    return { backgroundColor: "#F5B351", borderColor: "#E39A2E" };
+  }
+  if (status === "In Review") {
+    return { backgroundColor: "#315BC9", borderColor: "#259BEF" };
+  }
+  if (status === "Resolved") {
+    return { backgroundColor: "#168A18", borderColor: "#20B83B" };
+  }
+  return { backgroundColor: "#D83030", borderColor: "#B71C1C" };
 }
 
 const styles = StyleSheet.create({
@@ -681,15 +705,7 @@ historyRemarksCol: {
     width: 14,
     height: 14,
     borderRadius: 7,
-    borderWidth: 1,
-  },
-  activeDot: {
-    backgroundColor: "#F5B351",
-    borderColor: "#E39A2E",
-  },
-  inactiveDot: {
-    backgroundColor: "#fff",
-    borderColor: "#aaa",
+    borderWidth: 2,
   },
   historyText: {
     flex: 1,
