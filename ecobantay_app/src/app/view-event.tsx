@@ -73,7 +73,8 @@ export default function ViewEventScreen() {
   }, [id, user?.uid]);
 
   const isOwner = !!(event && user?.uid && event.submittedByUid === user.uid);
-  const canEdit = isOwner && event?.status === 'Pending';
+  // Removed the 'Pending' status restriction so the owner can always edit/delete
+  const canEdit = isOwner;
   const canJoin =
     !!event &&
     !isOwner &&
@@ -98,7 +99,7 @@ export default function ViewEventScreen() {
 
   const handleDelete = () => {
     if (!event || !user?.uid) return;
-    Alert.alert('Delete Event', 'Are you sure you want to delete this pending event?', [
+    Alert.alert('Delete Event', 'Are you sure you want to delete this event?', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -493,16 +494,20 @@ const styles = StyleSheet.create({
     lineHeight: 24,
   },
   actionButtonsContainer: { width: '100%', marginTop: 8 },
+  // Updated actionButton style to match the asymmetrical borders of ViewReportScreen
   actionButton: {
     width: '100%',
     height: 52,
-    borderRadius: 8,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 2,
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
   joinButton: { backgroundColor: '#375e55' },
   leaveButton: { backgroundColor: '#6b7c74' },
-  editButton: { backgroundColor: '#375e55' },
+  editButton: { backgroundColor: '#3B703C' },
   deleteButton: { backgroundColor: '#e74c3c' },
   actionButtonText: {
     fontFamily: 'Montserrat-Bold',

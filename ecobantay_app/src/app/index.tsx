@@ -44,15 +44,6 @@ export default function IntroductionScreen() {
             style={[styles.button, styles.buttonMargin]}
             onPress={() => router.push('/signup')}
           >
-            {/* <Text
-              style={styles.buttonText}
-              numberOfLines={1}
-              allowFontScaling={false}
-              android_hyphenationFrequency="none"
-              textBreakStrategy="simple"
-            >
-              REGISTER 
-            </Text> */}
             <Image 
               source={require('@/assets/images/register.png')} // Path to your local image
               style={styles.buttonImage}
