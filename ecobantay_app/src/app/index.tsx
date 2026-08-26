@@ -30,14 +30,11 @@ export default function IntroductionScreen() {
             style={styles.button}
             onPress={() => router.push('/login')}
           >
-            <Text
-              style={styles.buttonText}
-              numberOfLines={1}
-              allowFontScaling={false}
-              android_hyphenationFrequency="none"
-            >
-              LOGIN
-            </Text>
+            <Image 
+              source={require('@/assets/images/Login.png')} // Path to your local image
+              style={styles.buttonImage}
+              resizeMode="contain"
+            />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -51,8 +48,13 @@ export default function IntroductionScreen() {
               allowFontScaling={false}
               android_hyphenationFrequency="none"
             >
-              REGISTER
-            </Text>
+              REGISTER 
+            </Text> */}
+            <Image 
+              source={require('@/assets/images/register.png')} // Path to your local image
+              style={styles.buttonImage}
+              resizeMode="contain"
+            />
           </TouchableOpacity>
 
           <Text style={styles.tagline}>
