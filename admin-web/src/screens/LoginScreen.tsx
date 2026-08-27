@@ -11,7 +11,7 @@ import {
   View,
 } from "react-native";
 import Svg, { Polygon } from "react-native-svg";
-import { Eye, EyeOff, Lock, User } from "lucide-react-native";
+import { CircleCheckBig, Eye, EyeOff, Lock, Mail, Send, ShieldCheck, User, X } from "lucide-react-native";
 import {
   useFonts,
   Montserrat_700Bold,
@@ -108,6 +108,13 @@ export default function LoginScreen() {
    * Technologies Used: Firebase Authentication, React state, and asynchronous JavaScript.
    * Why this implementation: Provider-managed recovery avoids storing or transmitting replacement passwords.
    */
+  const closeForgotPassword = () => {
+    if (isSendingReset) return;
+    setForgotOpen(false);
+    setForgotError("");
+    setForgotSuccess("");
+  };
+
   const handleForgotPassword = async () => {
     setForgotError("");
     setForgotSuccess("");
@@ -182,10 +189,14 @@ export default function LoginScreen() {
         <Pressable
           onPress={() => {
             setForgotEmail(email);
-            setForgotOpen(true);
             setForgotError("");
             setForgotSuccess("");
+            setForgotOpen(true);
           }}
+          style={({ pressed }) => [
+            styles.forgotButton,
+            pressed && styles.forgotButtonPressed,
+          ]}
         >
           <Text style={styles.forgot}>Forgot Password?</Text>
         </Pressable>
@@ -203,41 +214,167 @@ export default function LoginScreen() {
         </Pressable>
       </View>
 
-      <Modal transparent visible={forgotOpen} animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Reset Password</Text>
-            <Text style={styles.modalSubtitle}>
-              Enter your admin email and we will send a Firebase reset link.
-            </Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Admin email"
-              autoCapitalize="none"
-              keyboardType="email-address"
-              value={forgotEmail}
-              onChangeText={setForgotEmail}
-            />
-            {forgotError ? <Text style={styles.modalError}>{forgotError}</Text> : null}
-            {forgotSuccess ? <Text style={styles.modalSuccess}>{forgotSuccess}</Text> : null}
-            <View style={styles.modalActions}>
-              <Pressable onPress={() => setForgotOpen(false)} style={styles.modalCancel}>
-                <Text style={styles.modalCancelText}>Close</Text>
-              </Pressable>
-              <Pressable
-                onPress={handleForgotPassword}
-                style={styles.modalConfirm}
-                disabled={isSendingReset}
-              >
-                {isSendingReset ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.modalConfirmText}>Send Link</Text>
-                )}
-              </Pressable>
-            </View>
-          </View>
-        </View>
+      <Modal
+        transparent
+        visible={forgotOpen}
+        animationType="fade"
+        onRequestClose={closeForgotPassword}
+      >
+        <Pressable style={styles.modalOverlay} onPress={closeForgotPassword}>
+          <Pressable
+            style={styles.modalCard}
+            onPress={() => {
+              // Prevent clicks inside the card from closing the modal.
+            }}
+          >
+            <Pressable
+              onPress={closeForgotPassword}
+              disabled={isSendingReset}
+              style={({ pressed }) => [
+                styles.modalCloseButton,
+                pressed && !isSendingReset && styles.modalCloseButtonPressed,
+                isSendingReset && styles.modalCloseButtonDisabled,
+              ]}
+              hitSlop={10}
+            >
+              <X size={20} color="#4F5F50" strokeWidth={2.4} />
+            </Pressable>
+
+            {forgotSuccess ? (
+              <View style={styles.resetSuccessContent}>
+                <View style={styles.successIconCircle}>
+                  <CircleCheckBig size={46} color="#2E8B3C" strokeWidth={2.1} />
+                </View>
+
+                <Text style={styles.resetSuccessTitle}>CHECK YOUR EMAIL</Text>
+
+                <Text style={styles.resetSuccessSubtitle}>
+                  We sent a password reset link to
+                </Text>
+
+                <View style={styles.sentEmailChip}>
+                  <Mail size={17} color="#34733B" strokeWidth={2.2} />
+                  <Text numberOfLines={1} style={styles.sentEmailText}>
+                    {forgotEmail.trim()}
+                  </Text>
+                </View>
+
+                <View style={styles.successInfoBox}>
+                  <Text style={styles.successInfoText}>
+                    Open the email and follow the secure link to create a new password.
+                    If you do not see it, check your spam or junk folder.
+                  </Text>
+                </View>
+
+                <Pressable
+                  onPress={closeForgotPassword}
+                  style={({ pressed }) => [
+                    styles.doneButton,
+                    pressed && styles.primaryButtonPressed,
+                  ]}
+                >
+                  <Text style={styles.doneButtonText}>DONE</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <>
+                <View style={styles.resetHeader}>
+                  <View style={styles.resetIconCircle}>
+                    <ShieldCheck size={34} color="#34733B" strokeWidth={2.15} />
+                  </View>
+
+                  <Text style={styles.modalTitle}>RESET PASSWORD</Text>
+
+                  <Text style={styles.modalSubtitle}>
+                    Enter the email connected to your administrator account.
+                    We will send you a secure password reset link.
+                  </Text>
+                </View>
+
+                <View style={styles.resetForm}>
+                  <Text style={styles.modalInputLabel}>EMAIL ADDRESS</Text>
+
+                  <View
+                    style={[
+                      styles.modalInputBox,
+                      forgotError ? styles.modalInputBoxError : null,
+                    ]}
+                  >
+                    <Mail
+                      size={20}
+                      color={forgotError ? "#A93131" : "#5C6B5D"}
+                      strokeWidth={2.1}
+                    />
+
+                    <TextInput
+                      style={styles.modalInput}
+                      placeholder="admin@example.com"
+                      placeholderTextColor="#8A968B"
+                      autoCapitalize="none"
+                      keyboardType="email-address"
+                      value={forgotEmail}
+                      onChangeText={(value) => {
+                        setForgotEmail(value);
+                        if (forgotError) setForgotError("");
+                      }}
+                      editable={!isSendingReset}
+                      autoFocus
+                    />
+                  </View>
+
+                  {forgotError ? (
+                    <View style={styles.modalErrorBox}>
+                      <Text style={styles.modalError}>{forgotError}</Text>
+                    </View>
+                  ) : null}
+
+                  <View style={styles.resetHintBox}>
+                    <Lock size={17} color="#34733B" strokeWidth={2.1} />
+                    <Text style={styles.resetHintText}>
+                      For security, the password itself is never shown or changed inside this page.
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.modalActions}>
+                  <Pressable
+                    onPress={closeForgotPassword}
+                    disabled={isSendingReset}
+                    style={({ pressed }) => [
+                      styles.modalCancel,
+                      pressed && !isSendingReset && styles.secondaryButtonPressed,
+                      isSendingReset && styles.buttonDisabled,
+                    ]}
+                  >
+                    <Text style={styles.modalCancelText}>CANCEL</Text>
+                  </Pressable>
+
+                  <Pressable
+                    onPress={handleForgotPassword}
+                    disabled={isSendingReset}
+                    style={({ pressed }) => [
+                      styles.modalConfirm,
+                      pressed && !isSendingReset && styles.primaryButtonPressed,
+                      isSendingReset && styles.buttonDisabled,
+                    ]}
+                  >
+                    {isSendingReset ? (
+                      <>
+                        <ActivityIndicator color="#FFFFFF" size="small" />
+                        <Text style={styles.modalConfirmText}>SENDING...</Text>
+                      </>
+                    ) : (
+                      <>
+                        <Send size={17} color="#FFFFFF" strokeWidth={2.3} />
+                        <Text style={styles.modalConfirmText}>SEND RESET LINK</Text>
+                      </>
+                    )}
+                  </Pressable>
+                </View>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
       </Modal>
     </View>
   );
@@ -300,11 +437,17 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     textAlign: "center",
   },
-  forgot: {
+  forgotButton: {
     width: 470,
-    textAlign: "right",
     marginTop: -16,
     marginBottom: 28,
+    alignItems: "flex-end",
+  },
+  forgotButtonPressed: {
+    opacity: 0.65,
+  },
+  forgot: {
+    textAlign: "right",
     fontFamily: "Montserrat_700Bold",
     color: "#005B1A",
     fontSize: 14,
@@ -327,72 +470,278 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.4)",
+    backgroundColor: "rgba(15, 28, 16, 0.48)",
     alignItems: "center",
     justifyContent: "center",
+    paddingHorizontal: 20,
   },
   modalCard: {
-    width: 420,
-    backgroundColor: "#fff",
-    borderRadius: 12,
-    padding: 24,
+    width: "92%",
+    maxWidth: 500,
+    minHeight: 420,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    paddingHorizontal: 30,
+    paddingTop: 30,
+    paddingBottom: 28,
+    position: "relative",
+    borderWidth: 1,
+    borderColor: "#DCE7D8",
+    shadowColor: "#000000",
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.2,
+    shadowRadius: 24,
+    elevation: 18,
+  },
+  modalCloseButton: {
+    position: "absolute",
+    top: 16,
+    right: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: "#F1F5EF",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 10,
+    cursor: "pointer",
+  } as any,
+  modalCloseButtonPressed: {
+    opacity: 0.65,
+  },
+  modalCloseButtonDisabled: {
+    opacity: 0.4,
+  },
+  resetHeader: {
+    alignItems: "center",
+    paddingHorizontal: 12,
+  },
+  resetIconCircle: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: "#EAF5E5",
+    borderWidth: 1,
+    borderColor: "#D2E8CB",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
   },
   modalTitle: {
     fontFamily: "Montserrat_800ExtraBold",
-    fontSize: 22,
-    color: "#005B1A",
-    marginBottom: 8,
+    fontSize: 23,
+    color: "#145B22",
+    textAlign: "center",
+    letterSpacing: 0.5,
   },
   modalSubtitle: {
+    marginTop: 9,
+    maxWidth: 390,
     fontFamily: "Montserrat_700Bold",
-    fontSize: 14,
-    color: "#555",
-    marginBottom: 16,
+    fontSize: 13,
+    lineHeight: 19,
+    color: "#5F6B60",
+    textAlign: "center",
+  },
+  resetForm: {
+    marginTop: 25,
+  },
+  modalInputLabel: {
+    fontFamily: "Montserrat_800ExtraBold",
+    fontSize: 11,
+    color: "#344735",
+    letterSpacing: 0.6,
+    marginBottom: 7,
+  },
+  modalInputBox: {
+    height: 52,
+    borderWidth: 1,
+    borderColor: "#C9D3C7",
+    borderRadius: 9,
+    backgroundColor: "#FAFCF9",
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  modalInputBoxError: {
+    borderColor: "#B64646",
+    backgroundColor: "#FFF9F9",
   },
   modalInput: {
-    borderWidth: 1,
-    borderColor: "#d6d6d6",
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    flex: 1,
+    height: "100%",
     fontFamily: "Montserrat_700Bold",
-    marginBottom: 12,
+    fontSize: 14,
+    color: "#243225",
     outlineStyle: "none" as any,
   },
-  modalError: {
-    color: "#8B1E1E",
-    fontFamily: "Montserrat_700Bold",
-    marginBottom: 8,
+  modalErrorBox: {
+    marginTop: 8,
+    paddingHorizontal: 11,
+    paddingVertical: 9,
+    borderRadius: 7,
+    backgroundColor: "#FFF0F0",
+    borderWidth: 1,
+    borderColor: "#F1CACA",
   },
-  modalSuccess: {
-    color: "#168A18",
+  modalError: {
+    color: "#9A2E2E",
     fontFamily: "Montserrat_700Bold",
-    marginBottom: 8,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  resetHintBox: {
+    marginTop: 13,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    borderRadius: 8,
+    backgroundColor: "#F2F8EF",
+    borderWidth: 1,
+    borderColor: "#DCEBD7",
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 9,
+  },
+  resetHintText: {
+    flex: 1,
+    color: "#536255",
+    fontFamily: "Montserrat_700Bold",
+    fontSize: 11,
+    lineHeight: 16,
   },
   modalActions: {
+    marginTop: 24,
     flexDirection: "row",
     justifyContent: "flex-end",
-    gap: 12,
-    marginTop: 8,
+    gap: 10,
   },
   modalCancel: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
+    minWidth: 105,
+    height: 42,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: "#AFC0AD",
+    borderRadius: 8,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+  } as any,
   modalCancelText: {
-    fontFamily: "Montserrat_700Bold",
-    color: "#666",
+    fontFamily: "Montserrat_800ExtraBold",
+    color: "#486049",
+    fontSize: 12,
   },
   modalConfirm: {
-    backgroundColor: "#34733B",
+    minWidth: 165,
+    height: 42,
+    paddingHorizontal: 17,
     borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    minWidth: 110,
+    backgroundColor: "#34733B",
+    flexDirection: "row",
     alignItems: "center",
-  },
+    justifyContent: "center",
+    gap: 8,
+    cursor: "pointer",
+  } as any,
   modalConfirmText: {
-    color: "#fff",
+    color: "#FFFFFF",
+    fontFamily: "Montserrat_800ExtraBold",
+    fontSize: 12,
+  },
+  primaryButtonPressed: {
+    opacity: 0.82,
+  },
+  secondaryButtonPressed: {
+    backgroundColor: "#F2F6F0",
+  },
+  buttonDisabled: {
+    opacity: 0.62,
+    cursor: "default",
+  } as any,
+  resetSuccessContent: {
+    flex: 1,
+    minHeight: 360,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 6,
+    paddingTop: 16,
+  },
+  successIconCircle: {
+    width: 86,
+    height: 86,
+    borderRadius: 43,
+    backgroundColor: "#EAF7E7",
+    borderWidth: 1,
+    borderColor: "#CEE7C8",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 18,
+  },
+  resetSuccessTitle: {
+    fontFamily: "Montserrat_800ExtraBold",
+    fontSize: 23,
+    color: "#145B22",
+    textAlign: "center",
+    letterSpacing: 0.5,
+  },
+  resetSuccessSubtitle: {
+    marginTop: 9,
     fontFamily: "Montserrat_700Bold",
+    fontSize: 13,
+    color: "#5D685E",
+    textAlign: "center",
+  },
+  sentEmailChip: {
+    maxWidth: "100%",
+    minHeight: 42,
+    marginTop: 13,
+    paddingHorizontal: 14,
+    borderRadius: 21,
+    backgroundColor: "#F0F7ED",
+    borderWidth: 1,
+    borderColor: "#D8E9D3",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  sentEmailText: {
+    flexShrink: 1,
+    fontFamily: "Montserrat_800ExtraBold",
+    fontSize: 12,
+    color: "#34733B",
+  },
+  successInfoBox: {
+    width: "100%",
+    marginTop: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    borderRadius: 9,
+    backgroundColor: "#F8FAF7",
+    borderWidth: 1,
+    borderColor: "#E0E7DD",
+  },
+  successInfoText: {
+    fontFamily: "Montserrat_700Bold",
+    fontSize: 11,
+    lineHeight: 17,
+    color: "#657066",
+    textAlign: "center",
+  },
+  doneButton: {
+    minWidth: 145,
+    height: 43,
+    marginTop: 22,
+    borderRadius: 8,
+    backgroundColor: "#34733B",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+  } as any,
+  doneButtonText: {
+    color: "#FFFFFF",
+    fontFamily: "Montserrat_800ExtraBold",
+    fontSize: 12,
   },
 });
