@@ -191,7 +191,7 @@ export default function ResetPasswordScreen() {
       >
         <View style={styles.brandWrap}>
           <Image
-            source={require("../assets/images/ecobantay-logo.png")}
+            source={require("../../assets/images/ecobantay-logo.png")}
             style={styles.logo}
             resizeMode="contain"
           />
