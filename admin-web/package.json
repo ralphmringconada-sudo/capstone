@@ -24,6 +24,7 @@
     "expo-system-ui": "~56.0.5",
     "expo-web-browser": "~56.0.5",
     "firebase": "^12.17.0",
+    "jszip": "^3.10.1",
     "lucide-react-native": "^1.21.0",
     "mime-types": "^3.0.2",
     "react": "19.2.3",

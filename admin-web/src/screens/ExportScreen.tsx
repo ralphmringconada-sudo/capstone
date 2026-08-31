@@ -283,9 +283,12 @@ export default function ExportReports() {
           : "All dates";
       Alert.alert(
         "Export ready",
-        `${result.count} report(s) exported for ${rangeText} as ${result.format.toUpperCase()}.` +
+        `${result.count} report(s) exported for ${rangeText} as ${result.format.toUpperCase()}` +
+          (result.imageCount
+            ? ` with ${result.imageCount} image(s) packed in the ZIP backup.`
+            : ".") +
           (selectedFile === "pdf" || selectedFile === "word"
-            ? " An HTML backup was downloaded; use Print if the print window opened."
+            ? " An HTML file was also downloaded; use Print if the print window opened."
             : ""),
       );
       await refreshPreview(false, filters);
