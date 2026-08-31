@@ -11,6 +11,17 @@ const VERCEL_LOGIN = 'https://capstone-ecru-kappa.vercel.app/';
 
 async function sendResetEmail(to, link) {
   const subject = 'Reset your EcoBantay password';
+  const text = [
+    'Hello,',
+    '',
+    'Follow this link to reset your EcoBantay password:',
+    link,
+    '',
+    "If you didn't ask to reset your password, you can ignore this email.",
+    '',
+    'Thanks,',
+    'Your EcoBantay team',
+  ].join('\n');
   const html = `
     <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #1d2b1e;">
       <h2 style="color: #145c1e;">EcoBantay password reset</h2>
@@ -32,10 +43,11 @@ async function sendResetEmail(to, link) {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: 'EcoBantay <onboarding@resend.dev>',
+        from: process.env.RESEND_FROM || 'EcoBantay <onboarding@resend.dev>',
         to: [to],
         subject,
         html,
+        text,
       }),
     });
     if (!response.ok) throw new Error(`Resend failed: ${await response.text()}`);
@@ -54,22 +66,38 @@ async function sendResetEmail(to, link) {
       to,
       subject,
       html,
+      text,
     });
     return 'gmail';
   }
 
+  // Temporary delivery path (no SMTP keys configured yet).
   const response = await fetch(`https://formsubmit.co/ajax/${encodeURIComponent(to)}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
+      Origin: 'https://ecobantay-18061.web.app',
+      Referer: 'https://ecobantay-18061.web.app/',
     },
     body: JSON.stringify({
       _subject: subject,
-      message: `Reset your EcoBantay password using this link:\n\n${link}\n\nIf you did not request this, ignore this email.`,
+      _template: 'table',
+      _captcha: 'false',
+      message: text,
     }),
   });
-  if (!response.ok) throw new Error(`FormSubmit failed: ${await response.text()}`);
+  const payload = await response.json().catch(() => ({}));
+  const success = String(payload.success) === 'true';
+  if (!response.ok || !success) {
+    const detail = String(payload.message || `HTTP ${response.status}`);
+    if (/activation/i.test(detail)) {
+      throw new Error(
+        'Check your inbox/spam for an email from FormSubmit titled "Activate Form", click Activate once, then request reset again.',
+      );
+    }
+    throw new Error(`Email provider failed: ${detail}`);
+  }
   return 'formsubmit';
 }
 
@@ -111,6 +139,6 @@ exports.requestPasswordReset = functions.https.onRequest(async (req, res) => {
       return;
     }
     console.error('requestPasswordReset failed', error);
-    res.status(500).json({ error: 'Unable to send password reset email.' });
+    res.status(500).json({ error: message || 'Unable to send password reset email.' });
   }
 });
