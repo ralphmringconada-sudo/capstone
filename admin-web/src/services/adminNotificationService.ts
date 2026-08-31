@@ -4,7 +4,6 @@ import {
   doc,
   getDocs,
   limit,
-  orderBy,
   query,
   updateDoc,
   where,
@@ -33,13 +32,15 @@ export async function createAdminNotification(input: {
 }
 
 export async function fetchAdminNotifications(max = 40): Promise<AdminInboxNotification[]> {
-  const snapshot = await getDocs(
-    query(collection(db, 'admin_notifications'), orderBy('createdAt', 'desc'), limit(max)),
-  );
-  return snapshot.docs.map((item) => ({
-    id: item.id,
-    ...(item.data() as Omit<AdminInboxNotification, 'id'>),
-  }));
+  // Avoid orderBy index requirements; sort newest-first on the client.
+  const snapshot = await getDocs(query(collection(db, 'admin_notifications'), limit(Math.max(max, 80))));
+  return snapshot.docs
+    .map((item) => ({
+      id: item.id,
+      ...(item.data() as Omit<AdminInboxNotification, 'id'>),
+    }))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, max);
 }
 
 export async function markAdminNotificationRead(id: string): Promise<void> {

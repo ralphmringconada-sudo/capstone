@@ -185,24 +185,32 @@ export async function updateEventStatus(
       status === 'Rejected' && details?.rejectionReason
         ? ` Reason: ${details.rejectionReason}${details.rejectionRemarks ? ` (${details.rejectionRemarks})` : ''}.`
         : '';
-    await createUserNotification({
-      userId: ownerUid,
-      title: eventTitle,
-      body: `Your event status was updated to ${status}.${reasonText}`,
-      type: 'event',
-      relatedId: eventId,
-      statusLabel: status,
-    });
+    try {
+      await createUserNotification({
+        userId: ownerUid,
+        title: eventTitle,
+        body: `Your event status was updated to ${status}.${reasonText}`,
+        type: 'event',
+        relatedId: eventId,
+        statusLabel: status,
+      });
+    } catch (notifyError) {
+      console.warn('Citizen event notification failed:', notifyError);
+    }
   }
 
-  await createAdminNotification({
-    title: `Event ${status}`,
-    body: `${admin.fullName} set "${eventTitle}" to ${status}.`,
-    type: status === 'Upcoming' || status === 'Rejected' ? 'approval' : 'event',
-    relatedId: eventId,
-    actorUid: admin.uid,
-    actorName: admin.fullName,
-  });
+  try {
+    await createAdminNotification({
+      title: `Event ${status}`,
+      body: `${admin.fullName} set "${eventTitle}" to ${status}.`,
+      type: status === 'Upcoming' || status === 'Rejected' ? 'approval' : 'event',
+      relatedId: eventId,
+      actorUid: admin.uid,
+      actorName: admin.fullName,
+    });
+  } catch (notifyError) {
+    console.warn('Admin event notification failed:', notifyError);
+  }
 }
 
 /** Updates editable event fields (admin). */
@@ -336,11 +344,13 @@ export async function updateReportStatus(
         },
       ];
 
+  // Avoid arrayUnion(...[]) edge cases by building the args list explicitly.
+  const historyArgs = [...seedPending, historyEntry];
   const batch = writeBatch(db);
   batch.update(reportRef, {
     status,
     updatedAt: now,
-    statusHistory: arrayUnion(...seedPending, historyEntry),
+    statusHistory: arrayUnion(...historyArgs),
   });
   batch.set(activityRef, {
     adminUid: admin.uid,
@@ -355,25 +365,35 @@ export async function updateReportStatus(
 
   const ownerUid = (existing.data()?.reportedByUid as string | undefined) || '';
   const reportTitle = (existing.data()?.title as string | undefined) || 'your report';
-  if (ownerUid) {
-    await createUserNotification({
-      userId: ownerUid,
-      title: reportTitle,
-      body: `Your report status was updated to ${status}.${details ? ` ${details}` : ''}`,
-      type: 'report',
-      relatedId: reportId,
-      statusLabel: status,
-    });
+
+  // Notifications must never block moderation if rules/indexes are incomplete.
+  try {
+    if (ownerUid) {
+      await createUserNotification({
+        userId: ownerUid,
+        title: reportTitle,
+        body: `Your report status was updated to ${status}.${details ? ` ${details}` : ''}`,
+        type: 'report',
+        relatedId: reportId,
+        statusLabel: status,
+      });
+    }
+  } catch (notifyError) {
+    console.warn('Citizen report notification failed:', notifyError);
   }
 
-  await createAdminNotification({
-    title: `Report ${status}`,
-    body: `${admin.fullName} set "${reportTitle}" to ${status}.`,
-    type: 'approval',
-    relatedId: reportId,
-    actorUid: admin.uid,
-    actorName: admin.fullName,
-  });
+  try {
+    await createAdminNotification({
+      title: `Report ${status}`,
+      body: `${admin.fullName} set "${reportTitle}" to ${status}.`,
+      type: 'approval',
+      relatedId: reportId,
+      actorUid: admin.uid,
+      actorName: admin.fullName,
+    });
+  } catch (notifyError) {
+    console.warn('Admin report notification failed:', notifyError);
+  }
 }
 
 /**
