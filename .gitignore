@@ -34,3 +34,5 @@ android/
 # Firebase service account (never commit)
 serviceAccountKey.json
 *-firebase-adminsdk-*.json
+
+.firebase/

@@ -5,5 +5,31 @@
   },
   "storage": {
     "rules": "storage.rules"
+  },
+  "hosting": {
+    "public": "auth-hosting",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/reset-password",
+        "destination": "/reset-password/index.html"
+      },
+      {
+        "source": "/reset-password/**",
+        "destination": "/reset-password/index.html"
+      },
+      {
+        "source": "/auth/action",
+        "destination": "/auth-action/index.html"
+      },
+      {
+        "source": "/auth/action/**",
+        "destination": "/auth-action/index.html"
+      }
+    ]
   }
 }
