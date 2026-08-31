@@ -11,7 +11,6 @@ import {
 } from "react-native";
 
 import {
-  CalendarDays,
   Check,
   ChevronDown,
   Clock3,
@@ -35,6 +34,7 @@ import {
 } from "@expo-google-fonts/montserrat";
 
 import AdminLayout from "../components/AdminLayout";
+import DateRangeFilter from "@/components/DateRangeFilter";
 import { exportFilteredReports } from "@/services/exportReportsService";
 
 // =========================================================
@@ -90,7 +90,8 @@ export default function ExportReports() {
   // FILTER STATES
   // =======================================================
 
-  const [dateRange, setDateRange] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
   const [status, setStatus] = useState("All Statuses");
   const [category, setCategory] =
     useState("All Categories");
@@ -187,7 +188,8 @@ export default function ExportReports() {
   // =======================================================
 
   const resetFilters = () => {
-    setDateRange("");
+    setFromDate("");
+    setToDate("");
     setStatus("All Statuses");
     setCategory("All Categories");
 
@@ -205,7 +207,8 @@ export default function ExportReports() {
     try {
       const result = await exportFilteredReports({
         filters: {
-          dateRange,
+          fromDate,
+          toDate,
           status,
           category,
         },
@@ -271,27 +274,14 @@ export default function ExportReports() {
           </Text>
 
           <View style={styles.filtersRow}>
-            {/* DATE RANGE */}
-
-            <View style={styles.filterGroup}>
-              <Text style={styles.filterLabel}>
-                Date Range
-              </Text>
-
-              <View style={styles.dateInput}>
-                <TextInput
-                  value={dateRange}
-                  onChangeText={setDateRange}
-                  style={styles.dateText}
-                  placeholder=""
-                />
-
-                <CalendarDays
-                  size={17}
-                  color="#58A05A"
-                />
-              </View>
-            </View>
+            <DateRangeFilter
+              label="Date Range"
+              fromDate={fromDate}
+              toDate={toDate}
+              onChangeFrom={setFromDate}
+              onChangeTo={setToDate}
+              style={styles.dateRangeFilter}
+            />
 
             {/* STATUS */}
 
@@ -962,6 +952,13 @@ const styles = StyleSheet.create({
     position: "relative",
     zIndex: 2000,
     elevation: 2000,
+  },
+
+  dateRangeFilter: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 260,
+    maxWidth: 340,
   },
 
   filterGroup: {

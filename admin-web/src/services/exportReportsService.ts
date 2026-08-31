@@ -1,28 +1,43 @@
-import type { Report, ReportStatus } from '@/types/admin';
+import type { Report } from '@/types/admin';
 import { fetchReports } from '@/services/adminDataService';
+import { isWithinDateRange } from '@/utils/dateRange';
 
 export type ExportFilters = {
+  fromDate?: string;
+  toDate?: string;
+  /** @deprecated Prefer fromDate/toDate */
   dateRange?: string;
   status?: string;
   category?: string;
 };
 
-function parseDateRange(dateRange: string): { from?: Date; to?: Date } {
+function legacyDateRangeToBounds(dateRange: string): { fromDate: string; toDate: string } {
   const trimmed = dateRange.trim();
-  if (!trimmed) return {};
-
-  // Supports "YYYY-MM-DD to YYYY-MM-DD" or single "YYYY-MM-DD"
-  const parts = trimmed.split(/\s+to\s+|\s*-\s*|\s+/i).filter(Boolean);
-  const from = parts[0] ? new Date(parts[0]) : undefined;
-  const to = parts[1] ? new Date(parts[1]) : from;
-  if (from && Number.isNaN(from.getTime())) return {};
-  if (to && Number.isNaN(to.getTime())) return {};
-  if (to) to.setHours(23, 59, 59, 999);
-  return { from, to };
+  if (!trimmed) return { fromDate: '', toDate: '' };
+  const parts = trimmed.split(/\s+to\s+/i).filter(Boolean);
+  if (parts.length >= 2) {
+    return { fromDate: parts[0].trim(), toDate: parts[1].trim() };
+  }
+  // Single day or "YYYY-MM-DD - YYYY-MM-DD"
+  const dashParts = trimmed.split(/\s*-\s*/).filter(Boolean);
+  if (dashParts.length >= 2 && /^\d{4}-\d{2}-\d{2}$/.test(dashParts[0])) {
+    return { fromDate: dashParts[0], toDate: dashParts[1] };
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    return { fromDate: trimmed, toDate: trimmed };
+  }
+  return { fromDate: '', toDate: '' };
 }
 
 export function filterReportsForExport(reports: Report[], filters: ExportFilters): Report[] {
-  const { from, to } = parseDateRange(filters.dateRange || '');
+  let fromDate = filters.fromDate || '';
+  let toDate = filters.toDate || '';
+  if ((!fromDate && !toDate) && filters.dateRange) {
+    const legacy = legacyDateRangeToBounds(filters.dateRange);
+    fromDate = legacy.fromDate;
+    toDate = legacy.toDate;
+  }
+
   return reports.filter((report) => {
     if (filters.status && filters.status !== 'All Statuses' && report.status !== filters.status) {
       return false;
@@ -34,13 +49,7 @@ export function filterReportsForExport(reports: Report[], filters: ExportFilters
     ) {
       return false;
     }
-    if (from || to) {
-      const created = new Date(report.createdAt);
-      if (Number.isNaN(created.getTime())) return false;
-      if (from && created < from) return false;
-      if (to && created > to) return false;
-    }
-    return true;
+    return isWithinDateRange(report.createdAt, fromDate, toDate);
   });
 }
 
@@ -176,5 +185,3 @@ export async function exportFilteredReports(input: {
 
   return { count: filtered.length, format: input.format };
 }
-
-export type { ReportStatus };

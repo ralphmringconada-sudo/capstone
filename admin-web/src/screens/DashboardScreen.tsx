@@ -356,30 +356,44 @@ export default function DashboardScreen() {
             </View>
 
             {upcomingEvents.length ? (
-              upcomingEvents.map((event) => (
-                <View key={event.id} style={[styles.eventRow, { height: 96 * s }]}>
-                  <View style={[styles.eventImage, { width: 58 * s, height: 58 * s }]} />
-                  <View style={styles.eventInfo}>
-                    <Text style={[styles.eventTitle, { fontSize: 18 * s }]}>{event.title}</Text>
-                    <Text style={[styles.eventDate, { fontSize: 14 * s }]}>
-                      ▣ {event.date}  ♦ {event.location}
+              upcomingEvents.map((event) => {
+                const eventImageUri =
+                  (event.images && event.images.find(Boolean)) || event.imageUrl || "";
+                return (
+                  <View key={event.id} style={[styles.eventRow, { height: 96 * s }]}>
+                    {eventImageUri ? (
+                      <Image
+                        source={{ uri: eventImageUri }}
+                        style={[styles.eventImage, { width: 58 * s, height: 58 * s }]}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={[styles.eventImage, styles.eventImagePlaceholder, { width: 58 * s, height: 58 * s }]}>
+                        <CalendarClock size={22 * s} color="#7d8c7c" />
+                      </View>
+                    )}
+                    <View style={styles.eventInfo}>
+                      <Text style={[styles.eventTitle, { fontSize: 18 * s }]}>{event.title}</Text>
+                      <Text style={[styles.eventDate, { fontSize: 14 * s }]}>
+                        ▣ {event.date}  ♦ {event.location}
+                      </Text>
+                    </View>
+                    <Text
+                      style={[
+                        styles.upcomingBadge,
+                        {
+                          fontSize: 16 * s,
+                          paddingHorizontal: 18 * s,
+                          paddingVertical: 10 * s,
+                          backgroundColor: event.status === "Ongoing" ? "#C7DDFF" : "#E8C1EF",
+                        },
+                      ]}
+                    >
+                      {event.status}
                     </Text>
                   </View>
-                  <Text
-                    style={[
-                      styles.upcomingBadge,
-                      {
-                        fontSize: 16 * s,
-                        paddingHorizontal: 18 * s,
-                        paddingVertical: 10 * s,
-                        backgroundColor: event.status === "Ongoing" ? "#C7DDFF" : "#E8C1EF",
-                      },
-                    ]}
-                  >
-                    {event.status}
-                  </Text>
-                </View>
-              ))
+                );
+              })
             ) : (
               <View style={styles.emptyEvents}>
                 <Text style={[styles.emptyEventsText, { fontSize: 15 * s }]}>
@@ -601,6 +615,11 @@ dateCol: {
   eventImage: {
     backgroundColor: "#d9d9d9",
     borderRadius: 4,
+    overflow: "hidden",
+  },
+  eventImagePlaceholder: {
+    alignItems: "center",
+    justifyContent: "center",
   },
   eventInfo: {
     flex: 1,
