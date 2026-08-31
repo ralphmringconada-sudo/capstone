@@ -1,11 +1,13 @@
 import React, { useState } from "react";
 import {
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
+  ActivityIndicator,
 } from "react-native";
 
 import {
@@ -33,6 +35,7 @@ import {
 } from "@expo-google-fonts/montserrat";
 
 import AdminLayout from "../components/AdminLayout";
+import { exportFilteredReports } from "@/services/exportReportsService";
 
 // =========================================================
 // FILE TYPES
@@ -106,6 +109,7 @@ export default function ExportReports() {
 
   const [openAfterSaving, setOpenAfterSaving] =
     useState(true);
+  const [isExporting, setIsExporting] = useState(false);
 
   // =======================================================
   // DROPDOWN STATES
@@ -132,9 +136,10 @@ export default function ExportReports() {
 
   const statuses = [
     "All Statuses",
-    "In Review",
     "Pending",
+    "In Review",
     "Resolved",
+    "Rejected",
   ];
 
   const categories = [
@@ -195,17 +200,34 @@ export default function ExportReports() {
   // EXPORT
   // =======================================================
 
-  const handleExport = () => {
-    // Backend export functionality will be added here.
-    console.log({
-      dateRange,
-      status,
-      category,
-      selectedFile,
-      saveLocation,
-      fileName,
-      openAfterSaving,
-    });
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      const result = await exportFilteredReports({
+        filters: {
+          dateRange,
+          status,
+          category,
+        },
+        format: selectedFile,
+        fileName: fileName || undefined,
+        openAfterSaving,
+      });
+      Alert.alert(
+        "Export ready",
+        `${result.count} report(s) exported as ${result.format.toUpperCase()}.` +
+          (selectedFile === "pdf" || selectedFile === "word"
+            ? " Use the print dialog to save a printable PDF."
+            : ""),
+      );
+    } catch (error) {
+      Alert.alert(
+        "Export failed",
+        error instanceof Error ? error.message : "Unable to export reports.",
+      );
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   if (!fontsLoaded) {
@@ -793,19 +815,26 @@ export default function ExportReports() {
             <Pressable
               style={({ pressed }) => [
                 styles.exportButton,
-                pressed &&
+                (pressed || isExporting) &&
                   styles.exportButtonPressed,
               ]}
               onPress={handleExport}
+              disabled={isExporting}
             >
-              <Download
-                size={16}
-                color="#ffffff"
-              />
+              {isExporting ? (
+                <ActivityIndicator color="#ffffff" />
+              ) : (
+                <>
+                  <Download
+                    size={16}
+                    color="#ffffff"
+                  />
 
-              <Text style={styles.exportButtonText}>
-                Export
-              </Text>
+                  <Text style={styles.exportButtonText}>
+                    Export
+                  </Text>
+                </>
+              )}
             </Pressable>
           </View>
 

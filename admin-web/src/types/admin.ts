@@ -1,6 +1,13 @@
 /** Shared role and document shapes used by the admin dashboard. */
 export type AdminRole = 'admin' | 'super_admin';
 
+export type AdminNotificationPrefs = {
+  reportUpdates: boolean;
+  eventUpdates: boolean;
+  approvalUpdates: boolean;
+  userActivity: boolean;
+};
+
 export type AdminProfile = {
   uid: string;
   fullName: string;
@@ -14,6 +21,7 @@ export type AdminProfile = {
   isFlagged?: boolean;
   flaggedAt?: string | null;
   flaggedBy?: string | null;
+  notificationPrefs?: AdminNotificationPrefs;
 };
 
 export type AppUser = {
@@ -86,9 +94,25 @@ export type AdminEvent = {
   submittedArea: string;
   submittedByUid?: string;
   imageUrl?: string;
+  images?: string[];
   coordinates?: { latitude: number; longitude: number };
+  rejectionReason?: string;
+  rejectionRemarks?: string;
+  rejectedAt?: string;
   createdAt: string;
   updatedAt?: string;
+};
+
+export type AdminInboxNotification = {
+  id: string;
+  title: string;
+  body: string;
+  type: 'report' | 'event' | 'approval' | 'activity';
+  relatedId?: string | null;
+  read: boolean;
+  createdAt: string;
+  actorUid?: string | null;
+  actorName?: string | null;
 };
 
 export type ActivityLog = {

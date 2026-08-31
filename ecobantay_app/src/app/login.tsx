@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -12,26 +12,28 @@ import {
   Platform,
   ActivityIndicator,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { FIREBASE_SETUP_MESSAGE } from '@/config/firebase';
+import { useGoogleAuth } from '@/hooks/useGoogleAuth';
 import { validateLoginForm } from '@/utils/validation';
 
 /**
- * Purpose: Authenticates returning users with email and password.
+ * Purpose: Authenticates returning users with email/password or Google.
  * How it works: 1) validates fields. 2) signs in through auth context. 3) navigates home on success.
- * Technologies Used: React Native, Expo Router, Firebase Authentication via AuthContext.
- * Why this implementation: Email login only — Google AuthSession was crashing standalone Android builds on mount.
  */
 export default function LoginScreen() {
   const router = useRouter();
-  const { login, isFirebaseConfigured } = useAuth();
+  const { login, loginGoogle, isFirebaseConfigured } = useAuth();
+  const { request, response, promptAsync, isGoogleConfigured } = useGoogleAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const submissionLockRef = useRef(false);
 
@@ -62,6 +64,62 @@ export default function LoginScreen() {
       setIsSubmitting(false);
     }
   };
+
+  const handleGoogleSignIn = async () => {
+    if (submissionLockRef.current) return;
+    if (!isGoogleConfigured) {
+      Alert.alert(
+        'Google Sign-In Not Configured',
+        'Add EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID to your .env file (Firebase → Authentication → Google → Web client ID).',
+      );
+      return;
+    }
+
+    setError('');
+    submissionLockRef.current = true;
+    setIsGoogleSubmitting(true);
+    try {
+      await promptAsync();
+    } catch {
+      submissionLockRef.current = false;
+      setError('Unable to open Google sign-in.');
+      setIsGoogleSubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (response?.type !== 'success') {
+      if (response?.type === 'error' || response?.type === 'dismiss') {
+        submissionLockRef.current = false;
+        setIsGoogleSubmitting(false);
+      }
+      return;
+    }
+
+    const idToken =
+      response.params.id_token ??
+      (response as { authentication?: { idToken?: string } }).authentication?.idToken;
+    if (!idToken) {
+      submissionLockRef.current = false;
+      setError('Google sign-in failed. Please try again.');
+      setIsGoogleSubmitting(false);
+      return;
+    }
+
+    (async () => {
+      try {
+        await loginGoogle(idToken);
+        router.replace('/home');
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unable to sign in with Google.');
+      } finally {
+        submissionLockRef.current = false;
+        setIsGoogleSubmitting(false);
+      }
+    })();
+  }, [response, loginGoogle, router]);
+
+  const isBusy = isSubmitting || isGoogleSubmitting;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -99,7 +157,7 @@ export default function LoginScreen() {
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
-            editable={!isSubmitting}
+            editable={!isBusy}
           />
 
           <View style={styles.passwordRow}>
@@ -110,7 +168,7 @@ export default function LoginScreen() {
               value={password}
               onChangeText={setPassword}
               secureTextEntry={!showPassword}
-              editable={!isSubmitting}
+              editable={!isBusy}
             />
             <TouchableOpacity
               style={styles.showButton}
@@ -124,14 +182,27 @@ export default function LoginScreen() {
 
           <TouchableOpacity
             activeOpacity={0.85}
-            style={[styles.button, isSubmitting && styles.buttonDisabled]}
+            style={[styles.button, isBusy && styles.buttonDisabled]}
             onPress={handleSignIn}
-            disabled={isSubmitting}
+            disabled={isBusy}
           >
             {isSubmitting ? (
               <ActivityIndicator color="#ffffff" />
             ) : (
               <Text style={styles.buttonText}>Log In</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.85}
+            style={[styles.googleButton, (isBusy || !request) && styles.buttonDisabled]}
+            onPress={handleGoogleSignIn}
+            disabled={isBusy || !request}
+          >
+            {isGoogleSubmitting ? (
+              <ActivityIndicator color="#3f5c2b" />
+            ) : (
+              <Text style={styles.googleButtonText}>Continue with Google</Text>
             )}
           </TouchableOpacity>
 
@@ -235,6 +306,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 16,
+  },
+  googleButton: {
+    width: '100%',
+    maxWidth: 260,
+    backgroundColor: '#ffffff',
+    height: 48,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#3f5c2b',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+  },
+  googleButtonText: {
+    fontFamily: 'Montserrat-Bold',
+    color: '#3f5c2b',
+    fontSize: 15,
   },
   buttonDisabled: { opacity: 0.7 },
   buttonText: {

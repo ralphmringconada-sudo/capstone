@@ -8,29 +8,27 @@ import {
   useWindowDimensions,
   Alert,
   ActivityIndicator,
+  Switch,
+  ScrollView,
 } from "react-native";
+import Constants from "expo-constants";
 import AdminLayout from "../components/AdminLayout";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { changeAdminPassword, updateAdminProfileInfo } from "@/services/adminDataService";
+import type { AdminNotificationPrefs } from "@/types/admin";
 
-/**
- * Purpose: Lets the signed-in administrator maintain profile information and credentials.
- * How it works:
- * 1. Authentication context data initializes controlled profile fields.
- * 2. Profile submissions update Firestore and refresh the shared admin identity.
- * 3. Password submissions validate input and reauthenticate through Firebase.
- * Technologies Used: React hooks, React Native Web, Firebase Authentication, Cloud Firestore, and React Context.
- * Why this implementation: Separating profile and credential workflows limits sensitive operations to their proper service.
- */
+const DEFAULT_PREFS: AdminNotificationPrefs = {
+  reportUpdates: true,
+  eventUpdates: true,
+  approvalUpdates: true,
+  userActivity: true,
+};
+
 export default function SettingsScreen() {
   const { width, height } = useWindowDimensions();
   const s = Math.min(width / 1920, height / 1080);
   const { admin, refreshAdmin } = useAdminAuth();
 
-  /*
-   * Profile fields mirror the Firestore admin document; credential fields remain temporary.
-   * Separate errors and saving flags let each form complete without blocking the other.
-   */
   const [fullName, setFullName] = useState("");
   const [contactNumber, setContactNumber] = useState("");
   const [username, setUsername] = useState("");
@@ -41,35 +39,25 @@ export default function SettingsScreen() {
   const [passwordError, setPasswordError] = useState("");
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
+  const [savingPrefs, setSavingPrefs] = useState(false);
+  const [prefs, setPrefs] = useState<AdminNotificationPrefs>(DEFAULT_PREFS);
 
   useEffect(() => {
     if (!admin) return;
-    // Synchronize editable fields whenever the authenticated Firestore profile changes.
     setFullName(admin.fullName || "");
     setContactNumber(admin.contactNumber || "");
     setUsername(admin.username || "");
+    setPrefs({ ...DEFAULT_PREFS, ...(admin.notificationPrefs || {}) });
   }, [admin]);
 
-  /**
-   * Purpose: Validates and persists editable fields for the current administrator.
-   * How it works:
-   * 1. An authenticated profile and required full name are verified.
-   * 2. The approved fields are written to Firestore with actor attribution.
-   * 3. Shared auth state is refreshed so headers and screens show the saved values.
-   * Technologies Used: React state, Cloud Firestore services, React Context, and React Native alerts.
-   * Why this implementation: Refreshing the provider creates one consistent profile after the write.
-   */
   const handleSaveProfile = async () => {
-    // Profile writes require the active admin as both target and auditable actor.
     if (!admin) return;
     setProfileError("");
-    // Prevent incomplete identity data from replacing the required display name.
     if (!fullName.trim()) {
       setProfileError("Full name is required.");
       return;
     }
 
-    // Disable repeated writes while Firestore and context refresh operations complete.
     setSavingProfile(true);
     try {
       await updateAdminProfileInfo(
@@ -83,7 +71,6 @@ export default function SettingsScreen() {
       );
       await refreshAdmin();
       Alert.alert("Saved", "Your profile was updated.");
-    // Retain edited values and expose a readable Firestore update failure.
     } catch (err) {
       setProfileError(err instanceof Error ? err.message : "Failed to update profile.");
     } finally {
@@ -91,18 +78,8 @@ export default function SettingsScreen() {
     }
   };
 
-  /**
-   * Purpose: Validates and securely changes the current administrator password.
-   * How it works:
-   * 1. Required, matching, and minimum-length rules are checked locally.
-   * 2. Firebase reauthenticates the current password before accepting the new one.
-   * 3. Sensitive fields are cleared after success and errors remain in the password form.
-   * Technologies Used: React state, Firebase Authentication, and React Native alerts.
-   * Why this implementation: Local validation improves feedback while Firebase reauthentication protects the account.
-   */
   const handleChangePassword = async () => {
     setPasswordError("");
-    // Complete local credential checks before invoking a sensitive Firebase operation.
     if (!currentPassword || !newPassword) {
       setPasswordError("Current and new password are required.");
       return;
@@ -116,7 +93,6 @@ export default function SettingsScreen() {
       return;
     }
 
-    // Prevent concurrent password updates during reauthentication and credential replacement.
     setSavingPassword(true);
     try {
       await changeAdminPassword(currentPassword, newPassword);
@@ -124,7 +100,6 @@ export default function SettingsScreen() {
       setNewPassword("");
       setConfirmPassword("");
       Alert.alert("Password Updated", "Your password was changed successfully.");
-    // Preserve the form context so the administrator can correct authentication errors.
     } catch (err) {
       setPasswordError(err instanceof Error ? err.message : "Failed to change password.");
     } finally {
@@ -132,9 +107,30 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleSavePrefs = async () => {
+    if (!admin) return;
+    setSavingPrefs(true);
+    try {
+      await updateAdminProfileInfo(admin.uid, { notificationPrefs: prefs }, admin);
+      await refreshAdmin();
+      Alert.alert("Saved", "Notification settings updated.");
+    } catch (err) {
+      Alert.alert(
+        "Save failed",
+        err instanceof Error ? err.message : "Could not save notification settings.",
+      );
+    } finally {
+      setSavingPrefs(false);
+    }
+  };
+
+  const togglePref = (key: keyof AdminNotificationPrefs) => {
+    setPrefs((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
   return (
     <AdminLayout activePage="Settings">
-      <View
+      <ScrollView
         style={[
           styles.page,
           {
@@ -145,12 +141,31 @@ export default function SettingsScreen() {
       >
         <Text style={[styles.pageTitle, { fontSize: 42 * s }]}>SETTINGS</Text>
         <Text style={[styles.subtitle, { fontSize: 18 * s }]}>
-          Manage your admin profile and password
+          Manage system info, account security, and notifications
         </Text>
 
         <View style={[styles.grid, { marginTop: 28 * s, gap: 24 * s }]}>
           <View style={[styles.card, { padding: 20 * s }]}>
-            <Text style={[styles.cardTitle, { fontSize: 22 * s }]}>Edit Information</Text>
+            <Text style={[styles.cardTitle, { fontSize: 22 * s }]}>System Information</Text>
+            <Text style={styles.infoLine}>App: EcoBantay Admin Web</Text>
+            <Text style={styles.infoLine}>
+              Version: {Constants.expoConfig?.version || "1.0.0"}
+            </Text>
+            <Text style={styles.infoLine}>
+              Environment: {Constants.executionEnvironment || "web"}
+            </Text>
+            <Text style={styles.infoLine}>Role: {admin?.role === "super_admin" ? "Super Admin" : "Admin"}</Text>
+            <Text style={styles.infoLine}>Account status: {admin?.status || "unknown"}</Text>
+            <Text style={styles.infoLine}>
+              Signed in as: {admin?.email || "—"}
+            </Text>
+            <Text style={styles.help}>
+              EcoBantay helps Valencia LGU review environmental reports and community events.
+            </Text>
+          </View>
+
+          <View style={[styles.card, { padding: 20 * s }]}>
+            <Text style={[styles.cardTitle, { fontSize: 22 * s }]}>Account / Security</Text>
             <Text style={styles.label}>Full Name</Text>
             <TextInput style={styles.input} value={fullName} onChangeText={setFullName} />
             <Text style={styles.label}>Username</Text>
@@ -167,10 +182,8 @@ export default function SettingsScreen() {
                 <Text style={styles.buttonText}>Save Profile</Text>
               )}
             </TouchableOpacity>
-          </View>
 
-          <View style={[styles.card, { padding: 20 * s }]}>
-            <Text style={[styles.cardTitle, { fontSize: 22 * s }]}>Change Password</Text>
+            <Text style={[styles.cardTitle, { fontSize: 18 * s, marginTop: 20 }]}>Change Password</Text>
             <Text style={styles.label}>Current Password</Text>
             <TextInput
               style={styles.input}
@@ -197,7 +210,36 @@ export default function SettingsScreen() {
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+
+        <View style={[styles.card, { padding: 20 * s, marginTop: 24 * s, marginBottom: 40 * s }]}>
+          <Text style={[styles.cardTitle, { fontSize: 22 * s }]}>Notification Settings</Text>
+          <Text style={styles.help}>
+            Choose which admin inbox alerts you want to keep enabled for this account.
+          </Text>
+
+          {(
+            [
+              ["reportUpdates", "Report Notifications"],
+              ["eventUpdates", "Event Notifications"],
+              ["approvalUpdates", "Approval Notifications"],
+              ["userActivity", "User Activity Notifications"],
+            ] as const
+          ).map(([key, label]) => (
+            <View key={key} style={styles.prefRow}>
+              <Text style={styles.prefLabel}>{label}</Text>
+              <Switch value={prefs[key]} onValueChange={() => togglePref(key)} />
+            </View>
+          ))}
+
+          <TouchableOpacity style={styles.button} onPress={handleSavePrefs} disabled={savingPrefs}>
+            {savingPrefs ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <Text style={styles.buttonText}>Save Notification Settings</Text>
+            )}
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
     </AdminLayout>
   );
 }
@@ -206,9 +248,10 @@ const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: "#fff" },
   pageTitle: { fontFamily: "Montserrat_700Bold", color: "#0B5A1E" },
   subtitle: { fontFamily: "Montserrat_700Bold", color: "#555", marginTop: 6 },
-  grid: { flexDirection: "row" },
+  grid: { flexDirection: "row", flexWrap: "wrap" },
   card: {
     flex: 1,
+    minWidth: 320,
     borderWidth: 1,
     borderColor: "#d6d6d6",
     borderRadius: 8,
@@ -218,22 +261,31 @@ const styles = StyleSheet.create({
   label: { fontFamily: "Montserrat_700Bold", color: "#444", marginBottom: 6, marginTop: 8 },
   input: {
     borderWidth: 1,
-    borderColor: "#d6d6d6",
+    borderColor: "#ccc",
     borderRadius: 6,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    fontFamily: "Montserrat_700Bold",
-    outlineStyle: "none" as any,
+    fontFamily: "Montserrat_500Medium",
   },
-  inputDisabled: { backgroundColor: "#f5f5f5", color: "#777" },
-  error: { color: "#8B1E1E", fontFamily: "Montserrat_700Bold", marginTop: 10 },
+  inputDisabled: { backgroundColor: "#f3f3f3", color: "#777" },
   button: {
-    marginTop: 18,
-    backgroundColor: "#34733B",
-    height: 44,
-    borderRadius: 6,
+    marginTop: 16,
+    backgroundColor: "#168A18",
+    borderRadius: 8,
+    paddingVertical: 12,
     alignItems: "center",
-    justifyContent: "center",
   },
-  buttonText: { color: "#fff", fontFamily: "Montserrat_700Bold", fontSize: 16 },
+  buttonText: { color: "#fff", fontFamily: "Montserrat_700Bold" },
+  error: { color: "#b42318", marginTop: 8, fontFamily: "Montserrat_500Medium" },
+  infoLine: { fontFamily: "Montserrat_500Medium", color: "#333", marginBottom: 8 },
+  help: { fontFamily: "Montserrat_400Regular", color: "#666", marginBottom: 12 },
+  prefRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: "#eee",
+  },
+  prefLabel: { fontFamily: "Montserrat_600SemiBold", color: "#222" },
 });

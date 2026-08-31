@@ -12,6 +12,7 @@ import {
 } from 'firebase/firestore';
 import { getDbInstance } from '@/config/firebase';
 import { uploadEventImage } from '@/services/firebaseStorageService';
+import { notifyAdminsOfActivity } from '@/services/adminActivityNotify';
 import type {
   EcoEvent,
   EventParticipant,
@@ -38,9 +39,10 @@ function sortByNewest(events: EcoEvent[]): EcoEvent[] {
  * Why this implementation: Matching the admin AdminEvent shape keeps one shared events collection.
  */
 export async function submitEvent(input: SubmitEventInput): Promise<string> {
-  let imageUrl: string | undefined;
-  if (input.imageUri) {
-    imageUrl = await uploadEventImage(input.imageUri, input.user.uid);
+  const uris = (input.imageUris || []).filter(Boolean).slice(0, 5);
+  const imageUrls: string[] = [];
+  for (const uri of uris) {
+    imageUrls.push(await uploadEventImage(uri, input.user.uid));
   }
 
   const now = new Date().toISOString();
@@ -62,13 +64,28 @@ export async function submitEvent(input: SubmitEventInput): Promise<string> {
     submittedBy: fullName,
     submittedArea: input.barangay.trim() || 'Valencia',
     submittedByUid: input.user.uid,
-    imageUrl,
+    imageUrl: imageUrls[0],
+    images: imageUrls,
     coordinates: input.coordinates,
     createdAt: now,
     updatedAt: now,
   };
 
   const docRef = await addDoc(collection(getDbInstance(), 'events'), eventData);
+
+  try {
+    await notifyAdminsOfActivity({
+      title: 'New event submitted',
+      body: `${fullName} submitted "${eventData.title}" for approval.`,
+      type: 'event',
+      relatedId: docRef.id,
+      actorUid: input.user.uid,
+      actorName: fullName,
+    });
+  } catch {
+    // Do not block event creation if admin notify fails.
+  }
+
   return docRef.id;
 }
 
@@ -170,6 +187,21 @@ export async function deleteUserEvent(eventId: string, userId: string): Promise<
     throw new Error('Only pending events can be deleted.');
   }
   await deleteDoc(doc(getDbInstance(), 'events', eventId));
+}
+
+export async function fetchEventParticipants(eventId: string): Promise<EventParticipant[]> {
+  const snapshot = await getDocs(collection(getDbInstance(), 'events', eventId, 'participants'));
+  return snapshot.docs
+    .map((item) => {
+      const data = item.data() as Partial<EventParticipant>;
+      return {
+        uid: data.uid || item.id,
+        name: data.name || 'Participant',
+        email: data.email || '',
+        joinedAt: data.joinedAt || '',
+      };
+    })
+    .sort((a, b) => (b.joinedAt || '').localeCompare(a.joinedAt || ''));
 }
 
 export async function hasJoinedEvent(eventId: string, userId: string): Promise<boolean> {

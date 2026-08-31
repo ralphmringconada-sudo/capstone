@@ -20,6 +20,7 @@ import { useAuth } from '@/context/AuthContext';
 import {
   deleteUserEvent,
   fetchEventById,
+  fetchEventParticipants,
   hasJoinedEvent,
   joinEvent,
   leaveEvent,
@@ -28,7 +29,7 @@ import {
   getEventStatusColors,
   getUserFacingEventStatus,
 } from '@/utils/eventStatus';
-import type { EcoEvent } from '@/types/event';
+import type { EcoEvent, EventParticipant } from '@/types/event';
 
 const DEFAULT_COORDS = { latitude: 9.2805, longitude: 123.2431 };
 
@@ -44,6 +45,7 @@ export default function ViewEventScreen() {
 
   const [event, setEvent] = useState<EcoEvent | null>(null);
   const [joined, setJoined] = useState(false);
+  const [participants, setParticipants] = useState<EventParticipant[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isActing, setIsActing] = useState(false);
 
@@ -55,6 +57,11 @@ export default function ViewEventScreen() {
     try {
       const item = await fetchEventById(String(id));
       setEvent(item);
+      if (item) {
+        setParticipants(await fetchEventParticipants(item.id));
+      } else {
+        setParticipants([]);
+      }
       if (item && user?.uid) {
         setJoined(await hasJoinedEvent(item.id, user.uid));
       } else {
@@ -62,6 +69,7 @@ export default function ViewEventScreen() {
       }
     } catch {
       setEvent(null);
+      setParticipants([]);
     } finally {
       setIsLoading(false);
     }
@@ -82,7 +90,12 @@ export default function ViewEventScreen() {
     !!user?.uid;
   const facingStatus = event ? getUserFacingEventStatus(event.status) : '';
   const statusColors = getEventStatusColors(facingStatus);
-  const photos = event?.imageUrl ? [{ id: '1', uri: event.imageUrl }] : [];
+  const photos =
+    event?.images?.length
+      ? event.images.map((uri, index) => ({ id: String(index), uri }))
+      : event?.imageUrl
+        ? [{ id: '1', uri: event.imageUrl }]
+        : [];
   const coords = event?.coordinates || DEFAULT_COORDS;
 
   const thumbWidth =
@@ -140,6 +153,7 @@ export default function ViewEventScreen() {
         setEvent({ ...event, participants: event.participants + 1 });
         Alert.alert('Joined', 'You successfully joined this event.');
       }
+      setParticipants(await fetchEventParticipants(event.id));
     } catch (err) {
       Alert.alert('Error', err instanceof Error ? err.message : 'Could not update join status.');
     } finally {
@@ -284,6 +298,19 @@ export default function ViewEventScreen() {
             <Text style={styles.participantsText}>
               {event.participants}/{event.capacity} participants
             </Text>
+            <View style={styles.participantList}>
+              <Text style={styles.participantListTitle}>Participants</Text>
+              {participants.length === 0 ? (
+                <Text style={styles.participantEmpty}>No one has joined yet.</Text>
+              ) : (
+                participants.map((person) => (
+                  <View key={person.uid} style={styles.participantRow}>
+                    <Text style={styles.participantName}>{person.name}</Text>
+                    <Text style={styles.participantEmail}>{person.email || 'No email'}</Text>
+                  </View>
+                ))
+              )}
+            </View>
           </View>
         </Shadow>
 
@@ -483,8 +510,39 @@ const styles = StyleSheet.create({
   },
   participantsText: {
     fontFamily: 'Montserrat-Semi-Bold',
+    fontSize: 13,
+    color: '#3f5c2b',
+    marginTop: 8,
+  },
+  participantList: {
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e6e6e6',
+    paddingTop: 10,
+  },
+  participantListTitle: {
+    fontFamily: 'Montserrat-Bold',
+    fontSize: 14,
+    color: '#111',
+    marginBottom: 8,
+  },
+  participantEmpty: {
+    fontFamily: 'Montserrat-Regular',
     fontSize: 12,
-    color: '#555',
+    color: '#777',
+  },
+  participantRow: {
+    marginBottom: 8,
+  },
+  participantName: {
+    fontFamily: 'Montserrat-Semi-Bold',
+    fontSize: 13,
+    color: '#222',
+  },
+  participantEmail: {
+    fontFamily: 'Montserrat-Regular',
+    fontSize: 11,
+    color: '#666',
   },
   descriptionContainer: { paddingHorizontal: 4, marginBottom: 32 },
   descriptionText: {

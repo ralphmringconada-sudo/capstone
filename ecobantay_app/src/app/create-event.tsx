@@ -31,6 +31,7 @@ const CARD_PADDING = 72;
 const ITEM_SIZE = 80;
 const CENTER_OFFSET = (SCREEN_WIDTH - CARD_PADDING - ITEM_SIZE) / 2;
 const VALENCIA_CITY = 'Valencia, Negros Oriental';
+const MAX_EVENT_PHOTOS = 5;
 const DEFAULT_REGION = {
   latitude: 9.2805,
   longitude: 123.2431,
@@ -72,7 +73,7 @@ export default function CreateEventScreen() {
   const [description, setDescription] = useState('');
   const [capacity, setCapacity] = useState('50');
   const [coordinates, setCoordinates] = useState<EventCoordinates | null>(null);
-  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [imageUris, setImageUris] = useState<string[]>([]);
   const [eventDate, setEventDate] = useState(new Date());
   const [eventTime, setEventTime] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -155,18 +156,29 @@ export default function CreateEventScreen() {
   };
 
   const handlePickPhoto = async () => {
+    if (imageUris.length >= MAX_EVENT_PHOTOS) {
+      Alert.alert('Photo limit', `You can attach up to ${MAX_EVENT_PHOTOS} event images.`);
+      return;
+    }
+
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      Alert.alert('Permission needed', 'Allow photo library access to attach an event image.');
+      Alert.alert('Permission needed', 'Allow photo library access to attach event images.');
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 0.8,
+      allowsMultipleSelection: true,
+      selectionLimit: MAX_EVENT_PHOTOS - imageUris.length,
     });
-    if (!result.canceled && result.assets[0]?.uri) {
-      setImageUri(result.assets[0].uri);
-    }
+    if (result.canceled) return;
+    const next = result.assets.map((asset) => asset.uri).filter(Boolean);
+    setImageUris((prev) => [...prev, ...next].slice(0, MAX_EVENT_PHOTOS));
+  };
+
+  const removeEventPhoto = (index: number) => {
+    setImageUris((prev) => prev.filter((_, i) => i !== index));
   };
 
   const handleCreate = async () => {
@@ -199,7 +211,7 @@ export default function CreateEventScreen() {
         barangay,
         capacity: Number(capacity) || 50,
         coordinates,
-        imageUri,
+        imageUris,
         user: {
           uid: user.uid,
           firstName: user.firstName || '',
@@ -430,15 +442,27 @@ export default function CreateEventScreen() {
 
           <View style={styles.photoUploadRow}>
             <Shadow distance={1} startColor={'rgba(0, 0, 0, 0.1)'} offset={[0, 2]}>
-              <TouchableOpacity activeOpacity={0.8} style={styles.photoButton} onPress={handlePickPhoto}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={[
+                  styles.photoButton,
+                  imageUris.length >= MAX_EVENT_PHOTOS && styles.photoButtonDisabled,
+                ]}
+                onPress={handlePickPhoto}
+                disabled={imageUris.length >= MAX_EVENT_PHOTOS}
+              >
                 <Text style={styles.photoButtonText}>
-                  {imageUri ? 'CHANGE PHOTO' : 'SUBMIT PHOTO'}
+                  {imageUris.length >= MAX_EVENT_PHOTOS
+                    ? 'PHOTO LIMIT'
+                    : imageUris.length
+                      ? 'ADD PHOTOS'
+                      : 'SUBMIT PHOTO'}
                 </Text>
               </TouchableOpacity>
             </Shadow>
             <View style={styles.photoBadgeWrapper}>
-              {imageUri ? (
-                <Image source={{ uri: imageUri }} style={styles.photoPreview} />
+              {imageUris[0] ? (
+                <Image source={{ uri: imageUris[0] }} style={styles.photoPreview} />
               ) : (
                 <>
                   <View style={styles.photoStackIconBase} />
@@ -446,10 +470,30 @@ export default function CreateEventScreen() {
                 </>
               )}
               <View style={styles.badgeCircle}>
-                <Text style={styles.badgeText}>{imageUri ? '1' : '0'}</Text>
+                <Text style={styles.badgeText}>{imageUris.length}</Text>
               </View>
             </View>
           </View>
+
+          {imageUris.length > 0 ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.eventPhotosRow}
+            >
+              {imageUris.map((uri, index) => (
+                <View key={`${uri}-${index}`} style={styles.eventPhotoCard}>
+                  <Image source={{ uri }} style={styles.eventPhotoThumb} resizeMode="cover" />
+                  <TouchableOpacity
+                    style={styles.eventPhotoRemove}
+                    onPress={() => removeEventPhoto(index)}
+                  >
+                    <Text style={styles.eventPhotoRemoveText}>×</Text>
+                  </TouchableOpacity>
+                </View>
+              ))}
+            </ScrollView>
+          ) : null}
 
           <Shadow
             distance={2}
@@ -661,6 +705,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   photoPreview: { width: 36, height: 36, borderRadius: 6 },
+  photoButtonDisabled: { opacity: 0.55 },
+  eventPhotosRow: { gap: 10, paddingBottom: 12, marginBottom: 8 },
+  eventPhotoCard: { width: 88, height: 88, position: 'relative' },
+  eventPhotoThumb: { width: 88, height: 88, borderRadius: 8, backgroundColor: '#d9d9d9' },
+  eventPhotoRemove: {
+    position: 'absolute',
+    top: -6,
+    right: -6,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#3B703C',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  eventPhotoRemoveText: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontFamily: 'Montserrat-Bold',
+    lineHeight: 18,
+  },
   photoStackIconBase: {
     position: 'absolute',
     width: 30,

@@ -47,7 +47,8 @@ export type SubmitReportInput = {
   locationText: string;
   barangay: string;
   coordinates: ReportCoordinates;
-  imageUri: string;
+  /** One or more local proof image URIs to upload. */
+  imageUris: string[];
   photoTimestamp: string;
   imageMetadata: ReportImageMetadata;
   user: {

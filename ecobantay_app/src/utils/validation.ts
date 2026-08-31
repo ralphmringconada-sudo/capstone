@@ -15,6 +15,7 @@ export type PasswordRequirement = {
  */
 export function getPasswordRequirements(password: string): PasswordRequirement[] {
   return [
+    { key: 'length', label: 'At least 8 characters', met: password.length >= 8 },
     { key: 'upper', label: '1 uppercase letter', met: /[A-Z]/.test(password) },
     { key: 'lower', label: '1 lowercase letter', met: /[a-z]/.test(password) },
     { key: 'special', label: '1 special character', met: /[^A-Za-z0-9]/.test(password) },
@@ -53,9 +54,20 @@ export function validateEmail(email: string): string | null {
 export function validatePassword(password: string): string | null {
   if (!password) return 'Password is required.';
   if (!isPasswordValid(password)) {
-    return 'Password must include 1 uppercase letter, 1 lowercase letter, and 1 special character.';
+    return 'Password must be at least 8 characters and include 1 uppercase letter, 1 lowercase letter, and 1 special character.';
   }
   return null;
+}
+
+/**
+ * Purpose: Validates a Philippine mobile number used for account contact.
+ * How it works: accepts 09XXXXXXXXX, +639XXXXXXXXX, or 639XXXXXXXXX after stripping spaces/dashes.
+ */
+export function validateContactNumber(contactNumber: string): string | null {
+  const trimmed = contactNumber.trim().replace(/[\s-]/g, '');
+  if (!trimmed) return 'Contact number is required.';
+  if (/^(09\d{9}|\+639\d{9}|639\d{9})$/.test(trimmed)) return null;
+  return 'Enter a valid PH mobile number (e.g. 09XXXXXXXXX).';
 }
 
 /**
@@ -66,9 +78,19 @@ export function validatePassword(password: string): string | null {
  */
 export function validateSignUpForm(form: SignUpFormData): string | null {
   if (!form.firstName.trim()) return 'First name is required.';
+  if (form.firstName.trim().length < 2) return 'First name must be at least 2 characters.';
   if (!form.lastName.trim()) return 'Last name is required.';
+  if (form.lastName.trim().length < 2) return 'Last name must be at least 2 characters.';
   if (!form.hasSelectedDate) return 'Birthday is required.';
-  if (!form.contactNumber.trim()) return 'Contact number is required.';
+
+  if (form.birthday) {
+    const ageMs = Date.now() - form.birthday.getTime();
+    const ageYears = ageMs / (1000 * 60 * 60 * 24 * 365.25);
+    if (ageYears < 13) return 'You must be at least 13 years old to create an account.';
+  }
+
+  const contactError = validateContactNumber(form.contactNumber);
+  if (contactError) return contactError;
 
   const emailError = validateEmail(form.email);
   if (emailError) return emailError;

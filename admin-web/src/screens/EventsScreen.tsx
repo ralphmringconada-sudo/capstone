@@ -45,8 +45,10 @@ import { useAdminAuth } from "@/context/AdminAuthContext";
 
 import {
   createEvent,
+  deleteEvent,
   fetchEventParticipants,
   fetchEvents,
+  updateEvent,
   updateEventStatus,
 } from "@/services/adminDataService";
 
@@ -151,6 +153,53 @@ function toHhMm(date: Date): string {
   ).padStart(2, "0")}:${String(
     date.getMinutes()
   ).padStart(2, "0")}`;
+}
+
+function getEventImages(event: {
+  imageUrl?: string;
+  images?: string[];
+}): string[] {
+  if (event.images?.length) return event.images.filter(Boolean);
+  if (event.imageUrl) return [event.imageUrl];
+  return [];
+}
+
+function EventImageLightbox({
+  uri,
+  onClose,
+}: {
+  uri: string | null;
+  onClose: () => void;
+}) {
+  if (!uri) return null;
+  return (
+    <Modal visible transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable
+        style={{
+          flex: 1,
+          backgroundColor: "rgba(0,0,0,0.88)",
+          justifyContent: "center",
+          alignItems: "center",
+          padding: 24,
+        }}
+        onPress={onClose}
+      >
+        <Image
+          source={{ uri }}
+          style={{ width: "92%", height: "82%" }}
+          resizeMode="contain"
+        />
+        <Text
+          style={{
+            color: "#ffffff",
+            marginTop: 12,
+          }}
+        >
+          Tap anywhere to close
+        </Text>
+      </Pressable>
+    </Modal>
+  );
 }
 
 // =========================================================
@@ -261,6 +310,9 @@ export default function EventsScreen() {
     setAddModalOpen,
   ] = useState(false);
 
+  const [editingEventId, setEditingEventId] =
+    useState<string | null>(null);
+
   // =======================================================
   // SELECTED EVENT
   // =======================================================
@@ -269,6 +321,9 @@ export default function EventsScreen() {
     selectedEvent,
     setSelectedEvent,
   ] = useState<AdminEvent | null>(null);
+
+  const [previewImageUrl, setPreviewImageUrl] =
+    useState<string | null>(null);
 
   const [
     eventParticipants,
@@ -742,62 +797,93 @@ export default function EventsScreen() {
         let imageUrl = "";
 
         if (newImageUri) {
-          imageUrl =
-            await uploadAdminEventImage(
-              newImageUri
-            );
+          // Keep existing remote URL when editing without picking a new local file.
+          if (
+            editingEventId &&
+            newImageUri.startsWith("http")
+          ) {
+            imageUrl = newImageUri;
+          } else {
+            imageUrl =
+              await uploadAdminEventImage(
+                newImageUri
+              );
+          }
         }
 
-        await createEvent(
-          {
-            title:
-              newTitle.trim(),
+        if (editingEventId) {
+          await updateEvent(
+            editingEventId,
+            {
+              title: newTitle.trim(),
+              description: newDescription.trim(),
+              category: newCategory,
+              date: newDate.includes("-")
+                ? formatEventDate(newDate.trim())
+                : newDate.trim(),
+              time: /^\d{1,2}:\d{2}$/.test(newTime.trim())
+                ? formatEventTime(newTime.trim())
+                : newTime.trim(),
+              location: newLocation.trim(),
+              capacity,
+              imageUrl: imageUrl || undefined,
+              coordinates: newCoordinates,
+            },
+            admin
+          );
+        } else {
+          await createEvent(
+            {
+              title:
+                newTitle.trim(),
 
-            description:
-              newDescription.trim(),
+              description:
+                newDescription.trim(),
 
-            category:
-              newCategory,
+              category:
+                newCategory,
 
-            date:
-              formatEventDate(
-                newDate.trim()
-              ),
+              date:
+                formatEventDate(
+                  newDate.trim()
+                ),
 
-            time:
-              formatEventTime(
-                newTime.trim()
-              ),
+              time:
+                formatEventTime(
+                  newTime.trim()
+                ),
 
-            location:
-              newLocation.trim(),
+              location:
+                newLocation.trim(),
 
-            status: "Pending",
+              status: "Pending",
 
-            participants: 0,
+              participants: 0,
 
-            capacity,
+              capacity,
 
-            submittedBy:
-              admin.fullName,
+              submittedBy:
+                admin.fullName,
 
-            submittedArea:
-              "Admin Dashboard",
+              submittedArea:
+                "Admin Dashboard",
 
-            submittedByUid:
-              admin.uid,
+              submittedByUid:
+                admin.uid,
 
-            imageUrl,
+              imageUrl,
 
-            coordinates:
-              newCoordinates,
-          },
+              coordinates:
+                newCoordinates,
+            },
 
-          admin
-        );
+            admin
+          );
+        }
 
         await reloadEvents();
 
+        setEditingEventId(null);
         setNewTitle("");
         setNewCategory(
           "Clean-up"
@@ -914,7 +1000,8 @@ export default function EventsScreen() {
 
   const moderateEvent =
     async (
-      nextStatus: EventStatus
+      nextStatus: EventStatus,
+      details?: { rejectionReason?: string; rejectionRemarks?: string }
     ) => {
       if (
         !selectedEvent ||
@@ -933,7 +1020,8 @@ export default function EventsScreen() {
         await updateEventStatus(
           selectedEvent.id,
           nextStatus,
-          admin
+          admin,
+          details
         );
 
         closeEventDetails();
@@ -967,12 +1055,60 @@ const confirmRejectEvent = async () => {
   setRejectModalOpen(false);
   setShowRejectReasonDropdown(false);
 
-  // Existing backend logic remains unchanged.
-  await moderateEvent("Rejected");
+  await moderateEvent("Rejected", {
+    rejectionReason,
+    rejectionRemarks,
+  });
 
   setRejectionReason("");
   setRejectionRemarks("");
 };
+
+  const handleDeleteSelectedEvent = () => {
+    if (!selectedEvent || !admin) return;
+    Alert.alert(
+      "Delete event",
+      `Permanently delete "${selectedEvent.title}"?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () => {
+            void (async () => {
+              try {
+                await deleteEvent(selectedEvent.id, admin);
+                closeEventDetails();
+                await reloadEvents();
+              } catch (error) {
+                Alert.alert(
+                  "Delete failed",
+                  error instanceof Error ? error.message : "Failed to delete event."
+                );
+              }
+            })();
+          },
+        },
+      ]
+    );
+  };
+
+  const openEditSelectedEvent = () => {
+    if (!selectedEvent) return;
+    setEditingEventId(selectedEvent.id);
+    setNewTitle(selectedEvent.title || "");
+    setNewCategory(selectedEvent.category || "Clean-up");
+    setNewDescription(selectedEvent.description || "");
+    setNewDate(selectedEvent.date || "");
+    setNewTime(selectedEvent.time || "");
+    setNewLocation(selectedEvent.location || "");
+    setNewCapacity(String(selectedEvent.capacity || 50));
+    setNewImageUri(selectedEvent.imageUrl || null);
+    if (selectedEvent.coordinates) {
+      setNewCoordinates(selectedEvent.coordinates);
+    }
+    setAddModalOpen(true);
+  };
 
   // =======================================================
   // RENDER
@@ -990,6 +1126,7 @@ const confirmRejectEvent = async () => {
           event={selectedEvent}
           isModerating={isModerating}
           onBack={closeEventDetails}
+          onOpenImage={setPreviewImageUrl}
           onReject={() => {
             setRejectionReason("");
             setRejectionRemarks("");
@@ -1072,11 +1209,10 @@ const confirmRejectEvent = async () => {
                 style={
                   styles.addButton
                 }
-                onPress={() =>
-                  setAddModalOpen(
-                    true
-                  )
-                }
+                onPress={() => {
+                  setEditingEventId(null);
+                  setAddModalOpen(true);
+                }}
               >
                 <Plus
                   size={18 * s}
@@ -1834,15 +1970,23 @@ const confirmRejectEvent = async () => {
                               styles.eventThumbnail
                             }
                           >
-                            {event.imageUrl ? (
-                              <Image
-                                source={{
-                                  uri: event.imageUrl,
-                                }}
-                                style={
-                                  styles.eventThumbnailImage
+                            {getEventImages(event)[0] ? (
+                              <Pressable
+                                onPress={() =>
+                                  setPreviewImageUrl(
+                                    getEventImages(event)[0]
+                                  )
                                 }
-                              />
+                              >
+                                <Image
+                                  source={{
+                                    uri: getEventImages(event)[0],
+                                  }}
+                                  style={
+                                    styles.eventThumbnailImage
+                                  }
+                                />
+                              </Pressable>
                             ) : (
                               <CalendarDays
                                 size={
@@ -2116,6 +2260,61 @@ const confirmRejectEvent = async () => {
                               }
                             >
                               View Event
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.viewButton, { marginTop: 6 }]}
+                            onPress={() => {
+                              setSelectedEvent(event);
+                              setEditingEventId(event.id);
+                              setNewTitle(event.title || "");
+                              setNewCategory(event.category || "Clean-up");
+                              setNewDescription(event.description || "");
+                              setNewDate(event.date || "");
+                              setNewTime(event.time || "");
+                              setNewLocation(event.location || "");
+                              setNewCapacity(String(event.capacity || 50));
+                              setNewImageUri(event.imageUrl || null);
+                              if (event.coordinates) setNewCoordinates(event.coordinates);
+                              setAddModalOpen(true);
+                            }}
+                          >
+                            <Text style={styles.viewButtonText}>Edit</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            style={[styles.viewButton, { marginTop: 6 }]}
+                            onPress={() => {
+                              if (!admin) return;
+                              Alert.alert(
+                                "Delete event",
+                                `Permanently delete "${event.title}"?`,
+                                [
+                                  { text: "Cancel", style: "cancel" },
+                                  {
+                                    text: "Delete",
+                                    style: "destructive",
+                                    onPress: () => {
+                                      void (async () => {
+                                        try {
+                                          await deleteEvent(event.id, admin);
+                                          await reloadEvents();
+                                        } catch (error) {
+                                          Alert.alert(
+                                            "Delete failed",
+                                            error instanceof Error
+                                              ? error.message
+                                              : "Failed to delete event."
+                                          );
+                                        }
+                                      })();
+                                    },
+                                  },
+                                ]
+                              );
+                            }}
+                          >
+                            <Text style={[styles.viewButtonText, { color: "#b42318" }]}>
+                              Delete
                             </Text>
                           </TouchableOpacity>
                         </View>
@@ -2596,7 +2795,7 @@ const confirmRejectEvent = async () => {
                     styles.modalTitle
                   }
                 >
-                  Add New Event
+                  {editingEventId ? "Edit Event" : "Add New Event"}
                 </Text>
 
                 <Text
@@ -2604,9 +2803,9 @@ const confirmRejectEvent = async () => {
                     styles.modalSubtitle
                   }
                 >
-                  Create an event
-                  for administrator
-                  approval.
+                  {editingEventId
+                    ? "Update event details and save changes"
+                    : "Create an event for administrator approval."}
                 </Text>
               </View>
 
@@ -2614,11 +2813,10 @@ const confirmRejectEvent = async () => {
                 style={
                   styles.closeButton
                 }
-                onPress={() =>
-                  setAddModalOpen(
-                    false
-                  )
-                }
+                onPress={() => {
+                  setEditingEventId(null);
+                  setAddModalOpen(false);
+                }}
               >
                 <X
                   size={20}
@@ -2931,8 +3129,12 @@ const confirmRejectEvent = async () => {
                   }
                 >
                   {isCreating
-                    ? "Creating..."
-                    : "Create Event"}
+                    ? editingEventId
+                      ? "Saving..."
+                      : "Creating..."
+                    : editingEventId
+                      ? "Save Changes"
+                      : "Create Event"}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -3019,15 +3221,23 @@ const confirmRejectEvent = async () => {
                 </Pressable>
               </View>
 
-              {selectedEvent.imageUrl ? (
-                <Image
-                  source={{
-                    uri: selectedEvent.imageUrl,
-                  }}
-                  style={
-                    styles.detailsHeroImage
+              {getEventImages(selectedEvent)[0] ? (
+                <Pressable
+                  onPress={() =>
+                    setPreviewImageUrl(
+                      getEventImages(selectedEvent)[0]
+                    )
                   }
-                />
+                >
+                  <Image
+                    source={{
+                      uri: getEventImages(selectedEvent)[0],
+                    }}
+                    style={
+                      styles.detailsHeroImage
+                    }
+                  />
+                </Pressable>
               ) : null}
 
               <Text
@@ -3277,6 +3487,34 @@ const confirmRejectEvent = async () => {
 
                 <TouchableOpacity
                   style={[
+                    styles.saveButton,
+                    isModerating && {
+                      opacity: 0.7,
+                    },
+                  ]}
+                  onPress={openEditSelectedEvent}
+                  disabled={isModerating}
+                >
+                  <Text style={styles.saveText}>Edit Event</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.cancelButton,
+                    isModerating && {
+                      opacity: 0.6,
+                    },
+                  ]}
+                  onPress={handleDeleteSelectedEvent}
+                  disabled={isModerating}
+                >
+                  <Text style={[styles.cancelText, { color: "#b42318" }]}>
+                    Delete Event
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
                     styles.cancelButton,
                     isModerating && {
                       opacity: 0.6,
@@ -3303,6 +3541,10 @@ const confirmRejectEvent = async () => {
           )}
         </View>
       </Modal>
+      <EventImageLightbox
+        uri={previewImageUrl}
+        onClose={() => setPreviewImageUrl(null)}
+      />
     </AdminLayout>
   );
 }
@@ -3317,17 +3559,20 @@ function PendingEventDetailsPage({
   onBack,
   onReject,
   onApprove,
+  onOpenImage,
 }: {
   event: AdminEvent;
   isModerating: boolean;
   onBack: () => void;
   onReject: () => void;
   onApprove: () => void;
+  onOpenImage: (uri: string) => void;
 }) {
   const submitted =
     formatDateTime(
       event.createdAt
     );
+  const eventImages = getEventImages(event);
 
   return (
     <ScrollView
@@ -3394,16 +3639,18 @@ function PendingEventDetailsPage({
                   styles.pendingHeroWrapper
                 }
               >
-                {event.imageUrl ? (
-                  <Image
-                    source={{
-                      uri: event.imageUrl,
-                    }}
-                    style={
-                      styles.pendingHeroImage
-                    }
-                    resizeMode="cover"
-                  />
+                {eventImages[0] ? (
+                  <Pressable onPress={() => onOpenImage(eventImages[0])}>
+                    <Image
+                      source={{
+                        uri: eventImages[0],
+                      }}
+                      style={
+                        styles.pendingHeroImage
+                      }
+                      resizeMode="cover"
+                    />
+                  </Pressable>
                 ) : (
                   <View
                     style={
@@ -3738,16 +3985,23 @@ function PendingEventDetailsPage({
                 styles.pendingImagesRow
               }
             >
-              {event.imageUrl ? (
-                <Image
-                  source={{
-                    uri: event.imageUrl,
-                  }}
-                  style={
-                    styles.pendingGalleryImage
-                  }
-                  resizeMode="cover"
-                />
+              {eventImages.length ? (
+                eventImages.map((imageUrl, index) => (
+                  <Pressable
+                    key={`${imageUrl}-${index}`}
+                    onPress={() => onOpenImage(imageUrl)}
+                  >
+                    <Image
+                      source={{
+                        uri: imageUrl,
+                      }}
+                      style={
+                        styles.pendingGalleryImage
+                      }
+                      resizeMode="cover"
+                    />
+                  </Pressable>
+                ))
               ) : (
                 <View
                   style={

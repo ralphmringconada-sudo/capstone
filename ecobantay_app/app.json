@@ -42,7 +42,10 @@
               "host": "*"
             }
           ],
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
       ]
     },
@@ -74,7 +77,8 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Allow EcoBantay to use your location to verify where reports are submitted in Valencia."
         }
-      ]
+      ],
+      "expo-sqlite"
     ],
     "experiments": {
       "typedRoutes": true

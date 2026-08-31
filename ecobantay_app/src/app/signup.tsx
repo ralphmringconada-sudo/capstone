@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -17,17 +17,17 @@ import {
 import { useRouter } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
 import { FIREBASE_SETUP_MESSAGE } from '@/config/firebase';
+import { useGoogleAuth } from '@/hooks/useGoogleAuth';
 import { validateSignUpForm } from '@/utils/validation';
 
 /**
- * Purpose: Creates a new EcoBantay account with email registration.
- * How it works: 1) collects profile fields. 2) validates. 3) registers through auth context. 4) sends user to login.
- * Technologies Used: React Native, Expo Router, Firebase Authentication via AuthContext.
- * Why this implementation: Avoids Google AuthSession and DateTimePicker, which were crashing the Android APK.
+ * Purpose: Creates a new EcoBantay account with email or Google registration.
+ * How it works: 1) collects profile fields. 2) validates. 3) registers through auth context. 4) requires email verify for email accounts.
  */
 export default function SignUpScreen() {
   const router = useRouter();
-  const { register, logout, isFirebaseConfigured } = useAuth();
+  const { register, registerGoogle, logout, isFirebaseConfigured } = useAuth();
+  const { request, response, promptAsync, isGoogleConfigured } = useGoogleAuth();
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -38,6 +38,7 @@ export default function SignUpScreen() {
   const [birthdayText, setBirthdayText] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const submissionLockRef = useRef(false);
 
@@ -105,8 +106,8 @@ export default function SignUpScreen() {
       });
       await logout();
       Alert.alert(
-        'Account Created',
-        'Your account was created successfully. Please log in to continue.',
+        'Verify your email',
+        'We sent a verification link to your inbox. Open it, then log in to continue.',
         [{ text: 'OK', onPress: () => router.replace('/login') }],
       );
     } catch (err) {
@@ -116,6 +117,62 @@ export default function SignUpScreen() {
       setIsSubmitting(false);
     }
   };
+
+  const handleGoogleSignUp = async () => {
+    if (submissionLockRef.current) return;
+    if (!isGoogleConfigured) {
+      Alert.alert(
+        'Google Sign-In Not Configured',
+        'Add EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID to your .env file (Firebase → Authentication → Google → Web client ID).',
+      );
+      return;
+    }
+
+    setError('');
+    submissionLockRef.current = true;
+    setIsGoogleSubmitting(true);
+    try {
+      await promptAsync();
+    } catch {
+      submissionLockRef.current = false;
+      setError('Unable to open Google sign-up.');
+      setIsGoogleSubmitting(false);
+    }
+  };
+
+  useEffect(() => {
+    if (response?.type !== 'success') {
+      if (response?.type === 'error' || response?.type === 'dismiss') {
+        submissionLockRef.current = false;
+        setIsGoogleSubmitting(false);
+      }
+      return;
+    }
+
+    const idToken =
+      response.params.id_token ??
+      (response as { authentication?: { idToken?: string } }).authentication?.idToken;
+    if (!idToken) {
+      submissionLockRef.current = false;
+      setError('Google sign-up failed. Please try again.');
+      setIsGoogleSubmitting(false);
+      return;
+    }
+
+    (async () => {
+      try {
+        await registerGoogle(idToken);
+        router.replace('/home');
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Unable to sign up with Google.');
+      } finally {
+        submissionLockRef.current = false;
+        setIsGoogleSubmitting(false);
+      }
+    })();
+  }, [response, registerGoogle, router]);
+
+  const isBusy = isSubmitting || isGoogleSubmitting;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -151,7 +208,7 @@ export default function SignUpScreen() {
             value={firstName}
             onChangeText={setFirstName}
             autoCapitalize="words"
-            editable={!isSubmitting}
+            editable={!isBusy}
           />
           <TextInput
             style={[styles.input, styles.groupBottom]}
@@ -160,7 +217,7 @@ export default function SignUpScreen() {
             value={lastName}
             onChangeText={setLastName}
             autoCapitalize="words"
-            editable={!isSubmitting}
+            editable={!isBusy}
           />
 
           <TextInput
@@ -170,7 +227,7 @@ export default function SignUpScreen() {
             value={birthdayText}
             onChangeText={setBirthdayText}
             keyboardType="numbers-and-punctuation"
-            editable={!isSubmitting}
+            editable={!isBusy}
           />
 
           <TextInput
@@ -182,16 +239,16 @@ export default function SignUpScreen() {
             keyboardType="email-address"
             autoCapitalize="none"
             autoCorrect={false}
-            editable={!isSubmitting}
+            editable={!isBusy}
           />
           <TextInput
             style={[styles.input, styles.groupBottom]}
-            placeholder="Contact Number"
+            placeholder="Contact (09XXXXXXXXX)"
             placeholderTextColor="#83a96e"
             value={contactNumber}
             onChangeText={setContactNumber}
             keyboardType="phone-pad"
-            editable={!isSubmitting}
+            editable={!isBusy}
           />
 
           <View style={styles.passwordRow}>
@@ -202,7 +259,7 @@ export default function SignUpScreen() {
               value={password}
               onChangeText={setPassword}
               secureTextEntry={!showPassword}
-              editable={!isSubmitting}
+              editable={!isBusy}
             />
             <TouchableOpacity
               style={styles.showButton}
@@ -219,21 +276,34 @@ export default function SignUpScreen() {
             value={confirmPassword}
             onChangeText={setConfirmPassword}
             secureTextEntry={!showPassword}
-            editable={!isSubmitting}
+            editable={!isBusy}
           />
 
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
 
           <TouchableOpacity
             activeOpacity={0.85}
-            style={[styles.button, isSubmitting && styles.buttonDisabled]}
+            style={[styles.button, isBusy && styles.buttonDisabled]}
             onPress={handleSignUp}
-            disabled={isSubmitting}
+            disabled={isBusy}
           >
             {isSubmitting ? (
               <ActivityIndicator color="#ffffff" />
             ) : (
               <Text style={styles.buttonText}>SIGN UP</Text>
+            )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.85}
+            style={[styles.googleButton, (isBusy || !request) && styles.buttonDisabled]}
+            onPress={handleGoogleSignUp}
+            disabled={isBusy || !request}
+          >
+            {isGoogleSubmitting ? (
+              <ActivityIndicator color="#3f5c2b" />
+            ) : (
+              <Text style={styles.googleButtonText}>Continue with Google</Text>
             )}
           </TouchableOpacity>
 
@@ -340,6 +410,23 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   buttonDisabled: { opacity: 0.7 },
+  googleButton: {
+    width: '100%',
+    maxWidth: 260,
+    backgroundColor: '#ffffff',
+    height: 48,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#3f5c2b',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 12,
+  },
+  googleButtonText: {
+    fontFamily: 'Montserrat-Bold',
+    color: '#3f5c2b',
+    fontSize: 15,
+  },
   buttonText: {
     fontFamily: 'Montserrat-Bold',
     color: '#ffffff',

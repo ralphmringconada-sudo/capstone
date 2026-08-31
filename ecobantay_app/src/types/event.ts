@@ -19,7 +19,10 @@ export type EcoEvent = {
   submittedBy: string;
   submittedArea: string;
   submittedByUid?: string;
+  /** Primary/cover image (first of images, kept for older clients). */
   imageUrl?: string;
+  /** All event photo download URLs. */
+  images?: string[];
   coordinates?: EventCoordinates;
   createdAt: string;
   updatedAt?: string;
@@ -42,7 +45,8 @@ export type SubmitEventInput = {
   barangay: string;
   capacity: number;
   coordinates: EventCoordinates;
-  imageUri?: string | null;
+  /** One or more local image URIs to upload (max 5). */
+  imageUris?: string[];
   user: {
     uid: string;
     firstName: string;

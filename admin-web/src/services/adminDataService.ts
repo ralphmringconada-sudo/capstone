@@ -28,6 +28,8 @@ import {
 import { getApps, initializeApp } from 'firebase/app';
 import { auth, db } from '@/config/firebase';
 import { firebaseConfig } from '@/config/firebaseConfig';
+import { createUserNotification } from '@/services/notificationService';
+import { createAdminNotification } from '@/services/adminNotificationService';
 import type {
   ActivityLog,
   AdminEvent,
@@ -145,19 +147,116 @@ export async function updateEventStatus(
   eventId: string,
   status: AdminEvent['status'],
   admin: AdminProfile,
+  details?: { rejectionReason?: string; rejectionRemarks?: string },
 ): Promise<void> {
   const eventRef = doc(db, 'events', eventId);
   const activityRef = doc(collection(db, 'admin_activity_logs'));
   const now = new Date().toISOString();
+  const eventSnapBefore = await getDoc(eventRef);
+  const existing = eventSnapBefore.data() || {};
+  const ownerUid = (existing.submittedByUid as string | undefined) || '';
+  const eventTitle = (existing.title as string | undefined) || 'your event';
+
+  const patch: Record<string, unknown> = { status, updatedAt: now };
+  if (status === 'Rejected') {
+    patch.rejectionReason = details?.rejectionReason || '';
+    patch.rejectionRemarks = details?.rejectionRemarks || '';
+    patch.rejectedAt = now;
+  }
+
   const batch = writeBatch(db);
-  batch.update(eventRef, { status, updatedAt: now });
+  batch.update(eventRef, patch);
   batch.set(activityRef, {
     adminUid: admin.uid,
     adminName: admin.fullName,
     action: `${status} Event`,
     module: 'Events',
     recordId: eventId,
-    details: `Changed event status to ${status}`,
+    details:
+      status === 'Rejected' && details?.rejectionReason
+        ? `Rejected: ${details.rejectionReason}${details.rejectionRemarks ? ` — ${details.rejectionRemarks}` : ''}`
+        : `Changed event status to ${status}`,
+    createdAt: now,
+  });
+  await batch.commit();
+
+  if (ownerUid) {
+    const reasonText =
+      status === 'Rejected' && details?.rejectionReason
+        ? ` Reason: ${details.rejectionReason}${details.rejectionRemarks ? ` (${details.rejectionRemarks})` : ''}.`
+        : '';
+    await createUserNotification({
+      userId: ownerUid,
+      title: eventTitle,
+      body: `Your event status was updated to ${status}.${reasonText}`,
+      type: 'event',
+      relatedId: eventId,
+      statusLabel: status,
+    });
+  }
+
+  await createAdminNotification({
+    title: `Event ${status}`,
+    body: `${admin.fullName} set "${eventTitle}" to ${status}.`,
+    type: status === 'Upcoming' || status === 'Rejected' ? 'approval' : 'event',
+    relatedId: eventId,
+    actorUid: admin.uid,
+    actorName: admin.fullName,
+  });
+}
+
+/** Updates editable event fields (admin). */
+export async function updateEvent(
+  eventId: string,
+  input: Partial<
+    Pick<
+      AdminEvent,
+      | 'title'
+      | 'description'
+      | 'category'
+      | 'date'
+      | 'time'
+      | 'location'
+      | 'submittedArea'
+      | 'capacity'
+      | 'imageUrl'
+      | 'images'
+      | 'coordinates'
+      | 'status'
+    >
+  >,
+  admin: AdminProfile,
+): Promise<void> {
+  const eventRef = doc(db, 'events', eventId);
+  const activityRef = doc(collection(db, 'admin_activity_logs'));
+  const now = new Date().toISOString();
+  const batch = writeBatch(db);
+  batch.update(eventRef, { ...input, updatedAt: now });
+  batch.set(activityRef, {
+    adminUid: admin.uid,
+    adminName: admin.fullName,
+    action: 'Updated Event',
+    module: 'Events',
+    recordId: eventId,
+    details: `Updated event fields for ${eventId}`,
+    createdAt: now,
+  });
+  await batch.commit();
+}
+
+/** Permanently deletes an event and audits the action. */
+export async function deleteEvent(eventId: string, admin: AdminProfile): Promise<void> {
+  const activityRef = doc(collection(db, 'admin_activity_logs'));
+  const now = new Date().toISOString();
+  const batch = writeBatch(db);
+  batch.delete(doc(db, 'events', eventId));
+  batch.set(activityRef, {
+    adminUid: admin.uid,
+    adminName: admin.fullName,
+    action: 'Deleted Event',
+    module: 'Events',
+    recordId: eventId,
+    details: 'Event permanently deleted by admin',
     createdAt: now,
   });
   await batch.commit();
@@ -252,8 +351,29 @@ export async function updateReportStatus(
     details: `${details} (Status: ${status})`,
     createdAt: now,
   });
-  // Commit the moderation decision and audit trail atomically.
   await batch.commit();
+
+  const ownerUid = (existing.data()?.reportedByUid as string | undefined) || '';
+  const reportTitle = (existing.data()?.title as string | undefined) || 'your report';
+  if (ownerUid) {
+    await createUserNotification({
+      userId: ownerUid,
+      title: reportTitle,
+      body: `Your report status was updated to ${status}.${details ? ` ${details}` : ''}`,
+      type: 'report',
+      relatedId: reportId,
+      statusLabel: status,
+    });
+  }
+
+  await createAdminNotification({
+    title: `Report ${status}`,
+    body: `${admin.fullName} set "${reportTitle}" to ${status}.`,
+    type: 'approval',
+    relatedId: reportId,
+    actorUid: admin.uid,
+    actorName: admin.fullName,
+  });
 }
 
 /**
@@ -317,7 +437,7 @@ export async function updateAppUserProfile(
  */
 export async function updateAdminProfileInfo(
   adminId: string,
-  data: Partial<Pick<AdminProfile, 'fullName' | 'contactNumber' | 'username'>>,
+  data: Partial<Pick<AdminProfile, 'fullName' | 'contactNumber' | 'username' | 'notificationPrefs'>>,
   actor: AdminProfile,
 ) {
   // Persist only the administrator fields intentionally exposed by the settings workflow.
@@ -332,7 +452,9 @@ export async function updateAdminProfileInfo(
     action: 'Updated Admin Profile',
     module: 'Users',
     recordId: adminId,
-    details: 'Updated administrator information',
+    details: data.notificationPrefs
+      ? 'Updated administrator notification settings'
+      : 'Updated administrator information',
   });
 }
 

@@ -1,5 +1,5 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { View, Text, TouchableOpacity, SafeAreaView, StatusBar, StyleSheet, Image, Animated, ActivityIndicator, RefreshControl, ScrollView, Modal } from 'react-native';
+import { View, Text, TouchableOpacity, SafeAreaView, StatusBar, StyleSheet, Image, Animated, ActivityIndicator, RefreshControl, ScrollView, Modal, Alert } from 'react-native';
 import { Shadow } from 'react-native-shadow-2';
 import { useRouter, Stack, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -7,6 +7,8 @@ import { useAuth } from '@/context/AuthContext';
 import { fetchUserReports, formatReportDate } from '@/services/reportService';
 import { fetchEventsForHome } from '@/services/eventService';
 import { attachDisplayImagesToReports } from '@/services/reportImageService';
+import { countPendingOfflineReports, listPendingOfflineReports, type OfflineReportRow } from '@/services/offlineReportQueue';
+import { syncPendingOfflineReports } from '@/services/offlineReportSync';
 import { getReportStatusColors, USER_REPORT_TABS, type UserReportTabKey } from '@/utils/reportStatus';
 import {
   getEventStatusColors,
@@ -16,6 +18,12 @@ import {
 } from '@/utils/eventStatus';
 import type { EcoReport } from '@/types/report';
 import type { EcoEvent } from '@/types/event';
+import {
+  fetchUserNotifications,
+  markAllNotificationsRead,
+  markNotificationRead,
+  type AppNotification,
+} from '@/services/notificationService';
 
 type ReportWithImages = EcoReport & { displayImages: string[] };
 
@@ -39,8 +47,9 @@ export default function HomeScreen() {
   // mode. Combined with the status tab as an AND in filteredEvents below.
   const [eventOwnershipFilter, setEventOwnershipFilter] = useState<'ALL' | 'MINE' | 'PUBLIC'>('ALL');
   const [viewMode, setViewMode] = useState<'Reports' | 'Events'>('Reports');
-  // UI-only for now: no real notification data or read/unread state, just the popover.
   const [showNotifications, setShowNotifications] = useState(false);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [loadingNotifications, setLoadingNotifications] = useState(false);
   const router = useRouter();
   const { user } = useAuth();
 
@@ -51,6 +60,9 @@ export default function HomeScreen() {
   const [isLoadingReports, setIsLoadingReports] = useState(false);
   const [isLoadingEvents, setIsLoadingEvents] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [offlinePendingCount, setOfflinePendingCount] = useState(0);
+  const [offlineDrafts, setOfflineDrafts] = useState<OfflineReportRow[]>([]);
+  const [showOfflineDetails, setShowOfflineDetails] = useState(false);
 
   // Dynamic header height based on the active view
   const headerHeight = viewMode === 'Events' ? 482 : 440;
@@ -153,21 +165,90 @@ export default function HomeScreen() {
     }
   }, [user?.uid]);
 
+  const loadOfflinePending = useCallback(async () => {
+    if (!user?.uid) {
+      setOfflinePendingCount(0);
+      setOfflineDrafts([]);
+      return;
+    }
+    try {
+      const drafts = await listPendingOfflineReports(user.uid);
+      setOfflineDrafts(drafts);
+      setOfflinePendingCount(drafts.length || (await countPendingOfflineReports(user.uid)));
+    } catch {
+      setOfflinePendingCount(0);
+      setOfflineDrafts([]);
+    }
+  }, [user?.uid]);
+
+  const loadNotifications = useCallback(async () => {
+    if (!user?.uid) {
+      setNotifications([]);
+      return;
+    }
+    try {
+      setLoadingNotifications(true);
+      setNotifications(await fetchUserNotifications(user.uid));
+    } catch {
+      setNotifications([]);
+    } finally {
+      setLoadingNotifications(false);
+    }
+  }, [user?.uid]);
+
+  const openNotifications = useCallback(async () => {
+    setShowNotifications(true);
+    await loadNotifications();
+  }, [loadNotifications]);
+
+  const handleNotificationPress = useCallback(
+    async (item: AppNotification) => {
+      if (!item.read) {
+        try {
+          await markNotificationRead(item.id);
+          setNotifications((prev) =>
+            prev.map((n) => (n.id === item.id ? { ...n, read: true } : n)),
+          );
+        } catch {
+          /* ignore */
+        }
+      }
+      setShowNotifications(false);
+      if (item.type === 'report' && item.relatedId) {
+        router.push({ pathname: '/view-report', params: { id: item.relatedId } });
+      } else if (item.type === 'event' && item.relatedId) {
+        router.push({ pathname: '/view-event', params: { id: item.relatedId } });
+      }
+    },
+    [router],
+  );
+
   useFocusEffect(
     useCallback(() => {
       loadReports();
       loadEvents();
-    }, [loadReports, loadEvents]),
+      loadOfflinePending();
+      loadNotifications();
+    }, [loadReports, loadEvents, loadOfflinePending, loadNotifications]),
   );
 
   const onRefresh = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      await Promise.all([loadReports(), loadEvents()]);
+      if (user?.uid) {
+        const result = await syncPendingOfflineReports(user.uid);
+        if (result.synced > 0 || result.skippedDuplicates > 0 || result.failed > 0) {
+          Alert.alert(
+            'Offline sync',
+            `Uploaded: ${result.synced}\nDuplicates skipped: ${result.skippedDuplicates}\nFailed: ${result.failed}\nStill waiting: ${result.remaining}`,
+          );
+        }
+      }
+      await Promise.all([loadReports(), loadEvents(), loadOfflinePending()]);
     } finally {
       setIsRefreshing(false);
     }
-  }, [loadReports, loadEvents]);
+  }, [loadReports, loadEvents, loadOfflinePending, user?.uid]);
 
   const filteredReports = reports.filter((report) => {
     const tab = USER_REPORT_TABS.find((item) => item.key === activeReportTab);
@@ -235,7 +316,7 @@ export default function HomeScreen() {
               </View>
 
               <View style={styles.topRight}>
-                <TouchableOpacity activeOpacity={0.7} onPress={() => setShowNotifications(true)}>
+                <TouchableOpacity activeOpacity={0.7} onPress={openNotifications}>
                   <Image source={require('@/assets/images/notification_icon.png')} style={styles.iconPlaceholder} />
                 </TouchableOpacity>
 
@@ -315,6 +396,15 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </View>
             </View>
+
+            {offlinePendingCount > 0 ? (
+              <TouchableOpacity activeOpacity={0.85} onPress={() => setShowOfflineDetails(true)}>
+                <Text style={styles.offlineBanner}>
+                  {offlinePendingCount} offline report{offlinePendingCount === 1 ? '' : 's'} waiting to
+                  upload. Tap for sync status · pull down to sync when online.
+                </Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           <View style={styles.tabsSection}>
@@ -631,8 +721,57 @@ export default function HomeScreen() {
         />
       </View>
 
-      {/* UI-only preview of the notification popover — sample content, no real data or
-          read/unread behavior wired up yet. Opens from the bell icon next to settings. */}
+      <Modal
+        visible={showOfflineDetails}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowOfflineDetails(false)}
+      >
+        <TouchableOpacity
+          style={styles.notificationBackdrop}
+          activeOpacity={1}
+          onPress={() => setShowOfflineDetails(false)}
+        >
+          <TouchableOpacity activeOpacity={1} style={styles.notificationCard}>
+            <Text style={styles.notificationHeaderTitle}>Offline sync status</Text>
+            {offlineDrafts.length === 0 ? (
+              <Text style={styles.notificationEmpty}>No offline drafts.</Text>
+            ) : (
+              offlineDrafts.map((draft) => {
+                let summary = 'Saved report';
+                try {
+                  const payload = JSON.parse(draft.payloadJson) as { categoryName?: string };
+                  summary = payload.categoryName || summary;
+                } catch {
+                  /* ignore */
+                }
+                return (
+                  <View key={draft.id} style={{ marginBottom: 12 }}>
+                    <Text style={styles.notificationTitle}>{summary}</Text>
+                    <Text style={styles.notificationDesc}>
+                      Status: {draft.syncStatus.toUpperCase()}
+                      {draft.lastError ? `\nError: ${draft.lastError}` : ''}
+                    </Text>
+                    <Text style={styles.notificationDesc}>
+                      Saved: {formatReportDate(draft.createdAt)}
+                    </Text>
+                  </View>
+                );
+              })
+            )}
+            <TouchableOpacity
+              style={{ marginTop: 8 }}
+              onPress={async () => {
+                setShowOfflineDetails(false);
+                await onRefresh();
+              }}
+            >
+              <Text style={styles.notificationMarkAll}>Sync now</Text>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </TouchableOpacity>
+      </Modal>
+
       <Modal
         visible={showNotifications}
         transparent
@@ -645,44 +784,62 @@ export default function HomeScreen() {
           onPress={() => setShowNotifications(false)}
         >
           <TouchableOpacity activeOpacity={1} style={styles.notificationCard}>
-            <View style={styles.notificationItem}>
-              <View style={styles.notificationIconCircle}>
-                <Text style={styles.notificationIconText}>i</Text>
-              </View>
-              <View style={styles.notificationTextBlock}>
-                <Text style={styles.notificationTitle}>EVENT NAME</Text>
-                <Text style={styles.notificationDesc}>
-                  Add main takeaway points, quotes, anecdotes, or even a very very short story.
-                </Text>
-                <View style={styles.notificationPillRow}>
-                  <View style={styles.notificationPillNeutral}>
-                    <Text style={styles.notificationPillNeutralText}>Apr 1, 2025</Text>
-                  </View>
-                  <View style={styles.notificationPillNeutral}>
-                    <Text style={styles.notificationPillNeutralText}>9:41 AM</Text>
-                  </View>
-                </View>
-              </View>
+            <View style={styles.notificationHeaderRow}>
+              <Text style={styles.notificationHeaderTitle}>Notifications</Text>
+              {notifications.some((item) => !item.read) ? (
+                <TouchableOpacity
+                  onPress={async () => {
+                    if (!user?.uid) return;
+                    await markAllNotificationsRead(user.uid);
+                    setNotifications((prev) => prev.map((item) => ({ ...item, read: true })));
+                  }}
+                >
+                  <Text style={styles.notificationMarkAll}>Mark all read</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
 
-            <View style={styles.notificationDivider} />
-
-            <View style={styles.notificationItem}>
-              <View style={styles.notificationIconCircle}>
-                <Text style={styles.notificationIconText}>i</Text>
-              </View>
-              <View style={styles.notificationTextBlock}>
-                <Text style={styles.notificationTitle}>REPORT NAME</Text>
-                <Text style={styles.notificationDesc}>
-                  Add main takeaway points, quotes, anecdotes, or even a very very short story.
-                </Text>
-                <View style={styles.notificationPillRow}>
-                  <View style={styles.notificationPillBlue}>
-                    <Text style={styles.notificationPillBlueText}>In-Review</Text>
-                  </View>
+            {loadingNotifications ? (
+              <ActivityIndicator color="#3B703C" style={{ marginVertical: 20 }} />
+            ) : notifications.length === 0 ? (
+              <Text style={styles.notificationEmpty}>No notifications yet.</Text>
+            ) : (
+              notifications.map((item, index) => (
+                <View key={item.id}>
+                  {index > 0 ? <View style={styles.notificationDivider} /> : null}
+                  <TouchableOpacity
+                    style={styles.notificationItem}
+                    activeOpacity={0.8}
+                    onPress={() => handleNotificationPress(item)}
+                  >
+                    <View
+                      style={[
+                        styles.notificationIconCircle,
+                        !item.read && styles.notificationIconUnread,
+                      ]}
+                    >
+                      <Text style={styles.notificationIconText}>i</Text>
+                    </View>
+                    <View style={styles.notificationTextBlock}>
+                      <Text style={styles.notificationTitle}>{item.title}</Text>
+                      <Text style={styles.notificationDesc}>{item.body}</Text>
+                      <View style={styles.notificationPillRow}>
+                        {item.statusLabel ? (
+                          <View style={styles.notificationPillBlue}>
+                            <Text style={styles.notificationPillBlueText}>{item.statusLabel}</Text>
+                          </View>
+                        ) : null}
+                        <View style={styles.notificationPillNeutral}>
+                          <Text style={styles.notificationPillNeutralText}>
+                            {formatReportDate(item.createdAt)}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  </TouchableOpacity>
                 </View>
-              </View>
-            </View>
+              ))
+            )}
           </TouchableOpacity>
         </TouchableOpacity>
       </Modal>
@@ -755,7 +912,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     includeFontPadding: false,
   },
-  
+  offlineBanner: {
+    fontFamily: 'Montserrat-Semi-Bold',
+    fontSize: 11,
+    color: '#7a5a00',
+    backgroundColor: '#FFF0B8',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    marginTop: 10,
+    includeFontPadding: false,
+  },
+
   // Segmented Control Updated Styles
   segmentedControlWrapper: {
     backgroundColor: 'rgba(255, 255, 255, 0.5)',
@@ -1006,11 +1174,35 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     paddingVertical: 16,
     paddingHorizontal: 16,
+    maxHeight: '70%',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 10,
     elevation: 6,
+  },
+  notificationHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  notificationHeaderTitle: {
+    fontFamily: 'Montserrat-Bold',
+    fontSize: 16,
+    color: '#1f3b20',
+  },
+  notificationMarkAll: {
+    fontFamily: 'Montserrat-Semi-Bold',
+    fontSize: 12,
+    color: '#3B703C',
+  },
+  notificationEmpty: {
+    fontFamily: 'Montserrat-Regular',
+    fontSize: 13,
+    color: '#666666',
+    textAlign: 'center',
+    paddingVertical: 16,
   },
   notificationItem: {
     flexDirection: 'row',
@@ -1025,6 +1217,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,
+  },
+  notificationIconUnread: {
+    backgroundColor: '#c2dc68',
   },
   notificationIconText: {
     fontFamily: 'Montserrat-Bold',

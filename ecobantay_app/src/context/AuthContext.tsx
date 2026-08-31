@@ -21,6 +21,7 @@ import {
   registerWithEmail,
   registerWithGoogle,
 } from '@/services/authService';
+import { startOfflineReportSync, stopOfflineReportSync } from '@/services/offlineReportSync';
 import type { UserProfile } from '@/types/user';
 
 type AuthContextValue = {
@@ -98,6 +99,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
          */
         try {
           await assertNotAdminAccount(firebaseUser.uid);
+          // Email accounts must verify before a mobile session is restored.
+          const providers = firebaseUser.providerData.map((item) => item.providerId);
+          const isPasswordAccount = providers.includes('password');
+          if (isPasswordAccount && !firebaseUser.emailVerified) {
+            await signOut(getAuthInstance());
+            setUser(null);
+            return;
+          }
           const profile = await getUserProfile(firebaseUser.uid);
           if (!profile) {
             await signOut(getAuthInstance());
@@ -121,6 +130,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       unsubscribe?.();
     };
   }, []);
+
+  // When a citizen session is active, sync any SQLite-queued offline reports.
+  useEffect(() => {
+    if (!user?.uid) {
+      stopOfflineReportSync();
+      return;
+    }
+    startOfflineReportSync(user.uid);
+    return () => {
+      stopOfflineReportSync();
+    };
+  }, [user?.uid]);
 
   /**
    * Purpose: Signs in with email credentials and updates provider state.

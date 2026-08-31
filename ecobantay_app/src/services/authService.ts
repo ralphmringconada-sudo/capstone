@@ -6,6 +6,7 @@ import {
   deleteUser,
   GoogleAuthProvider,
   sendPasswordResetEmail,
+  sendEmailVerification,
   updatePassword,
   EmailAuthProvider,
   reauthenticateWithCredential,
@@ -123,6 +124,12 @@ export async function registerWithEmail(input: {
 
     createdUser = credential.user;
 
+    await withTimeout(
+      sendEmailVerification(credential.user),
+      REQUEST_TIMEOUT_MS,
+      'Account was created, but the verification email could not be sent. Check your inbox settings and try logging in later.',
+    );
+
     const profile: UserProfile = {
       uid: credential.user.uid,
       firstName: input.firstName.trim(),
@@ -187,6 +194,19 @@ export async function loginWithEmail(email: string, password: string): Promise<U
      */
     const credential = await signInWithEmailAndPassword(auth(), trimmedEmail, password);
     await assertNotAdminAccount(credential.user.uid);
+
+    if (!credential.user.emailVerified) {
+      try {
+        await sendEmailVerification(credential.user);
+      } catch {
+        // Ignore resend failures; the main message still asks the user to verify.
+      }
+      await signOut(auth());
+      throw new Error(
+        'Please verify your email before signing in. We sent a verification link to your inbox.',
+      );
+    }
+
     const profile = await getUserProfile(credential.user.uid);
 
     /*
@@ -205,7 +225,8 @@ export async function loginWithEmail(email: string, password: string): Promise<U
     if (
       error instanceof Error &&
       (error.message.includes('profile was not found in the database') ||
-        error.message.includes('Admin accounts must use'))
+        error.message.includes('Admin accounts must use') ||
+        error.message.includes('verify your email'))
     ) {
       throw error;
     }

@@ -28,6 +28,12 @@ import {
   formatReportTimestamp,
   submitReport,
 } from '@/services/reportService';
+import { enqueueOfflineReport } from '@/services/offlineReportQueue';
+import {
+  checkIsOnline,
+  isLikelyOfflineError,
+  syncPendingOfflineReports,
+} from '@/services/offlineReportSync';
 import type { ReportCoordinates, ReportImageMetadata } from '@/types/report';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -36,6 +42,7 @@ const CAROUSEL_WIDTH = SCREEN_WIDTH - CARD_PADDING;
 const ITEM_SIZE = 80;
 const CENTER_OFFSET = (CAROUSEL_WIDTH - ITEM_SIZE) / 2;
 const VALENCIA_CITY = 'Valencia, Negros Oriental';
+const MAX_PROOF_PHOTOS = 5;
 const DEFAULT_REGION = {
   latitude: 9.3167,
   longitude: 123.245,
@@ -99,12 +106,12 @@ export default function CreateReportScreen() {
   const [coordinates, setCoordinates] = useState<ReportCoordinates | null>(null);
   const [locationAccuracy, setLocationAccuracy] = useState<number | undefined>();
   /*
-   * Evidence state: attachmentUri feeds the watermark preview, stampedImageUri
-   * stores the processed upload file, and photoTimestamp records capture time.
+   * Evidence state: proofPhotos holds each camera capture (preview + upload URI + timestamp).
+   * First photo timestamp is also used as the report-level imageTimestamp.
    */
-  const [attachmentUri, setAttachmentUri] = useState<string | null>(null);
-  const [stampedImageUri, setStampedImageUri] = useState<string | null>(null);
-  const [photoTimestamp, setPhotoTimestamp] = useState<string | null>(null);
+  const [proofPhotos, setProofPhotos] = useState<
+    Array<{ previewUri: string; stampedUri: string; timestamp: string }>
+  >([]);
   /*
    * Workflow state: independent flags prevent duplicate submission, communicate
    * image processing and GPS retrieval, and surface recoverable errors.
@@ -251,33 +258,35 @@ export default function CreateReportScreen() {
 
   /**
    * Purpose: Produces a clear upload image while preserving verification data separately.
-   * How it works: 1) stores the capture time for the preview. 2) normalizes the original photo. 3) returns the clear JPEG for upload.
-   * Technologies Used: React state and Expo ImageManipulator.
+   * How it works: 1) normalizes the original photo. 2) returns a standard JPEG URI for preview and upload.
+   * Technologies Used: Expo ImageManipulator.
    * Why this implementation: Keeping metadata outside the bitmap avoids Android screenshot color changes while Firestore retains verification details.
    */
-  const captureStampedImage = async (imageUri: string, timestamp: string): Promise<string> => {
+  const captureStampedImage = async (imageUri: string): Promise<string> => {
     /* Convert camera HDR/wide-color data into a standard JPEG before any view capture occurs. */
     const normalized = await ImageManipulator.manipulateAsync(
       imageUri,
       [{ resize: { width: 1600 } }],
       { compress: 1, format: ImageManipulator.SaveFormat.JPEG },
     );
-
-    setAttachmentUri(normalized.uri);
-    setPhotoTimestamp(timestamp);
     return normalized.uri;
   };
 
   /**
-   * Purpose: Captures a new camera photo and converts it into report evidence.
-   * How it works: 1) requires location. 2) requests camera permission. 3) launches capture. 4) stamps and stores the image.
+   * Purpose: Captures another camera photo and appends it to the proof set.
+   * How it works: 1) requires location. 2) enforces max count. 3) requests camera. 4) stamps and appends.
    * Technologies Used: Expo ImagePicker, Expo ImageManipulator, and React state.
-   * Why this implementation: Requiring an in-app camera capture after location reduces unverifiable gallery submissions.
+   * Why this implementation: Multiple in-app captures after GPS improve evidence coverage without gallery uploads.
    */
   const takePhotoWithCamera = async () => {
     /* Validation: location must be established before evidence is captured and watermarked. */
     if (!coordinates) {
       Alert.alert('Location required', 'Please use your location first before taking a photo.');
+      return;
+    }
+
+    if (proofPhotos.length >= MAX_PROOF_PHOTOS) {
+      Alert.alert('Photo limit', `You can attach up to ${MAX_PROOF_PHOTOS} proof photos.`);
       return;
     }
 
@@ -299,40 +308,37 @@ export default function CreateReportScreen() {
     if (result.canceled) return;
 
     /*
-     * Async image flow: expose processing state, generate one capture timestamp,
-     * and store only the completed stamped image as upload-ready evidence.
+     * Async image flow: expose processing state, generate a capture timestamp,
+     * and append the completed image to the multi-photo evidence list.
      */
     try {
       setImageProcessing(true);
       const timestamp = formatReportTimestamp();
-      const stampedUri = await captureStampedImage(result.assets[0].uri, timestamp);
-      setStampedImageUri(stampedUri);
+      const stampedUri = await captureStampedImage(result.assets[0].uri);
+      setProofPhotos((prev) => {
+        if (prev.length >= MAX_PROOF_PHOTOS) return prev;
+        return [...prev, { previewUri: stampedUri, stampedUri, timestamp }];
+      });
     } catch (processingError) {
-      /* Error handling: clear partial evidence so stale image metadata cannot be submitted. */
       const message =
         processingError instanceof Error
           ? processingError.message
           : 'Failed to process the photo. Please try again.';
       console.error('Proof photo processing failed:', processingError);
       Alert.alert('Image Error', message);
-      setAttachmentUri(null);
-      setStampedImageUri(null);
-      setPhotoTimestamp(null);
     } finally {
       setImageProcessing(false);
     }
   };
 
   /**
-   * Purpose: Removes the current proof image and its associated capture metadata.
-   * How it works: 1) clears source URI. 2) clears processed URI. 3) clears capture time.
+   * Purpose: Removes one proof photo from the evidence list.
+   * How it works: filters the selected index out of proofPhotos.
    * Technologies Used: React state.
-   * Why this implementation: Atomic cleanup prevents a replacement image from retaining stale evidence details.
+   * Why this implementation: Per-photo removal lets reporters replace bad shots without clearing all evidence.
    */
-  const clearAttachment = () => {
-    setAttachmentUri(null);
-    setStampedImageUri(null);
-    setPhotoTimestamp(null);
+  const removeProofPhoto = (index: number) => {
+    setProofPhotos((prev) => prev.filter((_, i) => i !== index));
   };
 
   /**
@@ -354,9 +360,9 @@ export default function CreateReportScreen() {
      * Evidence validation: narrative, GPS, processed image, and capture timestamp
      * must all exist before the submission flow can proceed.
      */
-    if (!description.trim() || !coordinates || !stampedImageUri || !photoTimestamp) {
+    if (!description.trim() || !coordinates || proofPhotos.length === 0) {
       const message =
-        'Please add your location, take a proof photo, and write a description before submitting.';
+        'Please add your location, take at least one proof photo, and write a description before submitting.';
       setError(message);
       Alert.alert('Missing fields', message);
       return;
@@ -372,7 +378,7 @@ export default function CreateReportScreen() {
    * Why this implementation: One final async boundary keeps evidence metadata and persistence status synchronized.
    */
   const finalizeSubmit = async () => {
-    if (!user || !coordinates || !stampedImageUri || !photoTimestamp) return;
+    if (!user || !coordinates || proofPhotos.length === 0) return;
     if (submittingRef.current || submitting) return;
 
     submittingRef.current = true;
@@ -380,10 +386,7 @@ export default function CreateReportScreen() {
       setSubmitting(true);
       setError(null);
 
-      /*
-       * Evidence metadata: preserve human-readable and machine-readable time,
-       * GPS, platform, barangay, city, and accuracy for later administrative review.
-       */
+      const photoTimestamp = proofPhotos[0].timestamp;
       const imageMetadata: ReportImageMetadata = {
         capturedAt: photoTimestamp,
         capturedAtIso: new Date().toISOString(),
@@ -395,18 +398,14 @@ export default function CreateReportScreen() {
         accuracy: locationAccuracy,
       };
 
-      /*
-       * Firebase persistence flow: the service uploads the proof image to Storage
-       * before creating the complete report document in Firestore.
-       */
-      await submitReport({
+      const payload = {
         categoryId: selectedCategory.id,
         categoryName: selectedCategory.name,
         description,
         locationText: locationText || `${barangay}, ${VALENCIA_CITY}`,
         barangay,
         coordinates,
-        imageUri: stampedImageUri,
+        imageUris: proofPhotos.map((photo) => photo.stampedUri),
         photoTimestamp,
         imageMetadata,
         user: {
@@ -415,13 +414,45 @@ export default function CreateReportScreen() {
           lastName: user.lastName,
           email: user.email,
         },
-      });
+      };
 
-      Alert.alert('Success', 'Report submitted successfully with timestamped image proof.');
-      router.replace('/home');
-      // Keep locked after success to block rapid re-submits before navigation finishes.
+      const online = await checkIsOnline();
+
+      // Offline: queue locally in SQLite and sync automatically when internet returns.
+      if (!online) {
+        await enqueueOfflineReport(payload);
+        Alert.alert(
+          'Saved offline',
+          'No internet connection. Your report was saved on this device and will upload to EcoBantay automatically when you are back online.',
+        );
+        router.replace('/home');
+        return;
+      }
+
+      try {
+        await submitReport(payload);
+        // Also push any older queued drafts now that we know the network works.
+        const syncResult = await syncPendingOfflineReports(user.uid);
+        const syncNote =
+          syncResult.synced > 0
+            ? `\nAlso uploaded ${syncResult.synced} previously saved offline report(s).`
+            : '';
+        Alert.alert('Success', `Report submitted successfully with timestamped image proof.${syncNote}`);
+        router.replace('/home');
+      } catch (submitError) {
+        // Network dropped mid-upload: keep the report on-device instead of losing it.
+        if (isLikelyOfflineError(submitError)) {
+          await enqueueOfflineReport(payload);
+          Alert.alert(
+            'Saved offline',
+            'Upload failed because of a network problem. Your report was saved on this device and will sync when internet is restored.',
+          );
+          router.replace('/home');
+          return;
+        }
+        throw submitError;
+      }
     } catch (submitError) {
-      /* Error handling: retain the completed form and evidence so the reporter can retry. */
       const message =
         submitError instanceof Error ? submitError.message : 'Failed to submit report. Please try again.';
       setError(message);
@@ -642,23 +673,44 @@ export default function CreateReportScreen() {
             <View style={styles.card}>
               <View style={styles.sectionHeader}>
                 <Image source={require('@/assets/images/information_icon.png')} style={styles.sectionIcon} />
-                <Text style={styles.sectionTitle}>Proof Image (Required)</Text>
+                <Text style={styles.sectionTitle}>
+                  Proof Images (Required) · {proofPhotos.length}/{MAX_PROOF_PHOTOS}
+                </Text>
               </View>
 
-              {attachmentUri ? (
+              {proofPhotos.length > 0 ? (
                 <View>
-                  <View style={styles.attachmentPreview}>
-                    <Image
-                      source={{ uri: attachmentUri }}
-                      style={styles.attachmentImage}
-                      resizeMode="cover"
-                    />
-                    <TouchableOpacity style={styles.clearAttachment} onPress={clearAttachment}>
-                      <Image source={require('@/assets/images/back_arrow.png')} style={styles.clearIcon} />
-                    </TouchableOpacity>
-                  </View>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.proofPhotosRow}
+                  >
+                    {proofPhotos.map((photo, index) => (
+                      <View key={`${photo.stampedUri}-${index}`} style={styles.proofPhotoCard}>
+                        <View style={styles.attachmentPreview}>
+                          <Image
+                            source={{ uri: photo.previewUri }}
+                            style={styles.attachmentImage}
+                            resizeMode="cover"
+                          />
+                          <TouchableOpacity
+                            style={styles.clearAttachment}
+                            onPress={() => removeProofPhoto(index)}
+                          >
+                            <Image
+                              source={require('@/assets/images/back_arrow.png')}
+                              style={styles.clearIcon}
+                            />
+                          </TouchableOpacity>
+                        </View>
+                        <Text style={styles.proofPhotoCaption} numberOfLines={1}>
+                          Photo {index + 1}
+                        </Text>
+                      </View>
+                    ))}
+                  </ScrollView>
                   <WatermarkOverlay
-                    timestamp={photoTimestamp || 'No timestamp'}
+                    timestamp={proofPhotos[0].timestamp}
                     locationInfo={locationInfo}
                     coordinates={coordinates}
                   />
@@ -669,20 +721,29 @@ export default function CreateReportScreen() {
                 <Shadow distance={1} startColor={'rgba(0, 0, 0, 0.1)'} offset={[0, 2]} style={{ width: '100%' }}>
                   <TouchableOpacity
                     activeOpacity={0.8}
-                    style={[styles.photoButton, imageProcessing && styles.photoButtonDisabled]}
+                    style={[
+                      styles.photoButton,
+                      (imageProcessing || proofPhotos.length >= MAX_PROOF_PHOTOS) && styles.photoButtonDisabled,
+                    ]}
                     onPress={takePhotoWithCamera}
-                    disabled={imageProcessing || isBusy}
+                    disabled={imageProcessing || isBusy || proofPhotos.length >= MAX_PROOF_PHOTOS}
                   >
                     <Text style={styles.photoButtonText}>
-                      {imageProcessing ? 'PROCESSING PHOTO...' : 'TAKE PHOTO'}
+                      {imageProcessing
+                        ? 'PROCESSING PHOTO...'
+                        : proofPhotos.length >= MAX_PROOF_PHOTOS
+                          ? 'PHOTO LIMIT REACHED'
+                          : proofPhotos.length > 0
+                            ? 'ADD ANOTHER PHOTO'
+                            : 'TAKE PHOTO'}
                     </Text>
                   </TouchableOpacity>
                 </Shadow>
               </View>
 
               <Text style={styles.helpText}>
-                The photo is stamped with the capture time, Valencia location, and GPS coordinates to help verify the
-                report.
+                Take up to {MAX_PROOF_PHOTOS} photos. Each is stamped with the capture time, Valencia location, and GPS
+                coordinates to help verify the report.
               </Text>
             </View>
           </Shadow>
@@ -861,8 +922,23 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     overflow: 'hidden',
     position: 'relative',
-    marginBottom: 12,
     backgroundColor: '#d9d9d9',
+  },
+  proofPhotosRow: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingBottom: 4,
+    marginBottom: 12,
+  },
+  proofPhotoCard: {
+    width: 220,
+  },
+  proofPhotoCaption: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#555555',
+    fontFamily: 'Montserrat-Semi-Bold',
+    includeFontPadding: false,
   },
   attachmentImage: { width: '100%', height: '100%' },
   watermarkOverlay: {

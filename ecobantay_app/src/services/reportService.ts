@@ -11,6 +11,7 @@ import {
 } from 'firebase/firestore';
 import { getDbInstance } from '@/config/firebase';
 import { uploadReportImage } from '@/services/firebaseStorageService';
+import { notifyAdminsOfActivity } from '@/services/adminActivityNotify';
 import type { EcoReport, SubmitReportInput } from '@/types/report';
 
 const VALENCIA_CITY = 'Valencia, Negros Oriental';
@@ -65,17 +66,26 @@ export function buildImageLocationText(
 }
 
 /**
- * Purpose: Persists a complete environmental report and its proof image.
- * How it works: 1) uploads evidence. 2) assembles normalized report metadata. 3) writes Firestore. 4) returns the ID.
+ * Purpose: Persists a complete environmental report and its proof image(s).
+ * How it works: 1) uploads each evidence photo. 2) assembles report metadata. 3) writes Firestore. 4) returns the ID.
  * Technologies Used: Firebase Storage, Firebase Firestore, TypeScript.
- * Why this implementation: Uploading evidence first ensures every stored report references an available image.
+ * Why this implementation: Uploading evidence first ensures every stored report references available images.
  */
 export async function submitReport(input: SubmitReportInput): Promise<string> {
+  const uris = input.imageUris.filter(Boolean);
+  if (!uris.length) {
+    throw new Error('At least one proof photo is required.');
+  }
+
   /*
-   * Firebase Storage upload: persist the captured proof before creating Firestore
-   * metadata so a report cannot point to an image that failed to upload.
+   * Firebase Storage uploads: persist every captured proof before creating Firestore
+   * metadata so a report cannot point to images that failed to upload.
    */
-  const imageUrl = await uploadReportImage(input.imageUri, input.user.uid);
+  const imageUrls: string[] = [];
+  for (const uri of uris) {
+    imageUrls.push(await uploadReportImage(uri, input.user.uid));
+  }
+
   const imageLocation = buildImageLocationText(input.locationText, input.coordinates);
   const now = new Date().toISOString();
 
@@ -97,7 +107,7 @@ export async function submitReport(input: SubmitReportInput): Promise<string> {
     status: 'Pending' as const,
     createdAt: now,
     imagePaths: [],
-    images: [imageUrl],
+    images: imageUrls,
     coordinates: input.coordinates,
     imageTimestamp: input.photoTimestamp,
     imageLocation,
@@ -106,6 +116,20 @@ export async function submitReport(input: SubmitReportInput): Promise<string> {
 
   /* Firestore write: create a server-addressable report document and return its generated ID. */
   const docRef = await addDoc(collection(getDbInstance(), 'reports'), reportData);
+
+  try {
+    await notifyAdminsOfActivity({
+      title: 'New environmental report',
+      body: `${reportData.reportedByName} submitted "${reportData.title}".`,
+      type: 'report',
+      relatedId: docRef.id,
+      actorUid: input.user.uid,
+      actorName: reportData.reportedByName,
+    });
+  } catch {
+    // Do not block report creation if admin notify fails.
+  }
+
   return docRef.id;
 }
 
