@@ -283,10 +283,13 @@ export default function ExportReports() {
           : "All dates";
       Alert.alert(
         "Export ready",
-        `${result.count} report(s) exported for ${rangeText} as ${result.format.toUpperCase()}` +
+        `${result.count} report(s) exported for ${rangeText} as ${result.format.toUpperCase()}. ` +
           (result.imageCount
-            ? ` with ${result.imageCount} image(s) packed in the ZIP backup.`
-            : ".") +
+            ? `${result.imageCount} image(s) saved in the ZIP images folder.`
+            : "No image files were packed into the ZIP.") +
+          (result.imagesMissing
+            ? ` ${result.imagesMissing} image(s) could not be downloaded — see image-urls.txt inside the ZIP.`
+            : "") +
           (selectedFile === "pdf" || selectedFile === "word"
             ? " An HTML file was also downloaded; use Print if the print window opened."
             : ""),

@@ -1,6 +1,8 @@
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
+import { getBlob, getBytes, ref as storageRef } from 'firebase/storage';
 import JSZip from 'jszip';
-import { db } from '@/config/firebase';
+import { auth, db, storage } from '@/config/firebase';
+import { firebaseConfig } from '@/config/firebaseConfig';
 import type { Report } from '@/types/admin';
 import { isWithinDateRange } from '@/utils/dateRange';
 
@@ -93,13 +95,57 @@ function matchesCategory(reportCategory: string, selected: string): boolean {
   return group.some((alias) => report === alias || report.includes(alias));
 }
 
-/** Prefer current image URL fields; fall back to legacy `images` / `imagePaths`. */
+/** Collect every image reference from both schema generations (URLs and storage paths). */
+export function getReportImageRefs(report: Report): string[] {
+  const refs = [...(report.images || []), ...(report.imagePaths || [])]
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  return Array.from(new Set(refs));
+}
+
+/** HTTP(S) URLs only — used in CSV/JSON columns. */
 export function getReportImageUrls(report: Report): string[] {
-  const fromImages = (report.images || []).filter(Boolean);
-  const fromPaths = (report.imagePaths || []).filter(Boolean);
-  // Mobile stores download URLs in `images`; some older docs may use imagePaths as URLs.
-  const urls = fromImages.length ? fromImages : fromPaths;
-  return Array.from(new Set(urls.filter((url) => /^https?:\/\//i.test(url))));
+  return getReportImageRefs(report).filter((value) => /^https?:\/\//i.test(value));
+}
+
+function storagePathFromRef(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (!/^https?:\/\//i.test(trimmed)) {
+    return trimmed.replace(/^\/+/, '');
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    // https://firebasestorage.googleapis.com/v0/b/<bucket>/o/<encodedPath>?alt=media&token=...
+    const objectMatch = parsed.pathname.match(/\/o\/(.+)$/);
+    if (objectMatch?.[1]) {
+      return decodeURIComponent(objectMatch[1]);
+    }
+    // https://<bucket>.storage.googleapis.com/<path>
+    if (parsed.hostname.endsWith('.storage.googleapis.com')) {
+      return decodeURIComponent(parsed.pathname.replace(/^\/+/, ''));
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function storageBucketsToTry(): string[] {
+  const configured = firebaseConfig.storageBucket || '';
+  const projectId = firebaseConfig.projectId || '';
+  return Array.from(
+    new Set(
+      [
+        configured,
+        configured && !configured.includes('.') ? `${configured}.appspot.com` : '',
+        configured && !configured.includes('.') ? `${configured}.firebasestorage.app` : '',
+        projectId ? `${projectId}.appspot.com` : '',
+        projectId ? `${projectId}.firebasestorage.app` : '',
+      ].filter(Boolean),
+    ),
+  );
 }
 
 export function filterReportsForExport(reports: Report[], filters: ExportFilters): Report[] {
@@ -225,24 +271,105 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+async function downloadViaProxy(imageUrl: string): Promise<Blob | null> {
+  if (typeof window === 'undefined' || !/^https?:\/\//i.test(imageUrl)) return null;
+  try {
+    const proxyUrl = `/api/report-image?url=${encodeURIComponent(imageUrl)}`;
+    const response = await fetch(proxyUrl);
+    if (!response.ok) return null;
+    const blob = await response.blob();
+    if (!blob.size) return null;
+    return blob;
+  } catch {
+    return null;
+  }
+}
+
+function buildMediaUrls(path: string): string[] {
+  return storageBucketsToTry().map(
+    (bucket) =>
+      `https://firebasestorage.googleapis.com/v0/b/${encodeURIComponent(bucket)}/o/` +
+      `${encodeURIComponent(path)}?alt=media`,
+  );
+}
+
+async function downloadImageBlob(imageRef: string): Promise<Blob> {
+  const path = storagePathFromRef(imageRef);
+  const errors: string[] = [];
+  const candidateUrls = [
+    ...(/^https?:\/\//i.test(imageRef) ? [imageRef] : []),
+    ...(path ? buildMediaUrls(path) : []),
+  ];
+
+  // 1) Same-origin Vercel proxy — bypasses Storage CORS in production.
+  for (const url of candidateUrls) {
+    const proxied = await downloadViaProxy(url);
+    if (proxied) return proxied;
+    errors.push(`proxy:${url.slice(0, 64)}`);
+  }
+
+  // 2) Firebase SDK (signed-in admin session).
+  if (path) {
+    for (const bucket of storageBucketsToTry()) {
+      try {
+        const objectRef = storageRef(storage, `gs://${bucket}/${path}`);
+        try {
+          return await getBlob(objectRef);
+        } catch {
+          const bytes = await getBytes(objectRef);
+          return new Blob([bytes], { type: 'image/jpeg' });
+        }
+      } catch (error) {
+        errors.push(`sdk:${bucket}:${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    try {
+      const objectRef = storageRef(storage, path);
+      try {
+        return await getBlob(objectRef);
+      } catch {
+        const bytes = await getBytes(objectRef);
+        return new Blob([bytes], { type: 'image/jpeg' });
+      }
+    } catch (error) {
+      errors.push(`sdk:default:${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  // 3) Authenticated / direct browser fetch (works after CORS is configured).
+  const token = await auth.currentUser?.getIdToken().catch(() => null);
+  for (const url of candidateUrls) {
+    try {
+      const response = await fetch(url, {
+        headers: token ? { Authorization: `Firebase ${token}` } : undefined,
+      });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return await response.blob();
+    } catch (error) {
+      errors.push(`fetch:${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  throw new Error(errors.slice(0, 6).join(' | ') || 'Unable to download image');
+}
+
 async function fetchReportImages(reports: Report[]): Promise<FetchedImage[]> {
   const jobs: Array<Promise<FetchedImage>> = [];
 
   for (const report of reports) {
-    const urls = getReportImageUrls(report);
-    urls.forEach((url, index) => {
+    const refs = getReportImageRefs(report);
+    refs.forEach((imageRef, index) => {
       jobs.push(
         (async () => {
           try {
-            const response = await fetch(url);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const blob = await response.blob();
-            const ext = extensionFromContentType(blob.type || '', url);
+            const blob = await downloadImageBlob(imageRef);
+            const ext = extensionFromContentType(blob.type || '', imageRef);
             const dataUrl = await blobToDataUrl(blob);
             return {
               reportId: report.id,
               index,
-              url,
+              url: imageRef,
               blob,
               dataUrl,
               fileName: `${String(index + 1).padStart(2, '0')}.${ext}`,
@@ -251,7 +378,7 @@ async function fetchReportImages(reports: Report[]): Promise<FetchedImage[]> {
             return {
               reportId: report.id,
               index,
-              url,
+              url: imageRef,
               blob: null,
               dataUrl: null,
               fileName: `${String(index + 1).padStart(2, '0')}.jpg`,
@@ -389,7 +516,7 @@ async function buildBackupZip(
   format: string,
   baseName: string,
   label: string,
-): Promise<Blob> {
+): Promise<{ blob: Blob; packed: number; missing: number }> {
   const zip = new JSZip();
   const folder = zip.folder(baseName) || zip;
 
@@ -404,11 +531,40 @@ async function buildBackupZip(
 
   const imagesRoot = folder.folder('images');
   let packed = 0;
+  const missingLines: string[] = [];
+
   for (const image of fetchedImages) {
-    if (!image.blob || !imagesRoot) continue;
-    const reportFolder = imagesRoot.folder(image.reportId);
-    reportFolder?.file(image.fileName, image.blob);
-    packed += 1;
+    if (image.blob && imagesRoot) {
+      const reportFolder = imagesRoot.folder(image.reportId);
+      reportFolder?.file(image.fileName, image.blob);
+      packed += 1;
+    } else {
+      missingLines.push(`${image.reportId}/${image.fileName} :: ${image.url}`);
+    }
+  }
+
+  // Always keep a plain list of image links so backups remain useful if binary pack fails.
+  folder.file(
+    'image-urls.txt',
+    reports
+      .map((report) => {
+        const refs = getReportImageRefs(report);
+        if (!refs.length) return `${report.id}: (no images)`;
+        return [`${report.id}:`, ...refs.map((refValue) => `  - ${refValue}`)].join('\n');
+      })
+      .join('\n\n'),
+  );
+
+  if (missingLines.length) {
+    folder.file(
+      'images-missing.txt',
+      [
+        'These image files could not be downloaded into the ZIP.',
+        'Open image-urls.txt and download them manually, or re-export after Storage CORS is configured.',
+        '',
+        ...missingLines,
+      ].join('\n'),
+    );
   }
 
   folder.file(
@@ -419,13 +575,19 @@ async function buildBackupZip(
       `Range: ${label}`,
       `Reports: ${reports.length}`,
       `Images packed: ${packed}`,
+      `Images missing: ${missingLines.length}`,
       '',
       'Open the .html file to view reports with photos.',
-      'Image files are under images/<reportId>/',
+      'Image files are under images/<reportId>/ when packing succeeds.',
+      'If images/ is empty, see images-missing.txt and image-urls.txt.',
     ].join('\n'),
   );
 
-  return zip.generateAsync({ type: 'blob' });
+  return {
+    blob: await zip.generateAsync({ type: 'blob' }),
+    packed,
+    missing: missingLines.length,
+  };
 }
 
 export async function exportFilteredReports(input: {
@@ -433,7 +595,7 @@ export async function exportFilteredReports(input: {
   format: string;
   fileName?: string;
   openAfterSaving?: boolean;
-}): Promise<{ count: number; format: string; imageCount: number }> {
+}): Promise<{ count: number; format: string; imageCount: number; imagesMissing: number }> {
   const all = await loadAllReports();
   const filtered = filterReportsForExport(all, input.filters);
   const baseName = (input.fileName || `ecobantay-reports-${Date.now()}`).replace(/\.[^.]+$/, '');
@@ -453,12 +615,10 @@ export async function exportFilteredReports(input: {
   }
 
   const fetchedImages = await fetchReportImages(filtered);
-  const packedImages = fetchedImages.filter((image) => image.blob).length;
   const html = reportsToPrintableHtml(filtered, 'EcoBantay Environmental Reports', label, fetchedImages);
 
-  // Always produce a ZIP backup that includes report data + image files when available.
-  const zipBlob = await buildBackupZip(filtered, fetchedImages, input.format, baseName, label);
-  downloadBrowserFile(`${baseName}.zip`, zipBlob, 'application/zip');
+  const zipResult = await buildBackupZip(filtered, fetchedImages, input.format, baseName, label);
+  downloadBrowserFile(`${baseName}.zip`, zipResult.blob, 'application/zip');
 
   // Keep a direct HTML download for PDF/Word so Print still works even if ZIP is ignored.
   if (input.format === 'pdf' || input.format === 'word') {
@@ -479,5 +639,10 @@ export async function exportFilteredReports(input: {
     throw new Error(`Unsupported export format: ${input.format}`);
   }
 
-  return { count: filtered.length, format: input.format, imageCount: packedImages };
+  return {
+    count: filtered.length,
+    format: input.format,
+    imageCount: zipResult.packed,
+    imagesMissing: zipResult.missing,
+  };
 }
