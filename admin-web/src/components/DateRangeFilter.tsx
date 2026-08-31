@@ -1,6 +1,5 @@
 import { createElement } from "react";
 import { Platform, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
-import { CalendarDays } from "lucide-react-native";
 import { formatIsoDayLabel } from "@/utils/dateRange";
 
 type DateRangeFilterProps = {
@@ -10,11 +9,13 @@ type DateRangeFilterProps = {
   onChangeFrom: (value: string) => void;
   onChangeTo: (value: string) => void;
   style?: StyleProp<ViewStyle>;
+  /** "card" = boxed summary (tables). "inline" = label + inputs aligned with export dropdowns. */
+  variant?: "card" | "inline";
 };
 
 /**
- * Purpose: Lets admins pick an inclusive From–To date range for table filters.
- * How it works: Uses native HTML date inputs on web; shows a readable summary of the range.
+ * Purpose: Lets admins pick an inclusive From–To date range for filters/exports.
+ * How it works: Uses native HTML date inputs on web; values are stored as YYYY-MM-DD.
  */
 export default function DateRangeFilter({
   label = "Date Range",
@@ -23,11 +24,47 @@ export default function DateRangeFilter({
   onChangeFrom,
   onChangeTo,
   style,
+  variant = "card",
 }: DateRangeFilterProps) {
   const summary =
     fromDate || toDate
       ? `${fromDate ? formatIsoDayLabel(fromDate) : "Any"} – ${toDate ? formatIsoDayLabel(toDate) : "Any"}`
       : "Any dates";
+
+  const fromInput = createElement("input", {
+    type: "date",
+    value: fromDate,
+    max: toDate || undefined,
+    onChange: (event: { target: { value: string } }) => onChangeFrom(event.target.value),
+    style: variant === "inline" ? inlineWebInputStyle : webInputStyle,
+    title: "From date",
+  });
+
+  const toInput = createElement("input", {
+    type: "date",
+    value: toDate,
+    min: fromDate || undefined,
+    onChange: (event: { target: { value: string } }) => onChangeTo(event.target.value),
+    style: variant === "inline" ? inlineWebInputStyle : webInputStyle,
+    title: "To date",
+  });
+
+  if (variant === "inline") {
+    return (
+      <View style={[styles.inlineBox, style]}>
+        <Text style={styles.inlineLabel}>{label}</Text>
+        {Platform.OS === "web" ? (
+          <View style={styles.inlineInputsRow}>
+            {fromInput}
+            <Text style={styles.dash}>–</Text>
+            {toInput}
+          </View>
+        ) : (
+          <Text style={styles.inlineFallback}>{summary}</Text>
+        )}
+      </View>
+    );
+  }
 
   return (
     <View style={[styles.box, style]}>
@@ -36,27 +73,12 @@ export default function DateRangeFilter({
         <Text style={styles.summary} numberOfLines={1}>
           {summary}
         </Text>
-        <CalendarDays size={16} color="#333" />
       </View>
       {Platform.OS === "web" ? (
         <View style={styles.inputsRow}>
-          {createElement("input", {
-            type: "date",
-            value: fromDate,
-            max: toDate || undefined,
-            onChange: (event: { target: { value: string } }) => onChangeFrom(event.target.value),
-            style: webInputStyle,
-            title: "From date",
-          })}
+          {fromInput}
           <Text style={styles.dash}>–</Text>
-          {createElement("input", {
-            type: "date",
-            value: toDate,
-            min: fromDate || undefined,
-            onChange: (event: { target: { value: string } }) => onChangeTo(event.target.value),
-            style: webInputStyle,
-            title: "To date",
-          })}
+          {toInput}
         </View>
       ) : null}
     </View>
@@ -75,6 +97,21 @@ const webInputStyle = {
   fontSize: 12,
   color: "#222",
   backgroundColor: "#fff",
+} as const;
+
+const inlineWebInputStyle = {
+  flex: 1,
+  minWidth: 0,
+  height: 42,
+  borderRadius: 8,
+  border: "1px solid #d6d6d6",
+  paddingLeft: 10,
+  paddingRight: 10,
+  fontFamily: "Montserrat_700Bold",
+  fontSize: 13,
+  color: "#111",
+  backgroundColor: "#fff",
+  boxSizing: "border-box",
 } as const;
 
 const styles = StyleSheet.create({
@@ -116,5 +153,30 @@ const styles = StyleSheet.create({
   dash: {
     fontFamily: "Montserrat_700Bold",
     color: "#555",
+  },
+  inlineBox: {
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 260,
+    maxWidth: 360,
+  },
+  inlineLabel: {
+    fontSize: 14,
+    fontFamily: "Montserrat_700Bold",
+    color: "#111111",
+    marginBottom: 3,
+  },
+  inlineInputsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    height: 42,
+  },
+  inlineFallback: {
+    fontFamily: "Montserrat_700Bold",
+    fontSize: 13,
+    color: "#222",
+    height: 42,
+    textAlignVertical: "center",
   },
 });

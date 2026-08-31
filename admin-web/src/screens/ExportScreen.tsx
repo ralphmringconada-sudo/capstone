@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Alert,
   Pressable,
   ScrollView,
@@ -7,7 +8,6 @@ import {
   Text,
   TextInput,
   View,
-  ActivityIndicator,
 } from "react-native";
 
 import {
@@ -35,7 +35,12 @@ import {
 
 import AdminLayout from "../components/AdminLayout";
 import DateRangeFilter from "@/components/DateRangeFilter";
-import { exportFilteredReports } from "@/services/exportReportsService";
+import {
+  exportFilteredReports,
+  previewExportFilters,
+  type ExportSummary,
+} from "@/services/exportReportsService";
+import { formatIsoDayLabel } from "@/utils/dateRange";
 
 // =========================================================
 // FILE TYPES
@@ -111,6 +116,15 @@ export default function ExportReports() {
   const [openAfterSaving, setOpenAfterSaving] =
     useState(true);
   const [isExporting, setIsExporting] = useState(false);
+  const [isApplying, setIsApplying] = useState(false);
+  const [summary, setSummary] = useState<ExportSummary>({
+    total: 0,
+    inReview: 0,
+    pending: 0,
+    resolved: 0,
+    rejected: 0,
+  });
+  const [filtersApplied, setFiltersApplied] = useState(false);
 
   // =======================================================
   // DROPDOWN STATES
@@ -145,11 +159,15 @@ export default function ExportReports() {
 
   const categories = [
     "All Categories",
+    "Deforestation",
+    "Forest Fires",
+    "Illegal Logging",
+    "Waste Dumping",
+    "Other",
     "Illegal Dumping",
     "Air Pollution",
     "Water Pollution",
     "Waste Management",
-    "Other",
   ];
 
   const locations = [
@@ -187,6 +205,51 @@ export default function ExportReports() {
   // RESET FILTERS
   // =======================================================
 
+  const buildFilters = (
+    overrides?: Partial<{
+      fromDate: string;
+      toDate: string;
+      status: string;
+      category: string;
+    }>,
+  ) => ({
+    fromDate: overrides?.fromDate ?? fromDate,
+    toDate: overrides?.toDate ?? toDate,
+    status: overrides?.status ?? status,
+    category: overrides?.category ?? category,
+  });
+
+  const refreshPreview = async (
+    showAlert = false,
+    filters = buildFilters(),
+  ) => {
+    setIsApplying(true);
+    try {
+      const result = await previewExportFilters(filters);
+      setSummary(result.summary);
+      setFiltersApplied(true);
+      if (showAlert) {
+        Alert.alert(
+          "Filters applied",
+          `${result.summary.total} report(s) match the selected range and filters.`,
+        );
+      }
+    } catch (error) {
+      Alert.alert(
+        "Filter failed",
+        error instanceof Error ? error.message : "Unable to load report summary.",
+      );
+    } finally {
+      setIsApplying(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshPreview(false);
+    // Initial load only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const resetFilters = () => {
     setFromDate("");
     setToDate("");
@@ -196,33 +259,36 @@ export default function ExportReports() {
     setShowStatusDropdown(false);
     setShowCategoryDropdown(false);
     setShowSaveDropdown(false);
+    void refreshPreview(false, {
+      fromDate: "",
+      toDate: "",
+      status: "All Statuses",
+      category: "All Categories",
+    });
   };
 
-  // =======================================================
-  // EXPORT
-  // =======================================================
-
   const handleExport = async () => {
+    const filters = buildFilters();
     setIsExporting(true);
     try {
       const result = await exportFilteredReports({
-        filters: {
-          fromDate,
-          toDate,
-          status,
-          category,
-        },
+        filters,
         format: selectedFile,
         fileName: fileName || undefined,
         openAfterSaving,
       });
+      const rangeText =
+        filters.fromDate || filters.toDate
+          ? `${filters.fromDate ? formatIsoDayLabel(filters.fromDate) : "Any"} – ${filters.toDate ? formatIsoDayLabel(filters.toDate) : "Any"}`
+          : "All dates";
       Alert.alert(
         "Export ready",
-        `${result.count} report(s) exported as ${result.format.toUpperCase()}.` +
+        `${result.count} report(s) exported for ${rangeText} as ${result.format.toUpperCase()}.` +
           (selectedFile === "pdf" || selectedFile === "word"
-            ? " Use the print dialog to save a printable PDF."
+            ? " An HTML backup was downloaded; use Print if the print window opened."
             : ""),
       );
+      await refreshPreview(false, filters);
     } catch (error) {
       Alert.alert(
         "Export failed",
@@ -281,6 +347,7 @@ export default function ExportReports() {
               onChangeFrom={setFromDate}
               onChangeTo={setToDate}
               style={styles.dateRangeFilter}
+              variant="inline"
             />
 
             {/* STATUS */}
@@ -431,21 +498,24 @@ export default function ExportReports() {
                 pressed && styles.buttonPressed,
               ]}
               onPress={() => {
-                setShowStatusDropdown(false);
-                setShowCategoryDropdown(false);
-                setShowSaveDropdown(false);
-
-                // Backend filtering will be added here.
+                void refreshPreview(true);
               }}
+              disabled={isApplying}
             >
-              <Filter
-                size={16}
-                color="#ffffff"
-              />
+              {isApplying ? (
+                <ActivityIndicator color="#ffffff" />
+              ) : (
+                <>
+                  <Filter
+                    size={16}
+                    color="#ffffff"
+                  />
 
-              <Text style={styles.applyButtonText}>
-                Apply Filters
-              </Text>
+                  <Text style={styles.applyButtonText}>
+                    Apply Filters
+                  </Text>
+                </>
+              )}
             </Pressable>
 
             <Pressable
@@ -503,7 +573,7 @@ export default function ExportReports() {
                 </Text>
 
                 <Text style={styles.summaryNumber}>
-                  {/* Backend value */}
+                  {filtersApplied ? summary.total : "—"}
                 </Text>
               </View>
             </View>
@@ -534,7 +604,7 @@ export default function ExportReports() {
                 </Text>
 
                 <Text style={styles.summaryNumber}>
-                  {/* Backend value */}
+                  {filtersApplied ? summary.inReview : "—"}
                 </Text>
               </View>
             </View>
@@ -565,7 +635,7 @@ export default function ExportReports() {
                 </Text>
 
                 <Text style={styles.summaryNumber}>
-                  {/* Backend value */}
+                  {filtersApplied ? summary.pending : "—"}
                 </Text>
               </View>
             </View>
@@ -597,7 +667,7 @@ export default function ExportReports() {
                 </Text>
 
                 <Text style={styles.summaryNumber}>
-                  {/* Backend value */}
+                  {filtersApplied ? summary.resolved : "—"}
                 </Text>
               </View>
             </View>
@@ -947,18 +1017,19 @@ const styles = StyleSheet.create({
   filtersRow: {
     flexDirection: "row",
     alignItems: "flex-end",
-    gap: 30,
+    gap: 24,
     paddingLeft: 24,
     position: "relative",
     zIndex: 2000,
     elevation: 2000,
+    flexWrap: "wrap",
   },
 
   dateRangeFilter: {
     flexGrow: 1,
     flexShrink: 1,
-    minWidth: 260,
-    maxWidth: 340,
+    minWidth: 280,
+    maxWidth: 360,
   },
 
   filterGroup: {
@@ -1018,10 +1089,10 @@ const styles = StyleSheet.create({
   },
 
   dropdown: {
-    height: 27,
+    height: 42,
     borderWidth: 1,
-    borderColor: "#CCCCCC",
-    borderRadius: 5,
+    borderColor: "#d6d6d6",
+    borderRadius: 8,
     paddingHorizontal: 10,
     flexDirection: "row",
     alignItems: "center",
@@ -1030,14 +1101,14 @@ const styles = StyleSheet.create({
   },
 
   dropdownText: {
-    fontSize: 11,
+    fontSize: 13,
     fontFamily: "Montserrat_500Medium",
     color: "#222222",
   },
 
   dropdownMenu: {
   position: "absolute",
-  top: 31,
+  top: 46,
   left: 0,
   right: 0,
 
