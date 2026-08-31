@@ -5,7 +5,6 @@ import {
   signOut,
   deleteUser,
   GoogleAuthProvider,
-  sendPasswordResetEmail,
   sendEmailVerification,
   updatePassword,
   EmailAuthProvider,
@@ -335,8 +334,18 @@ export async function logoutUser() {
 export async function sendForgotPasswordEmail(email: string) {
   const trimmedEmail = email.trim().toLowerCase();
   try {
-    /* Authentication API call: Firebase generates and emails the secure reset link. */
-    await sendPasswordResetEmail(auth(), trimmedEmail);
+    const response = await fetch(
+      'https://us-central1-ecobantay-18061.cloudfunctions.net/requestPasswordReset',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: trimmedEmail }),
+      },
+    );
+    const data = (await response.json().catch(() => ({}))) as { error?: string };
+    if (!response.ok) {
+      throw new Error(data.error || 'Failed to send reset email.');
+    }
   } catch (error) {
     throw mapServiceError(error);
   }

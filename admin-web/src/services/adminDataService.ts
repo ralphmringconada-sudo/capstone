@@ -18,7 +18,6 @@ import {
   createUserWithEmailAndPassword,
   deleteUser,
   getAuth,
-  sendPasswordResetEmail,
   signOut,
   updateProfile,
   updatePassword,
@@ -543,15 +542,21 @@ export async function deleteAppUserAccount(token: string, userId: string) {
  * Purpose: Starts Firebase's email-based administrator password recovery flow.
  * How it works:
  * 1. The address is normalized by trimming and lowercasing.
- * 2. Firebase Authentication sends its configured reset email.
- * Technologies Used: Firebase Authentication and TypeScript.
- * Why this implementation: Firebase-managed recovery avoids handling reset secrets in the application.
+ * 2. A Cloud Function generates a reset code and emails a link to the EcoBantay reset UI.
+ * Technologies Used: Fetch API and TypeScript.
+ * Why this implementation: Firebase's default /__/auth/action page cannot be restyled, so custom email links are required.
  */
 export async function sendAdminPasswordReset(email: string) {
   const normalized = email.trim().toLowerCase();
-  // Auth-only: do not query Firestore here — forgot-password runs while logged out,
-  // and admins collection reads require an authenticated session.
-  await sendPasswordResetEmail(auth, normalized);
+  const response = await fetch('/api/send-password-reset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: normalized }),
+  });
+  const data = (await response.json().catch(() => ({}))) as { error?: string };
+  if (!response.ok) {
+    throw new Error(data.error || 'Failed to send reset email.');
+  }
 }
 
 /**
@@ -572,7 +577,16 @@ export async function sendAdminPasswordResetForAdmin(
   if (target.role === 'super_admin' && target.uid !== actor.uid) {
     throw new Error('You cannot reset another super admin password from here.');
   }
-  await sendPasswordResetEmail(auth, target.email.trim().toLowerCase());
+  await fetch('/api/send-password-reset', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: target.email.trim().toLowerCase() }),
+  }).then(async (response) => {
+    const data = (await response.json().catch(() => ({}))) as { error?: string };
+    if (!response.ok) {
+      throw new Error(data.error || 'Failed to send reset email.');
+    }
+  });
   await logAdminActivity({
     adminUid: actor.uid,
     adminName: actor.fullName,

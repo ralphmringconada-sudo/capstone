@@ -36,3 +36,5 @@ serviceAccountKey.json
 *-firebase-adminsdk-*.json
 
 .firebase/
+
+secrets/

@@ -3,33 +3,261 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>EcoBantay Password Reset</title>
+    <title>EcoBantay · Reset Password</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Montserrat:wght@600;700;800;900&display=swap"
+      rel="stylesheet"
+    />
     <style>
+      :root {
+        --green: #34733b;
+        --green-dark: #145c1e;
+        --lime: #9bcb2e;
+        --forest: #679b16;
+        --bg: #eef5e8;
+        --card: #ffffff;
+        --text: #1d2b1e;
+        --muted: #5c6b5d;
+        --line: #d5e2d0;
+        --danger: #a93131;
+      }
+      * { box-sizing: border-box; }
       body {
         margin: 0;
         min-height: 100vh;
+        font-family: Montserrat, Arial, sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at top left, rgba(155, 203, 46, 0.28), transparent 40%),
+          radial-gradient(circle at bottom right, rgba(52, 115, 59, 0.18), transparent 35%),
+          var(--bg);
         display: grid;
         place-items: center;
-        font-family: Arial, sans-serif;
-        background: #f3f7ef;
-        color: #145c1e;
+        padding: 24px;
       }
-      p {
+      .shell {
+        width: min(460px, 100%);
+      }
+      .brand {
+        text-align: center;
+        margin-bottom: 18px;
+        font-weight: 900;
+        font-size: 28px;
+        letter-spacing: 0.04em;
+        color: var(--green-dark);
+      }
+      .brand span { color: var(--forest); }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 18px;
+        padding: 28px 24px 24px;
+        box-shadow: 0 18px 40px rgba(20, 92, 30, 0.08);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 22px;
+        font-weight: 800;
+        color: var(--green-dark);
+      }
+      .sub {
+        margin: 0 0 20px;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.5;
+        font-weight: 600;
+      }
+      .email {
+        display: inline-block;
+        margin-bottom: 18px;
+        padding: 8px 12px;
+        border-radius: 999px;
+        background: #eef7e4;
+        color: var(--green-dark);
+        font-size: 12px;
+        font-weight: 700;
+      }
+      label {
+        display: block;
+        margin: 0 0 6px;
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--muted);
+      }
+      .field {
+        margin-bottom: 14px;
+      }
+      input {
+        width: 100%;
+        height: 46px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 0 14px;
+        font: inherit;
+        font-weight: 600;
+        outline: none;
+      }
+      input:focus { border-color: var(--green); }
+      button {
+        width: 100%;
+        height: 48px;
+        margin-top: 8px;
+        border: 0;
+        border-radius: 10px;
+        background: linear-gradient(135deg, var(--green), var(--forest));
+        color: white;
+        font: inherit;
+        font-weight: 800;
+        letter-spacing: 0.04em;
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.7;
+        cursor: default;
+      }
+      .error {
+        margin: 0 0 12px;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: #fdeeee;
+        color: var(--danger);
+        font-size: 13px;
+        font-weight: 700;
+      }
+      .ok {
         margin: 0;
-        font-size: 16px;
+        color: var(--green-dark);
+        font-size: 14px;
+        font-weight: 700;
+        line-height: 1.5;
       }
+      .back {
+        display: inline-block;
+        margin-top: 18px;
+        color: var(--green);
+        font-weight: 700;
+        font-size: 13px;
+        text-decoration: none;
+      }
+      .state { text-align: center; padding: 12px 0; }
     </style>
   </head>
   <body>
-    <p>Redirecting to EcoBantay password reset…</p>
-    <script>
-      (function () {
-        var target =
-          "https://capstone-ecru-kappa.vercel.app/reset-password" +
-          window.location.search +
-          window.location.hash;
-        window.location.replace(target);
-      })();
+    <div class="shell">
+      <div class="brand">ECO<span>BANTAY</span></div>
+      <div class="card" id="card">
+        <div class="state"><p class="sub">Loading secure reset form…</p></div>
+      </div>
+    </div>
+
+    <script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+      import {
+        getAuth,
+        verifyPasswordResetCode,
+        confirmPasswordReset,
+      } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+
+      const firebaseConfig = {
+        apiKey: "AIzaSyA24JSqDdVpXMTX_Immim4ojEjTTMT-BHo",
+        authDomain: "ecobantay-18061.firebaseapp.com",
+        projectId: "ecobantay-18061",
+        storageBucket: "ecobantay-18061",
+        messagingSenderId: "117741383587",
+        appId: "1:117741383587:web:991f984fa7451cef3df416",
+      };
+
+      const app = initializeApp(firebaseConfig);
+      const auth = getAuth(app);
+      const params = new URLSearchParams(window.location.search);
+      const mode = params.get("mode");
+      const oobCode = params.get("oobCode");
+      const card = document.getElementById("card");
+      const loginUrl = "https://capstone-ecru-kappa.vercel.app/";
+
+      function render(html) {
+        card.innerHTML = html;
+      }
+
+      function escapeHtml(value) {
+        return String(value || "")
+          .replaceAll("&", "&amp;")
+          .replaceAll("<", "&lt;")
+          .replaceAll(">", "&gt;")
+          .replaceAll('"', "&quot;");
+      }
+
+      if (mode !== "resetPassword" || !oobCode) {
+        render(`
+          <div class="state">
+            <h1>Reset link unavailable</h1>
+            <p class="sub">This password reset link is incomplete or invalid. Request a new one from the login page.</p>
+            <a class="back" href="${loginUrl}">Back to login</a>
+          </div>
+        `);
+      } else {
+        try {
+          const email = await verifyPasswordResetCode(auth, oobCode);
+          render(`
+            <h1>Reset your password</h1>
+            <p class="sub">Choose a new password for your EcoBantay account.</p>
+            <div class="email">${escapeHtml(email)}</div>
+            <div id="error"></div>
+            <form id="form">
+              <div class="field">
+                <label for="password">New password</label>
+                <input id="password" type="password" minlength="6" required placeholder="At least 6 characters" />
+              </div>
+              <div class="field">
+                <label for="confirm">Confirm password</label>
+                <input id="confirm" type="password" minlength="6" required placeholder="Re-enter password" />
+              </div>
+              <button id="submit" type="submit">SAVE NEW PASSWORD</button>
+            </form>
+            <a class="back" href="${loginUrl}">Back to login</a>
+          `);
+
+          const form = document.getElementById("form");
+          const errorBox = document.getElementById("error");
+          form.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            errorBox.innerHTML = "";
+            const password = document.getElementById("password").value;
+            const confirm = document.getElementById("confirm").value;
+            if (password !== confirm) {
+              errorBox.innerHTML = `<div class="error">The passwords do not match.</div>`;
+              return;
+            }
+            const button = document.getElementById("submit");
+            button.disabled = true;
+            button.textContent = "SAVING…";
+            try {
+              await confirmPasswordReset(auth, oobCode, password);
+              render(`
+                <div class="state">
+                  <h1>Password updated</h1>
+                  <p class="ok">Your password has been changed. You can now sign in with your new password.</p>
+                  <a class="back" href="${loginUrl}">Return to login</a>
+                </div>
+              `);
+            } catch (error) {
+              button.disabled = false;
+              button.textContent = "SAVE NEW PASSWORD";
+              errorBox.innerHTML = `<div class="error">${escapeHtml(error.message || "Unable to reset password.")}</div>`;
+            }
+          });
+        } catch (error) {
+          render(`
+            <div class="state">
+              <h1>Reset link unavailable</h1>
+              <p class="sub">${escapeHtml(error.message || "This password reset link is invalid or has expired.")}</p>
+              <a class="back" href="${loginUrl}">Back to login</a>
+            </div>
+          `);
+        }
+      }
     </script>
   </body>
 </html>

@@ -4,36 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>EcoBantay Auth Action</title>
-    <style>
-      body {
-        margin: 0;
-        min-height: 100vh;
-        display: grid;
-        place-items: center;
-        font-family: Arial, sans-serif;
-        background: #f3f7ef;
-        color: #145c1e;
-      }
-    </style>
   </head>
   <body>
-    <p>Opening EcoBantay…</p>
+    <p>Opening EcoBantay password reset…</p>
     <script>
       (function () {
         var params = window.location.search || "";
         var hash = window.location.hash || "";
-        var query = params || (hash.indexOf("?") >= 0 ? hash.substring(hash.indexOf("?")) : "");
-        // Password reset goes to the custom admin UI.
-        if (/[?&]mode=resetPassword(?:&|$)/.test(query) || /[?&]mode=resetPassword(?:&|$)/.test(hash)) {
-          window.location.replace(
-            "https://capstone-ecru-kappa.vercel.app/reset-password" + params + hash
-          );
-          return;
-        }
-        // Other auth actions keep Firebase's default handler.
-        window.location.replace(
-          "https://ecobantay-18061.firebaseapp.com/__/auth/action" + params + hash
-        );
+        window.location.replace("/reset-password" + params + hash);
       })();
     </script>
   </body>
