@@ -72,7 +72,7 @@ export default function LoginScreen() {
     setError("");
     // Stop before Firebase access when either required credential is absent.
     if (!email.trim() || !password) {
-      setError("Email and password are required.");
+      setError("Email or username and password are required.");
       return;
     }
 
@@ -157,13 +157,13 @@ export default function LoginScreen() {
         <View style={styles.inputBox}>
           <User size={32} color="#FFFFFF" />
           <TextInput
-            placeholder="Email"
+            placeholder="Email or username"
             placeholderTextColor="#FFFFFF"
             style={styles.input}
             value={email}
             onChangeText={setEmail}
             autoCapitalize="none"
-            keyboardType="email-address"
+            keyboardType="default"
             editable={!isSubmitting}
           />
         </View>

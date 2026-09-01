@@ -1,4 +1,4 @@
-export const AUTH_ROUTES = ['index', 'login', 'signup', 'forgot-password'] as const;
+export const AUTH_ROUTES = ['index', 'login', 'signup', 'forgot-password', 'verify-email'] as const;
 
 export const APP_ROUTES = [
   'home',

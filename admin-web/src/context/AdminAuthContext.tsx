@@ -8,7 +8,7 @@ import React, {
 } from 'react';
 import { onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { auth } from '@/config/firebase';
-import { getAdminProfile } from '@/services/adminDataService';
+import { getAdminProfile, resolveAdminLoginEmail, upsertAdminUsernameMapping } from '@/services/adminDataService';
 import type { AdminProfile } from '@/types/admin';
 
 type AdminAuthContextValue = {
@@ -105,10 +105,11 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
    * Technologies Used: React useCallback, Firebase Authentication, and Cloud Firestore.
    * Why this implementation: Authentication alone proves identity; the profile and status checks establish authorization.
    */
-  const login = useCallback(async (email: string, password: string) => {
+  const login = useCallback(async (emailOrUsername: string, password: string) => {
     try {
-      // Authenticate first, then bind the resulting UID to an authorized admin profile.
-      const credential = await signInWithEmailAndPassword(auth, email.trim(), password);
+      // Username logins resolve to the Firebase Auth email stored for that admin.
+      const email = await resolveAdminLoginEmail(emailOrUsername);
+      const credential = await signInWithEmailAndPassword(auth, email, password);
       const profile = await getAdminProfile(credential.user.uid);
 
       // Reject valid Firebase accounts that are not represented in the admins collection.
@@ -124,6 +125,15 @@ export function AdminAuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       setAdmin(profile);
+
+      // Keep username login working for older admin accounts created before mappings existed.
+      if (profile.username && profile.email) {
+        void upsertAdminUsernameMapping({
+          username: profile.username,
+          email: profile.email,
+          uid: profile.uid,
+        }).catch(() => undefined);
+      }
     // Convert Firestore rule failures into an actionable message while preserving other errors.
     } catch (error: unknown) {
       const code = (error as { code?: string })?.code;

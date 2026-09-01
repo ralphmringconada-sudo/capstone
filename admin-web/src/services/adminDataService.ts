@@ -55,6 +55,77 @@ export async function getAdminProfile(uid: string): Promise<AdminProfile | null>
   return snapshot.data() as AdminProfile;
 }
 
+function normalizeAdminUsername(username: string): string {
+  return username.trim().toLowerCase().replace(/^@+/, '');
+}
+
+/**
+ * Purpose: Resolves an admin login identifier to the Firebase Auth email.
+ * How it works: emails pass through; usernames are looked up in admin_usernames.
+ */
+export async function resolveAdminLoginEmail(identifier: string): Promise<string> {
+  const trimmed = identifier.trim();
+  if (!trimmed) {
+    throw new Error('Email or username is required.');
+  }
+  if (trimmed.includes('@')) {
+    return trimmed.toLowerCase();
+  }
+
+  const username = normalizeAdminUsername(trimmed);
+  const snapshot = await getDoc(doc(db, 'admin_usernames', username));
+  if (!snapshot.exists()) {
+    throw new Error('Invalid username or password.');
+  }
+  const email = String((snapshot.data() as { email?: string }).email || '')
+    .trim()
+    .toLowerCase();
+  if (!email) {
+    throw new Error('Invalid username or password.');
+  }
+  return email;
+}
+
+export async function upsertAdminUsernameMapping(input: {
+  username: string;
+  email: string;
+  uid: string;
+  previousUsername?: string;
+}) {
+  const nextUsername = normalizeAdminUsername(input.username);
+  if (!nextUsername) {
+    throw new Error('Username is required.');
+  }
+  if (!/^[a-z0-9._-]{3,30}$/.test(nextUsername)) {
+    throw new Error(
+      'Username must be 3–30 characters and use only letters, numbers, dots, underscores, or hyphens.',
+    );
+  }
+
+  const mappingRef = doc(db, 'admin_usernames', nextUsername);
+  const existing = await getDoc(mappingRef);
+  if (existing.exists()) {
+    const ownerUid = String((existing.data() as { uid?: string }).uid || '');
+    if (ownerUid && ownerUid !== input.uid) {
+      throw new Error('That username is already taken.');
+    }
+  }
+
+  const previous = normalizeAdminUsername(input.previousUsername || '');
+  if (previous && previous !== nextUsername) {
+    await deleteDoc(doc(db, 'admin_usernames', previous)).catch(() => undefined);
+  }
+
+  await setDoc(mappingRef, {
+    username: nextUsername,
+    email: input.email.trim().toLowerCase(),
+    uid: input.uid,
+    updatedAt: new Date().toISOString(),
+  });
+
+  return nextUsername;
+}
+
 /**
  * Purpose: Retrieves citizen accounts for administrative search and management.
  * How it works:
@@ -459,9 +530,25 @@ export async function updateAdminProfileInfo(
   data: Partial<Pick<AdminProfile, 'fullName' | 'contactNumber' | 'username' | 'notificationPrefs'>>,
   actor: AdminProfile,
 ) {
+  const existing = await getAdminProfile(adminId);
+  if (!existing) {
+    throw new Error('Administrator account was not found.');
+  }
+
+  let nextUsername = existing.username;
+  if (typeof data.username === 'string') {
+    nextUsername = await upsertAdminUsernameMapping({
+      username: data.username,
+      email: existing.email,
+      uid: adminId,
+      previousUsername: existing.username,
+    });
+  }
+
   // Persist only the administrator fields intentionally exposed by the settings workflow.
   await updateDoc(doc(db, 'admins', adminId), {
     ...data,
+    ...(typeof data.username === 'string' ? { username: nextUsername } : {}),
     updatedAt: new Date().toISOString(),
   });
 
@@ -686,6 +773,11 @@ export async function createAdminAccount(
     initializeApp(firebaseConfig, 'admin-provisioning');
   const provisioningAuth = getAuth(provisioningApp);
   const normalizedEmail = payload.email.trim().toLowerCase();
+  const requestedUsername = normalizeAdminUsername(payload.username);
+  if (!requestedUsername) {
+    throw new Error('Username is required.');
+  }
+
   const credential = await createUserWithEmailAndPassword(
     provisioningAuth,
     normalizedEmail,
@@ -694,12 +786,17 @@ export async function createAdminAccount(
 
   try {
     await updateProfile(credential.user, { displayName: payload.fullName.trim() });
+    const username = await upsertAdminUsernameMapping({
+      username: requestedUsername,
+      email: normalizedEmail,
+      uid: credential.user.uid,
+    });
     const profile: AdminProfile = {
       uid: credential.user.uid,
       fullName: payload.fullName.trim(),
       email: normalizedEmail,
       contactNumber: payload.contactNumber.trim(),
-      username: payload.username.trim() || normalizedEmail.split('@')[0],
+      username,
       role: 'admin',
       status: payload.status || 'active',
       createdAt: new Date().toISOString(),
@@ -713,12 +810,13 @@ export async function createAdminAccount(
       action: 'Created Administrator',
       module: 'Users',
       recordId: credential.user.uid,
-      details: `Created admin account for ${normalizedEmail}`,
+      details: `Created admin account for ${normalizedEmail} (@${username})`,
     });
     await signOut(provisioningAuth);
     return profile;
   } catch (error) {
     // Remove the new Auth identity if its required Firestore profile cannot be completed.
+    await deleteDoc(doc(db, 'admin_usernames', requestedUsername)).catch(() => undefined);
     await deleteDoc(doc(db, 'admins', credential.user.uid)).catch(() => undefined);
     await deleteUser(credential.user).catch(() => undefined);
     await signOut(provisioningAuth).catch(() => undefined);

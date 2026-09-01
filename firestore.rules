@@ -71,6 +71,15 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    // Public username → email lookup for admin login (get only; no listing).
+    match /admin_usernames/{username} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update: if isSuperAdmin()
+        || (isAdmin() && request.resource.data.uid == request.auth.uid);
+      allow delete: if isSuperAdmin() || isAdmin();
+    }
+
     match /reports/{reportId} {
       allow read: if isAdmin() || (isSignedIn() && resource.data.reportedByUid == request.auth.uid);
       allow create: if isSignedIn() && request.resource.data.reportedByUid == request.auth.uid;

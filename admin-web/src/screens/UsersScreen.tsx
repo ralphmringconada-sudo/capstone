@@ -493,8 +493,8 @@ export default function UsersScreen() {
     if (creatingAdminRef.current || isCreatingAdmin) return;
     setAdminFormError("");
     // Complete required-field and password confirmation checks before requesting a token.
-    if (!adminForm.fullName || !adminForm.email || !adminForm.password) {
-      setAdminFormError("Full name, email, and password are required.");
+    if (!adminForm.fullName || !adminForm.email || !adminForm.username || !adminForm.password) {
+      setAdminFormError("Full name, email, username, and password are required.");
       return;
     }
     if (adminForm.password !== adminForm.confirmPassword) {

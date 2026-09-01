@@ -105,11 +105,10 @@ export default function SignUpScreen() {
         birthday,
       });
       await logout();
-      Alert.alert(
-        'Verify your email',
-        'We sent a verification link to your inbox. Open it, then log in to continue.',
-        [{ text: 'OK', onPress: () => router.replace('/login') }],
-      );
+      router.replace({
+        pathname: '/verify-email',
+        params: { email: email.trim().toLowerCase() },
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to create account.');
     } finally {

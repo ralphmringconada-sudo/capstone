@@ -234,6 +234,44 @@ export async function loginWithEmail(email: string, password: string): Promise<U
 }
 
 /**
+ * Purpose: Resends the Firebase verification email for an unverified password account.
+ * How it works: signs in briefly, sends verification when needed, then signs out.
+ */
+export async function resendEmailVerification(email: string, password: string): Promise<void> {
+  const trimmedEmail = email.trim().toLowerCase();
+  const credential = await signInWithEmailAndPassword(auth(), trimmedEmail, password);
+  try {
+    await assertNotAdminAccount(credential.user.uid);
+    if (credential.user.emailVerified) {
+      await signOut(auth());
+      throw new Error('This email is already verified. You can sign in now.');
+    }
+    await sendEmailVerification(credential.user);
+  } finally {
+    await signOut(auth()).catch(() => undefined);
+  }
+}
+
+/**
+ * Purpose: Confirms the inbox link was opened and activates a mobile session.
+ * How it works: signs in, reloads Auth user, keeps the session only when emailVerified is true.
+ */
+export async function checkEmailVerifiedAndSignIn(
+  email: string,
+  password: string,
+): Promise<boolean> {
+  const trimmedEmail = email.trim().toLowerCase();
+  const credential = await signInWithEmailAndPassword(auth(), trimmedEmail, password);
+  await assertNotAdminAccount(credential.user.uid);
+  await credential.user.reload();
+  if (!credential.user.emailVerified) {
+    await signOut(auth());
+    return false;
+  }
+  return true;
+}
+
+/**
  * Purpose: Authenticates an existing account with a Google ID token.
  * How it works: 1) Creates a Google credential. 2) signs in. 3) loads the profile. 4) verifies provider ownership.
  * Technologies Used: Google OAuth, Firebase Authentication, Firebase Firestore.

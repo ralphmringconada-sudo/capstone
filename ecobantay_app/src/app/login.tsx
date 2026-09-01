@@ -58,7 +58,15 @@ export default function LoginScreen() {
       await login(email.trim(), password);
       router.replace('/home');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to sign in.');
+      const message = err instanceof Error ? err.message : 'Unable to sign in.';
+      if (message.toLowerCase().includes('verify your email')) {
+        router.replace({
+          pathname: '/verify-email',
+          params: { email: email.trim().toLowerCase() },
+        });
+        return;
+      }
+      setError(message);
     } finally {
       submissionLockRef.current = false;
       setIsSubmitting(false);
