@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -28,7 +28,7 @@ import { validateSignUpForm } from '@/utils/validation';
 export default function SignUpScreen() {
   const router = useRouter();
   const { register, registerGoogle, logout, isFirebaseConfigured } = useAuth();
-  const { request, response, promptAsync, isGoogleConfigured } = useGoogleAuth();
+  const { request, signInWithGoogle, isGoogleConfigured } = useGoogleAuth();
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -115,45 +115,19 @@ export default function SignUpScreen() {
     submissionLockRef.current = true;
     setIsGoogleSubmitting(true);
     try {
-      await promptAsync();
-    } catch {
+      const idToken = await signInWithGoogle();
+      if (!idToken) {
+        return;
+      }
+      await registerGoogle(idToken);
+      router.replace('/home');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to sign up with Google.');
+    } finally {
       submissionLockRef.current = false;
-      setError('Unable to open Google sign-up.');
       setIsGoogleSubmitting(false);
     }
   };
-
-  useEffect(() => {
-    if (response?.type !== 'success') {
-      if (response?.type === 'error' || response?.type === 'dismiss') {
-        submissionLockRef.current = false;
-        setIsGoogleSubmitting(false);
-      }
-      return;
-    }
-
-    const idToken =
-      response.params.id_token ??
-      (response as { authentication?: { idToken?: string } }).authentication?.idToken;
-    if (!idToken) {
-      submissionLockRef.current = false;
-      setError('Google sign-up failed. Please try again.');
-      setIsGoogleSubmitting(false);
-      return;
-    }
-
-    (async () => {
-      try {
-        await registerGoogle(idToken);
-        router.replace('/home');
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Unable to sign up with Google.');
-      } finally {
-        submissionLockRef.current = false;
-        setIsGoogleSubmitting(false);
-      }
-    })();
-  }, [response, registerGoogle, router]);
 
   const isBusy = isSubmitting || isGoogleSubmitting;
 

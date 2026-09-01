@@ -351,6 +351,12 @@ export async function registerWithGoogle(idToken: string): Promise<UserProfile> 
 
   try {
     const authCredential = await signInWithCredential(auth(), credential);
+    await withTimeout(
+      authCredential.user.getIdToken(true),
+      REQUEST_TIMEOUT_MS,
+      'Could not refresh your Google sign-in token. Check your internet connection and try again.',
+    );
+
     /* Firestore read: prevent registration from replacing an existing application profile. */
     const existingProfile = await getUserProfile(authCredential.user.uid);
 
@@ -372,7 +378,25 @@ export async function registerWithGoogle(idToken: string): Promise<UserProfile> 
     };
 
     /* Firestore write: persist the provider-derived profile after duplicate validation. */
-    await saveUserProfile(profile);
+    try {
+      await withTimeout(
+        saveUserProfile(profile),
+        REQUEST_TIMEOUT_MS,
+        'Timed out saving your profile to Firestore. Check internet, then try again.',
+      );
+    } catch (firstSaveError) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      await authCredential.user.getIdToken(true);
+      try {
+        await withTimeout(
+          saveUserProfile(profile),
+          REQUEST_TIMEOUT_MS,
+          'Timed out saving your profile to Firestore. Check internet, then try again.',
+        );
+      } catch (secondSaveError) {
+        throw mapServiceError(secondSaveError ?? firstSaveError);
+      }
+    }
     return profile;
   } catch (error: unknown) {
     if (error instanceof Error && error.message.startsWith('An account with this Google email')) {

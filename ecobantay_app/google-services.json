@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "117741383587",
+    "project_id": "ecobantay-18061",
+    "storage_bucket": "ecobantay-18061.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:117741383587:android:589e67d04bec83d53df416",
+        "android_client_info": {
+          "package_name": "com.wex_1231.ecobantay_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "117741383587-54avgs3lrnl0c60vlhi9nom18kg1eqmd.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.wex_1231.ecobantay_app",
+            "certificate_hash": "8449cda23acf41d23d5e1ad61ca0cb50ce9d8c4c"
+          }
+        },
+        {
+          "client_id": "117741383587-5fde25c1fjsvabvdp5ire8jisf24i1rl.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCx5ctphWV8kAkqVRogtdlQr0CRG-E6AZ8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "117741383587-2uaininkcbc97t80k60uj3kmc4c628ud.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

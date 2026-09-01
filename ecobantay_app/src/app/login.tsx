@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -27,7 +27,7 @@ import { validateLoginForm } from '@/utils/validation';
 export default function LoginScreen() {
   const router = useRouter();
   const { login, loginGoogle, isFirebaseConfigured } = useAuth();
-  const { request, response, promptAsync, isGoogleConfigured } = useGoogleAuth();
+  const { request, signInWithGoogle, isGoogleConfigured } = useGoogleAuth();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -87,45 +87,19 @@ export default function LoginScreen() {
     submissionLockRef.current = true;
     setIsGoogleSubmitting(true);
     try {
-      await promptAsync();
-    } catch {
+      const idToken = await signInWithGoogle();
+      if (!idToken) {
+        return;
+      }
+      await loginGoogle(idToken);
+      router.replace('/home');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to sign in with Google.');
+    } finally {
       submissionLockRef.current = false;
-      setError('Unable to open Google sign-in.');
       setIsGoogleSubmitting(false);
     }
   };
-
-  useEffect(() => {
-    if (response?.type !== 'success') {
-      if (response?.type === 'error' || response?.type === 'dismiss') {
-        submissionLockRef.current = false;
-        setIsGoogleSubmitting(false);
-      }
-      return;
-    }
-
-    const idToken =
-      response.params.id_token ??
-      (response as { authentication?: { idToken?: string } }).authentication?.idToken;
-    if (!idToken) {
-      submissionLockRef.current = false;
-      setError('Google sign-in failed. Please try again.');
-      setIsGoogleSubmitting(false);
-      return;
-    }
-
-    (async () => {
-      try {
-        await loginGoogle(idToken);
-        router.replace('/home');
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Unable to sign in with Google.');
-      } finally {
-        submissionLockRef.current = false;
-        setIsGoogleSubmitting(false);
-      }
-    })();
-  }, [response, loginGoogle, router]);
 
   const isBusy = isSubmitting || isGoogleSubmitting;
 

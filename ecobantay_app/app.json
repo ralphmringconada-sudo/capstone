@@ -21,6 +21,7 @@
         "backgroundImage": "./assets/images/android-icon-background.png"
       },
       "predictiveBackGestureEnabled": false,
+      "googleServicesFile": "./google-services.json",
       "config": {
         "googleMaps": {
           "apiKey": "AIzaSyBK-t1HyWS40z-Y18sT4OWuPWcY7gt-Dhw"
@@ -78,7 +79,8 @@
           "locationAlwaysAndWhenInUsePermission": "Allow EcoBantay to use your location to verify where reports are submitted in Valencia."
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      "@react-native-google-signin/google-signin"
     ],
     "experiments": {
       "typedRoutes": true
