@@ -109,6 +109,7 @@ export async function registerWithEmail(input: {
   birthday: Date;
 }): Promise<UserProfile> {
   let createdUser: User | null = null;
+  let profileSaved = false;
 
   try {
     /*
@@ -122,12 +123,6 @@ export async function registerWithEmail(input: {
     );
 
     createdUser = credential.user;
-
-    await withTimeout(
-      sendEmailVerification(credential.user),
-      REQUEST_TIMEOUT_MS,
-      'Account was created, but the verification email could not be sent. Check your inbox settings and try logging in later.',
-    );
 
     const profile: UserProfile = {
       uid: credential.user.uid,
@@ -149,14 +144,26 @@ export async function registerWithEmail(input: {
       REQUEST_TIMEOUT_MS,
       'Auth account was created, but Firestore did not save the profile. Create Firestore Database and publish the security rules.',
     );
+    profileSaved = true;
+
+    try {
+      await withTimeout(
+        sendEmailVerification(credential.user),
+        REQUEST_TIMEOUT_MS,
+        'Account was created, but the verification email could not be sent. Open Verify Email and tap Resend.',
+      );
+    } catch (verifyError) {
+      // Keep the account — user can resend verification from the verify-email screen.
+      console.warn('sendEmailVerification failed after signup:', verifyError);
+    }
 
     return profile;
   } catch (error) {
     /*
-     * Error handling: roll back the newly created Auth identity if the Firestore
-     * profile write fails, preserving consistency between both Firebase services.
+     * Error handling: roll back the newly created Auth identity only when the
+     * Firestore profile was not saved, so Auth and profile stay consistent.
      */
-    if (createdUser) {
+    if (createdUser && !profileSaved) {
       try {
         await deleteUser(createdUser);
       } catch {
@@ -553,6 +560,7 @@ function mapServiceError(error: unknown): Error {
  */
 function mapFirebaseAuthError(error: unknown): Error {
   const code = (error as { code?: string })?.code;
+  const rawMessage = error instanceof Error ? error.message : '';
 
   switch (code) {
     case 'auth/user-not-found':
@@ -563,14 +571,28 @@ function mapFirebaseAuthError(error: unknown): Error {
     case 'auth/requires-recent-login':
       return new Error('Please log out and log in again before doing this.');
     case 'auth/email-already-in-use':
-      return new Error('An account with this email already exists.');
+      return new Error(
+        'An account with this email already exists. Try signing in, or use Verify Email if you have not activated it yet.',
+      );
     case 'auth/invalid-email':
       return new Error('Please enter a valid email address.');
     case 'auth/too-many-requests':
       return new Error('Too many attempts. Please try again later.');
     case 'auth/weak-password':
       return new Error('Password is too weak. Please choose a stronger password.');
+    case 'auth/operation-not-allowed':
+      return new Error(
+        'Email/password sign-up is disabled in Firebase. Enable Email/Password under Authentication → Sign-in method.',
+      );
+    case 'auth/network-request-failed':
+      return new Error('Network error. Check your internet connection and try again.');
     default:
+      if (rawMessage && !rawMessage.startsWith('Firebase:')) {
+        return new Error(rawMessage);
+      }
+      if (rawMessage) {
+        return new Error(rawMessage.replace(/^Firebase:\s*/i, '').replace(/\s*\(.*\)\s*$/, '').trim() || 'Something went wrong. Please try again.');
+      }
       return new Error('Something went wrong. Please try again.');
   }
 }
