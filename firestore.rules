@@ -29,19 +29,21 @@ service cloud.firestore {
 
     match /users/{userId} {
       allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
-      allow create: if isSignedIn() && request.auth.uid == userId;
-      // Admins manage account flags; citizens may change profile fields only.
-      allow update: if isAdmin() || (
-        isSignedIn()
+
+      // Sign up / Google register: newly signed-in users must be able to save their own profile.
+      allow create: if isSignedIn()
         && request.auth.uid == userId
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-          'firstName',
-          'lastName',
-          'contactNumber',
-          'birthday',
-          'updatedAt'
-        ])
-      );
+        && request.resource.data.uid == userId;
+
+      // Citizens may update their own profile document; admins may moderate any user.
+      // (setDoc on an existing doc is an update — keep this open enough for signup retries.)
+      allow update: if isAdmin()
+        || (
+          isSignedIn()
+          && request.auth.uid == userId
+          && request.resource.data.uid == userId
+        );
+
       allow delete: if isSuperAdmin() || (isSignedIn() && request.auth.uid == userId);
     }
 
