@@ -3,7 +3,9 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Dimensions,
   Image,
+  Modal,
   Platform,
   SafeAreaView,
   ScrollView,
@@ -31,6 +33,7 @@ import {
 } from '@/utils/eventStatus';
 import type { EcoEvent, EventParticipant } from '@/types/event';
 
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const DEFAULT_COORDS = { latitude: 9.2805, longitude: 123.2431 };
 
 export default function ViewEventScreen() {
@@ -48,6 +51,8 @@ export default function ViewEventScreen() {
   const [participants, setParticipants] = useState<EventParticipant[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isActing, setIsActing] = useState(false);
+  const [hideParticipants, setHideParticipants] = useState(false);
+  const [viewerUri, setViewerUri] = useState<string | null>(null);
 
   const loadEvent = async () => {
     if (!id) {
@@ -248,15 +253,17 @@ export default function ViewEventScreen() {
                   scrollEventThrottle={16}
                 >
                   {photos.map((photo, index) => (
-                    <View
+                    <TouchableOpacity
                       key={photo.id}
+                      activeOpacity={0.85}
+                      onPress={() => setViewerUri(photo.uri)}
                       style={[
                         styles.photoWrapper,
                         index === photos.length - 1 && { marginRight: 0 },
                       ]}
                     >
                       <Image source={{ uri: photo.uri }} style={styles.eventPhoto} resizeMode="cover" />
-                    </View>
+                    </TouchableOpacity>
                   ))}
                 </Animated.ScrollView>
                 <View style={styles.scrollIndicatorContainer}>
@@ -299,8 +306,33 @@ export default function ViewEventScreen() {
               {event.participants}/{event.capacity} participants
             </Text>
             <View style={styles.participantList}>
-              <Text style={styles.participantListTitle}>Participants</Text>
-              {participants.length === 0 ? (
+              <View style={styles.participantListHeaderRow}>
+                <Text style={styles.participantListTitle}>Participants</Text>
+                {isOwner ? (
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    style={[
+                      styles.visibilityToggle,
+                      !hideParticipants && styles.visibilityToggleActive,
+                    ]}
+                    onPress={() => setHideParticipants((prev) => !prev)}
+                  >
+                    <Text
+                      style={[
+                        styles.visibilityToggleText,
+                        !hideParticipants && styles.visibilityToggleTextActive,
+                      ]}
+                    >
+                      {hideParticipants ? 'HIDDEN' : 'VISIBLE'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+              {hideParticipants && !isOwner ? (
+                <Text style={styles.participantEmpty}>
+                  The organizer has hidden the participant list.
+                </Text>
+              ) : participants.length === 0 ? (
                 <Text style={styles.participantEmpty}>No one has joined yet.</Text>
               ) : (
                 participants.map((person) => (
@@ -390,6 +422,24 @@ export default function ViewEventScreen() {
           ) : null}
         </View>
       </ScrollView>
+
+      <Modal
+        visible={Boolean(viewerUri)}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setViewerUri(null)}
+      >
+        <View style={styles.viewerOverlay}>
+          <TouchableOpacity style={styles.viewerClose} onPress={() => setViewerUri(null)}>
+            <Text style={styles.viewerCloseText}>Close</Text>
+          </TouchableOpacity>
+          {viewerUri ? (
+            <View style={styles.viewerContent}>
+              <Image source={{ uri: viewerUri }} style={styles.viewerImage} resizeMode="contain" />
+            </View>
+          ) : null}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -520,12 +570,36 @@ const styles = StyleSheet.create({
     borderTopColor: '#e6e6e6',
     paddingTop: 10,
   },
+  participantListHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
   participantListTitle: {
     fontFamily: 'Montserrat-Bold',
     fontSize: 14,
     color: '#111',
-    marginBottom: 8,
   },
+  visibilityToggle: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#eef2f0',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    minWidth: 64,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  visibilityToggleActive: { backgroundColor: '#375e55', borderColor: '#375e55' },
+  visibilityToggleText: {
+    fontFamily: 'Montserrat-Bold',
+    fontSize: 10,
+    color: '#555555',
+    includeFontPadding: false,
+  },
+  visibilityToggleTextActive: { color: '#ffffff' },
   participantEmpty: {
     fontFamily: 'Montserrat-Regular',
     fontSize: 12,
@@ -582,4 +656,20 @@ const styles = StyleSheet.create({
     color: '#D99A00',
     lineHeight: 18,
   },
+  viewerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  viewerClose: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 56 : 36,
+    right: 24,
+    zIndex: 2,
+    padding: 8,
+  },
+  viewerCloseText: { color: '#fff', fontFamily: 'Montserrat-Bold', fontSize: 16 },
+  viewerContent: { width: SCREEN_WIDTH * 0.92, alignItems: 'center' },
+  viewerImage: { width: '100%', height: SCREEN_HEIGHT * 0.65 },
 });

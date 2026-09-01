@@ -121,6 +121,7 @@ export default function CreateReportScreen() {
   const [imageProcessing, setImageProcessing] = useState(false);
   const [locating, setLocating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hideCreatorName, setHideCreatorName] = useState(false);
 
   const [categoryIndex, setCategoryIndex] = useState(2);
   const currentIndexRef = useRef(2);
@@ -755,6 +756,36 @@ export default function CreateReportScreen() {
                 <Text style={styles.sectionTitle}>Additional Information</Text>
               </View>
 
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={styles.visibilityToggleRow}
+                onPress={() => setHideCreatorName((prev) => !prev)}
+              >
+                <View style={styles.visibilityToggleLabelContainer}>
+                  <Text style={styles.visibilityToggleLabel}>Hide your name on this report</Text>
+                  <Text style={styles.visibilityToggleHint}>
+                    {hideCreatorName
+                      ? 'Your name will not be shown as the reporter.'
+                      : 'Your name will be shown as the reporter.'}
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.visibilityToggleButton,
+                    !hideCreatorName && styles.visibilityToggleButtonActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.visibilityToggleButtonText,
+                      !hideCreatorName && styles.visibilityToggleButtonTextActive,
+                    ]}
+                  >
+                    {hideCreatorName ? 'HIDDEN' : 'VISIBLE'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
               <TextInput
                 style={styles.textArea}
                 placeholder="Describe what happened"
@@ -975,6 +1006,41 @@ const styles = StyleSheet.create({
     fontFamily: 'Montserrat-Regular',
     includeFontPadding: false,
   },
+  visibilityToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  visibilityToggleLabelContainer: { flex: 1, paddingRight: 12 },
+  visibilityToggleLabel: {
+    fontFamily: 'Montserrat-Semi-Bold',
+    fontSize: 13,
+    color: '#000000',
+    includeFontPadding: false,
+  },
+  visibilityToggleHint: {
+    fontFamily: 'Montserrat-Regular',
+    fontSize: 11,
+    color: '#777777',
+    marginTop: 2,
+  },
+  visibilityToggleButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#eef2f0',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  visibilityToggleButtonActive: { backgroundColor: '#3B703C', borderColor: '#3B703C' },
+  visibilityToggleButtonText: {
+    fontFamily: 'Montserrat-Bold',
+    fontSize: 11,
+    color: '#555555',
+    includeFontPadding: false,
+  },
+  visibilityToggleButtonTextActive: { color: '#ffffff' },
   textArea: {
     width: '100%',
     height: 120,

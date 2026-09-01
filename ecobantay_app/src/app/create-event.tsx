@@ -72,6 +72,7 @@ export default function CreateEventScreen() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [capacity, setCapacity] = useState('50');
+  const [hideParticipants, setHideParticipants] = useState(false);
   const [coordinates, setCoordinates] = useState<EventCoordinates | null>(null);
   const [imageUris, setImageUris] = useState<string[]>([]);
   const [eventDate, setEventDate] = useState(new Date());
@@ -566,6 +567,38 @@ export default function CreateEventScreen() {
                 onChangeText={setCapacity}
               />
 
+              <TouchableOpacity
+                activeOpacity={0.8}
+                style={styles.visibilityToggleRow}
+                onPress={() => setHideParticipants((prev) => !prev)}
+              >
+                <View style={styles.visibilityToggleLabelContainer}>
+                  <Text style={styles.visibilityToggleLabel}>
+                    Change visibility of participants
+                  </Text>
+                  <Text style={styles.visibilityToggleHint}>
+                    {hideParticipants
+                      ? 'Only you will see who has joined this event.'
+                      : 'Anyone viewing this event can see who has joined.'}
+                  </Text>
+                </View>
+                <View
+                  style={[
+                    styles.visibilityToggleButton,
+                    !hideParticipants && styles.visibilityToggleButtonActive,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.visibilityToggleButtonText,
+                      !hideParticipants && styles.visibilityToggleButtonTextActive,
+                    ]}
+                  >
+                    {hideParticipants ? 'HIDDEN' : 'VISIBLE'}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+
               <TextInput
                 style={styles.textArea}
                 placeholder="Description"
@@ -757,6 +790,41 @@ const styles = StyleSheet.create({
   },
   badgeText: { color: '#ffffff', fontSize: 10, fontFamily: 'Montserrat-Bold' },
   titleInput: { marginBottom: 12 },
+  visibilityToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  visibilityToggleLabelContainer: { flex: 1, paddingRight: 12 },
+  visibilityToggleLabel: {
+    fontFamily: 'Montserrat-Semi-Bold',
+    fontSize: 13,
+    color: '#000000',
+    includeFontPadding: false,
+  },
+  visibilityToggleHint: {
+    fontFamily: 'Montserrat-Regular',
+    fontSize: 11,
+    color: '#777777',
+    marginTop: 2,
+  },
+  visibilityToggleButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: '#eef2f0',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  visibilityToggleButtonActive: { backgroundColor: '#375e55', borderColor: '#375e55' },
+  visibilityToggleButtonText: {
+    fontFamily: 'Montserrat-Bold',
+    fontSize: 11,
+    color: '#555555',
+    includeFontPadding: false,
+  },
+  visibilityToggleButtonTextActive: { color: '#ffffff' },
   dateTimeRow: { flexDirection: 'row', marginBottom: 12 },
   pill: {
     backgroundColor: '#eef2f0',

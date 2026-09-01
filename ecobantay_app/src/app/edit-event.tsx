@@ -19,13 +19,23 @@ import {
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Shadow } from 'react-native-shadow-2';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
+import * as Location from 'expo-location';
+import MapView, { Marker, type MapPressEvent, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useAuth } from '@/context/AuthContext';
 import { fetchEventById, updateUserEvent } from '@/services/eventService';
+import type { EventCoordinates } from '@/types/event';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CARD_PADDING = 72;
 const ITEM_SIZE = 80;
 const CENTER_OFFSET = (SCREEN_WIDTH - CARD_PADDING - ITEM_SIZE) / 2;
+const VALENCIA_CITY = 'Valencia, Negros Oriental';
+const DEFAULT_REGION = {
+  latitude: 9.2805,
+  longitude: 123.2431,
+  latitudeDelta: 0.04,
+  longitudeDelta: 0.04,
+};
 
 const categories = [
   { name: 'Clean-up', icon: require('@/assets/images/calendar_icon.png') },
@@ -66,6 +76,7 @@ export default function EditEventScreen() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [capacity, setCapacity] = useState('50');
+  const [coordinates, setCoordinates] = useState<EventCoordinates | null>(null);
   const [eventDate, setEventDate] = useState(new Date());
   const [eventTime, setEventTime] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -116,6 +127,7 @@ export default function EditEventScreen() {
         setLocation(event.location);
         setBarangay(event.submittedArea || '');
         setCapacity(String(event.capacity || 50));
+        setCoordinates(event.coordinates || null);
         setEventDate(parseStoredDate(event.date));
         setEventTime(parseStoredDate(`${event.date} ${event.time}`));
 
@@ -137,6 +149,40 @@ export default function EditEventScreen() {
     })();
   }, [id, user?.uid, router]);
 
+  const region = coordinates
+    ? {
+        latitude: coordinates.latitude,
+        longitude: coordinates.longitude,
+        latitudeDelta: 0.01,
+        longitudeDelta: 0.01,
+      }
+    : DEFAULT_REGION;
+
+  const updateAddressForCoords = async (coords: EventCoordinates) => {
+    try {
+      const results = await Location.reverseGeocodeAsync(coords);
+      if (!results.length) return;
+      const place = results[0];
+      const district = (place.district || place.subregion || place.name || '').toString();
+      const parts = [
+        place.street,
+        district,
+        place.city || VALENCIA_CITY,
+        place.region,
+      ].filter(Boolean);
+      if (parts.length) setLocation(parts.join(', '));
+      if (district && !barangay) setBarangay(district);
+    } catch {
+      /* keep manual address fields */
+    }
+  };
+
+  const handleMapPress = async (event: MapPressEvent) => {
+    const next = event.nativeEvent.coordinate;
+    setCoordinates(next);
+    await updateAddressForCoords(next);
+  };
+
   const handleSave = async () => {
     if (!id || !user?.uid) return;
     if (!title.trim() || !description.trim()) {
@@ -155,6 +201,7 @@ export default function EditEventScreen() {
         location,
         barangay,
         capacity: Number(capacity) || 50,
+        ...(coordinates ? { coordinates } : {}),
       });
       Alert.alert('Saved', 'Event updated.', [
         {
@@ -226,7 +273,6 @@ export default function EditEventScreen() {
             style={styles.cardShadowWrapper}
           >
             <View style={styles.card}>
-              <Text style={styles.sectionTitleCenter}>CATEGORY</Text>
               <View style={styles.carouselContainer}>
                 <View style={styles.carouselWrapper}>
                   <Animated.ScrollView
@@ -300,6 +346,44 @@ export default function EditEventScreen() {
                       );
                     })}
                   </Animated.ScrollView>
+
+                  <TouchableOpacity
+                    style={styles.arrowLeftAbsolute}
+                    onPress={() => {
+                      if (categoryIndex > 0) {
+                        scrollViewRef.current?.scrollTo({
+                          x: (categoryIndex - 1) * ITEM_SIZE,
+                          animated: true,
+                        });
+                      }
+                    }}
+                    hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+                  >
+                    <Image
+                      source={require('@/assets/images/Pointer_Left.png')}
+                      style={[styles.arrowIcon, categoryIndex === 0 && styles.arrowDisabled]}
+                    />
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.arrowRightAbsolute}
+                    onPress={() => {
+                      if (categoryIndex < categories.length - 1) {
+                        scrollViewRef.current?.scrollTo({
+                          x: (categoryIndex + 1) * ITEM_SIZE,
+                          animated: true,
+                        });
+                      }
+                    }}
+                    hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+                  >
+                    <Image
+                      source={require('@/assets/images/Pointer_Right.png')}
+                      style={[
+                        styles.arrowIcon,
+                        categoryIndex === categories.length - 1 && styles.arrowDisabled,
+                      ]}
+                    />
+                  </TouchableOpacity>
                 </View>
                 <Text style={styles.activeCategoryText}>{categories[categoryIndex].name}</Text>
               </View>
@@ -320,6 +404,18 @@ export default function EditEventScreen() {
                 />
                 <Text style={styles.sectionTitle}>Location</Text>
               </View>
+
+              <View style={styles.mapContainer}>
+                <MapView
+                  style={styles.map}
+                  provider={PROVIDER_GOOGLE}
+                  region={region}
+                  onPress={handleMapPress}
+                >
+                  {coordinates ? <Marker coordinate={coordinates} /> : null}
+                </MapView>
+              </View>
+
               <TextInput
                 style={styles.textInput}
                 placeholder="Barangay"
@@ -471,14 +567,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#f0f0f0',
   },
-  sectionTitleCenter: {
-    fontFamily: 'Montserrat-Bold',
-    fontSize: 16,
-    color: '#000000',
-    textAlign: 'center',
-    marginBottom: 16,
-    includeFontPadding: false,
-  },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
   sectionIcon: { width: 18, height: 18, tintColor: '#000000', marginRight: 8 },
   sectionTitle: {
@@ -487,19 +575,31 @@ const styles = StyleSheet.create({
     color: '#000000',
     includeFontPadding: false,
   },
-  carouselContainer: { width: '100%', alignItems: 'center' },
+  carouselContainer: { width: '100%', alignItems: 'center', paddingTop: 10 },
   carouselWrapper: { width: '100%', height: 70, position: 'relative', justifyContent: 'center' },
   slotContainer: { width: ITEM_SIZE, alignItems: 'center', justifyContent: 'center' },
   slotCircle: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center' },
   slotIcon: { width: 32, height: 32, tintColor: '#ffffff' },
   activeCategoryText: {
-    marginTop: 12,
+    marginTop: 16,
     fontFamily: 'Montserrat-Semi-Bold',
-    fontSize: 14,
+    fontSize: 12,
     color: '#000000',
     textAlign: 'center',
     includeFontPadding: false,
   },
+  arrowLeftAbsolute: { position: 'absolute', left: 0, zIndex: 10, elevation: 10 },
+  arrowRightAbsolute: { position: 'absolute', right: 0, zIndex: 10, elevation: 10 },
+  arrowIcon: { width: 24, height: 24, tintColor: '#4a5948' },
+  arrowDisabled: { opacity: 0.2 },
+  mapContainer: {
+    width: '100%',
+    height: 160,
+    borderRadius: 6,
+    overflow: 'hidden',
+    marginBottom: 12,
+  },
+  map: { width: '100%', height: '100%' },
   textInput: {
     width: '100%',
     height: 44,

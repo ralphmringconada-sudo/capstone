@@ -33,6 +33,11 @@ const EVENT_OWNERSHIP_TABS: { key: 'ALL' | 'MINE' | 'PUBLIC'; label: string }[] 
   { key: 'PUBLIC', label: 'Public' },
 ];
 
+// How often the notification list re-fetches while this screen is focused. Polling
+// rather than a Firestore listener keeps the change contained to this file; swap in
+// an onSnapshot subscription if instant delivery matters more than read count.
+const NOTIFICATION_POLL_MS = 30000;
+
 /**
  * Purpose: Presents the signed-in user's report/event dashboard and status-based monitoring views.
  * How it works: 1) loads owned reports or events on focus. 2) resolves images. 3) filters by status. 4) exposes actions.
@@ -181,24 +186,34 @@ export default function HomeScreen() {
     }
   }, [user?.uid]);
 
-  const loadNotifications = useCallback(async () => {
-    if (!user?.uid) {
-      setNotifications([]);
-      return;
-    }
-    try {
-      setLoadingNotifications(true);
-      setNotifications(await fetchUserNotifications(user.uid));
-    } catch {
-      setNotifications([]);
-    } finally {
-      setLoadingNotifications(false);
-    }
-  }, [user?.uid]);
+  // `silent` is for background refreshes (the poll, pull-to-refresh): it skips the
+  // loading flag so the panel doesn't flash a spinner, and leaves the existing list
+  // in place if the fetch fails rather than blanking a list the user can see.
+  const loadNotifications = useCallback(
+    async (options?: { silent?: boolean }) => {
+      const silent = options?.silent ?? false;
 
-  const openNotifications = useCallback(async () => {
+      if (!user?.uid) {
+        setNotifications([]);
+        return;
+      }
+      try {
+        if (!silent) setLoadingNotifications(true);
+        setNotifications(await fetchUserNotifications(user.uid));
+      } catch {
+        if (!silent) setNotifications([]);
+      } finally {
+        if (!silent) setLoadingNotifications(false);
+      }
+    },
+    [user?.uid],
+  );
+
+  const openNotifications = useCallback(() => {
     setShowNotifications(true);
-    await loadNotifications();
+    // Fire and forget — the panel renders whatever is already in state while this
+    // resolves, so opening it never waits on the network.
+    void loadNotifications({ silent: true });
   }, [loadNotifications]);
 
   const handleNotificationPress = useCallback(
@@ -229,6 +244,14 @@ export default function HomeScreen() {
       loadEvents();
       loadOfflinePending();
       loadNotifications();
+
+      // Keep the badge and the panel current without needing a tap. The interval is
+      // torn down on blur so a backgrounded screen isn't polling Firestore.
+      const pollId = setInterval(() => {
+        void loadNotifications({ silent: true });
+      }, NOTIFICATION_POLL_MS);
+
+      return () => clearInterval(pollId);
     }, [loadReports, loadEvents, loadOfflinePending, loadNotifications]),
   );
 
@@ -244,11 +267,16 @@ export default function HomeScreen() {
           );
         }
       }
-      await Promise.all([loadReports(), loadEvents(), loadOfflinePending()]);
+      await Promise.all([
+        loadReports(),
+        loadEvents(),
+        loadOfflinePending(),
+        loadNotifications({ silent: true }),
+      ]);
     } finally {
       setIsRefreshing(false);
     }
-  }, [loadReports, loadEvents, loadOfflinePending, user?.uid]);
+  }, [loadReports, loadEvents, loadOfflinePending, loadNotifications, user?.uid]);
 
   const filteredReports = reports.filter((report) => {
     const tab = USER_REPORT_TABS.find((item) => item.key === activeReportTab);
@@ -293,6 +321,14 @@ export default function HomeScreen() {
   const tabs = isEventsMode ? USER_EVENT_TABS : USER_REPORT_TABS;
   const activeTab = isEventsMode ? activeEventTab : activeReportTab;
 
+  // Badge count for the bell icon. Derived rather than stored so it stays in sync
+  // with the local optimistic updates in handleNotificationPress / "Mark all read"
+  // without needing a refetch.
+  const unreadCount = notifications.filter((item) => !item.read).length;
+
+  // Only take over the panel with a spinner when there's genuinely nothing to show.
+  const showNotificationSpinner = loadingNotifications && notifications.length === 0;
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#9FC37F" />
@@ -316,8 +352,19 @@ export default function HomeScreen() {
               </View>
 
               <View style={styles.topRight}>
-                <TouchableOpacity activeOpacity={0.7} onPress={openNotifications}>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={openNotifications}
+                  style={styles.notificationButton}
+                >
                   <Image source={require('@/assets/images/notification_icon.png')} style={styles.iconPlaceholder} />
+                  {unreadCount > 0 ? (
+                    <View style={styles.notificationBadge}>
+                      <Text style={styles.notificationBadgeText}>
+                        {unreadCount > 9 ? '9+' : unreadCount}
+                      </Text>
+                    </View>
+                  ) : null}
                 </TouchableOpacity>
 
                 <TouchableOpacity activeOpacity={0.7} onPress={() => router.navigate('/profile')}>
@@ -727,40 +774,55 @@ export default function HomeScreen() {
         animationType="fade"
         onRequestClose={() => setShowOfflineDetails(false)}
       >
-        <TouchableOpacity
-          style={styles.notificationBackdrop}
-          activeOpacity={1}
-          onPress={() => setShowOfflineDetails(false)}
-        >
-          <TouchableOpacity activeOpacity={1} style={styles.notificationCard}>
-            <Text style={styles.notificationHeaderTitle}>Offline sync status</Text>
-            {offlineDrafts.length === 0 ? (
-              <Text style={styles.notificationEmpty}>No offline drafts.</Text>
-            ) : (
-              offlineDrafts.map((draft) => {
-                let summary = 'Saved report';
-                try {
-                  const payload = JSON.parse(draft.payloadJson) as { categoryName?: string };
-                  summary = payload.categoryName || summary;
-                } catch {
-                  /* ignore */
-                }
-                return (
-                  <View key={draft.id} style={{ marginBottom: 12 }}>
-                    <Text style={styles.notificationTitle}>{summary}</Text>
-                    <Text style={styles.notificationDesc}>
-                      Status: {draft.syncStatus.toUpperCase()}
-                      {draft.lastError ? `\nError: ${draft.lastError}` : ''}
-                    </Text>
-                    <Text style={styles.notificationDesc}>
-                      Saved: {formatReportDate(draft.createdAt)}
-                    </Text>
-                  </View>
-                );
-              })
-            )}
+        {/* The backdrop is a sibling behind the card rather than its parent: a
+            ScrollView nested inside a TouchableOpacity competes with it for the
+            gesture responder on Android, which is what kept the list from dragging. */}
+        <View style={styles.modalRoot}>
+          <TouchableOpacity
+            style={styles.notificationBackdrop}
+            activeOpacity={1}
+            onPress={() => setShowOfflineDetails(false)}
+          />
+
+          <View style={styles.notificationCard}>
+            <View style={styles.notificationHeaderRow}>
+              <Text style={styles.notificationHeaderTitle}>Offline sync status</Text>
+            </View>
+
+            <ScrollView
+              style={styles.notificationScroll}
+              contentContainerStyle={styles.notificationScrollContent}
+              showsVerticalScrollIndicator
+            >
+              {offlineDrafts.length === 0 ? (
+                <Text style={styles.notificationEmpty}>No offline drafts.</Text>
+              ) : (
+                offlineDrafts.map((draft) => {
+                  let summary = 'Saved report';
+                  try {
+                    const payload = JSON.parse(draft.payloadJson) as { categoryName?: string };
+                    summary = payload.categoryName || summary;
+                  } catch {
+                    /* ignore */
+                  }
+                  return (
+                    <View key={draft.id} style={{ marginBottom: 12 }}>
+                      <Text style={styles.notificationTitle}>{summary}</Text>
+                      <Text style={styles.notificationDesc}>
+                        Status: {draft.syncStatus.toUpperCase()}
+                        {draft.lastError ? `\nError: ${draft.lastError}` : ''}
+                      </Text>
+                      <Text style={styles.notificationDesc}>
+                        Saved: {formatReportDate(draft.createdAt)}
+                      </Text>
+                    </View>
+                  );
+                })
+              )}
+            </ScrollView>
+
             <TouchableOpacity
-              style={{ marginTop: 8 }}
+              style={styles.notificationFooter}
               onPress={async () => {
                 setShowOfflineDetails(false);
                 await onRefresh();
@@ -768,8 +830,8 @@ export default function HomeScreen() {
             >
               <Text style={styles.notificationMarkAll}>Sync now</Text>
             </TouchableOpacity>
-          </TouchableOpacity>
-        </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
 
       <Modal
@@ -778,15 +840,18 @@ export default function HomeScreen() {
         animationType="fade"
         onRequestClose={() => setShowNotifications(false)}
       >
-        <TouchableOpacity
-          style={styles.notificationBackdrop}
-          activeOpacity={1}
-          onPress={() => setShowNotifications(false)}
-        >
-          <TouchableOpacity activeOpacity={1} style={styles.notificationCard}>
+        <View style={styles.modalRoot}>
+          <TouchableOpacity
+            style={styles.notificationBackdrop}
+            activeOpacity={1}
+            onPress={() => setShowNotifications(false)}
+          />
+
+          <View style={styles.notificationCard}>
+            {/* Header stays pinned; only the list below it scrolls. */}
             <View style={styles.notificationHeaderRow}>
               <Text style={styles.notificationHeaderTitle}>Notifications</Text>
-              {notifications.some((item) => !item.read) ? (
+              {unreadCount > 0 ? (
                 <TouchableOpacity
                   onPress={async () => {
                     if (!user?.uid) return;
@@ -799,49 +864,55 @@ export default function HomeScreen() {
               ) : null}
             </View>
 
-            {loadingNotifications ? (
+            {showNotificationSpinner ? (
               <ActivityIndicator color="#3B703C" style={{ marginVertical: 20 }} />
             ) : notifications.length === 0 ? (
               <Text style={styles.notificationEmpty}>No notifications yet.</Text>
             ) : (
-              notifications.map((item, index) => (
-                <View key={item.id}>
-                  {index > 0 ? <View style={styles.notificationDivider} /> : null}
-                  <TouchableOpacity
-                    style={styles.notificationItem}
-                    activeOpacity={0.8}
-                    onPress={() => handleNotificationPress(item)}
-                  >
-                    <View
-                      style={[
-                        styles.notificationIconCircle,
-                        !item.read && styles.notificationIconUnread,
-                      ]}
+              <ScrollView
+                style={styles.notificationScroll}
+                contentContainerStyle={styles.notificationScrollContent}
+                showsVerticalScrollIndicator
+              >
+                {notifications.map((item, index) => (
+                  <View key={item.id}>
+                    {index > 0 ? <View style={styles.notificationDivider} /> : null}
+                    <TouchableOpacity
+                      style={styles.notificationItem}
+                      activeOpacity={0.8}
+                      onPress={() => handleNotificationPress(item)}
                     >
-                      <Text style={styles.notificationIconText}>i</Text>
-                    </View>
-                    <View style={styles.notificationTextBlock}>
-                      <Text style={styles.notificationTitle}>{item.title}</Text>
-                      <Text style={styles.notificationDesc}>{item.body}</Text>
-                      <View style={styles.notificationPillRow}>
-                        {item.statusLabel ? (
-                          <View style={styles.notificationPillBlue}>
-                            <Text style={styles.notificationPillBlueText}>{item.statusLabel}</Text>
+                      <View
+                        style={[
+                          styles.notificationIconCircle,
+                          !item.read && styles.notificationIconUnread,
+                        ]}
+                      >
+                        <Text style={styles.notificationIconText}>i</Text>
+                      </View>
+                      <View style={styles.notificationTextBlock}>
+                        <Text style={styles.notificationTitle}>{item.title}</Text>
+                        <Text style={styles.notificationDesc}>{item.body}</Text>
+                        <View style={styles.notificationPillRow}>
+                          {item.statusLabel ? (
+                            <View style={styles.notificationPillBlue}>
+                              <Text style={styles.notificationPillBlueText}>{item.statusLabel}</Text>
+                            </View>
+                          ) : null}
+                          <View style={styles.notificationPillNeutral}>
+                            <Text style={styles.notificationPillNeutralText}>
+                              {formatReportDate(item.createdAt)}
+                            </Text>
                           </View>
-                        ) : null}
-                        <View style={styles.notificationPillNeutral}>
-                          <Text style={styles.notificationPillNeutralText}>
-                            {formatReportDate(item.createdAt)}
-                          </Text>
                         </View>
                       </View>
-                    </View>
-                  </TouchableOpacity>
-                </View>
-              ))
+                    </TouchableOpacity>
+                  </View>
+                ))}
+              </ScrollView>
             )}
-          </TouchableOpacity>
-        </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
     </SafeAreaView>
   );
@@ -1163,8 +1234,32 @@ const styles = StyleSheet.create({
     tintColor: '#ffffff',
   },
 
+  // Bell + unread count badge
+  notificationButton: { position: 'relative' },
+  notificationBadge: {
+    position: 'absolute',
+    top: -6,
+    right: -8,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    backgroundColor: '#d64545',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#E1F0B9', // matches greenSection so the badge reads as a cutout
+  },
+  notificationBadgeText: {
+    fontFamily: 'Montserrat-Bold',
+    fontSize: 9,
+    color: '#ffffff',
+    includeFontPadding: false,
+  },
+
+  modalRoot: { flex: 1 },
   notificationBackdrop: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: 'transparent',
   },
   notificationCard: {
@@ -1175,12 +1270,19 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 16,
     maxHeight: '70%',
+    // Without this the list bleeds past the rounded corners while scrolling.
+    overflow: 'hidden',
     shadowColor: '#000000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 10,
     elevation: 6,
   },
+  // flexShrink lets the list give up height so the card can honour maxHeight; without
+  // it the ScrollView claims its full content height and nothing actually scrolls.
+  notificationScroll: { flexShrink: 1 },
+  notificationScrollContent: { paddingBottom: 4 },
+  notificationFooter: { marginTop: 12 },
   notificationHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
