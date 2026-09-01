@@ -110,7 +110,28 @@ export default function SignUpScreen() {
         params: { email: email.trim().toLowerCase() },
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to create account.');
+      const message = err instanceof Error ? err.message : 'Unable to create account.';
+      if (message.toLowerCase().includes('already exists')) {
+        setError(message);
+        Alert.alert(
+          'Account already exists',
+          'If you already signed up, open Verify Email or Sign in. If you never verified, use Verify Email and tap Resend.',
+          [
+            {
+              text: 'Verify Email',
+              onPress: () =>
+                router.replace({
+                  pathname: '/verify-email',
+                  params: { email: email.trim().toLowerCase() },
+                }),
+            },
+            { text: 'Sign in', onPress: () => router.replace('/login') },
+            { text: 'OK', style: 'cancel' },
+          ],
+        );
+        return;
+      }
+      setError(message);
     } finally {
       submissionLockRef.current = false;
       setIsSubmitting(false);
