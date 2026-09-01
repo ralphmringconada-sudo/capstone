@@ -124,6 +124,13 @@ export async function registerWithEmail(input: {
 
     createdUser = credential.user;
 
+    // Ensure Firestore receives a fresh Auth token before the profile write (avoids hung/denied creates).
+    await withTimeout(
+      credential.user.getIdToken(true),
+      REQUEST_TIMEOUT_MS,
+      'Could not refresh your sign-in token. Check your internet connection and try again.',
+    );
+
     const profile: UserProfile = {
       uid: credential.user.uid,
       firstName: input.firstName.trim(),
@@ -139,11 +146,26 @@ export async function registerWithEmail(input: {
      * Firestore write: persist profile details only after Firebase Authentication
      * has issued a stable UID for use as the document key.
      */
-    await withTimeout(
-      saveUserProfile(profile),
-      REQUEST_TIMEOUT_MS,
-      'Auth account was created, but Firestore did not save the profile. Create Firestore Database and publish the security rules.',
-    );
+    try {
+      await withTimeout(
+        saveUserProfile(profile),
+        REQUEST_TIMEOUT_MS,
+        'Timed out saving your profile to Firestore. Check internet, then try again.',
+      );
+    } catch (firstSaveError) {
+      // One retry after a short pause — common after brand-new Auth sessions on mobile.
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      await credential.user.getIdToken(true);
+      try {
+        await withTimeout(
+          saveUserProfile(profile),
+          REQUEST_TIMEOUT_MS,
+          'Timed out saving your profile to Firestore. Check internet, then try again.',
+        );
+      } catch (secondSaveError) {
+        throw mapServiceError(secondSaveError ?? firstSaveError);
+      }
+    }
     profileSaved = true;
 
     try {

@@ -114,7 +114,8 @@ function initializeFirebase() {
         Platform.OS === 'web'
           ? getFirestore(appInstance)
           : initializeFirestore(appInstance, {
-              experimentalAutoDetectLongPolling: true,
+              // RN/Expo often hangs on WebChannel; long polling is more reliable on mobile data/Wi‑Fi.
+              experimentalForceLongPolling: true,
             });
     } catch {
       dbInstance = getFirestore(appInstance);
