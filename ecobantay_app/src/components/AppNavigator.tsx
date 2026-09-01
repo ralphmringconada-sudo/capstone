@@ -59,7 +59,7 @@ export function AppNavigator() {
 
       {isLoading ? (
         <View style={styles.loadingOverlay} pointerEvents="auto">
-          <LoadingScreen message="Ecobantay is Loading..." />
+          <LoadingScreen />
         </View>
       ) : null}
     </>

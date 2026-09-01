@@ -1,8 +1,9 @@
 import React, { useRef, useState, useCallback, useEffect } from 'react';
-import { View, Text, TouchableOpacity, SafeAreaView, StatusBar, StyleSheet, Image, Animated, ActivityIndicator, RefreshControl, ScrollView, Modal, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, SafeAreaView, StatusBar, StyleSheet, Image, Animated, ActivityIndicator, RefreshControl, ScrollView, Modal, Alert, Dimensions } from 'react-native';
 import { Shadow } from 'react-native-shadow-2';
 import { useRouter, Stack, useFocusEffect } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
+import TopLoadingIndicator from '@/components/TopLoadingIndicator';
 import { useAuth } from '@/context/AuthContext';
 import { fetchUserReports, formatReportDate } from '@/services/reportService';
 import { fetchEventsForHome } from '@/services/eventService';
@@ -38,6 +39,8 @@ const EVENT_OWNERSHIP_TABS: { key: 'ALL' | 'MINE' | 'PUBLIC'; label: string }[] 
 // an onSnapshot subscription if instant delivery matters more than read count.
 const NOTIFICATION_POLL_MS = 30000;
 
+const SCREEN_HEIGHT = Dimensions.get('window').height;
+
 /**
  * Purpose: Presents the signed-in user's report/event dashboard and status-based monitoring views.
  * How it works: 1) loads owned reports or events on focus. 2) resolves images. 3) filters by status. 4) exposes actions.
@@ -68,10 +71,12 @@ export default function HomeScreen() {
   const [offlinePendingCount, setOfflinePendingCount] = useState(0);
   const [offlineDrafts, setOfflineDrafts] = useState<OfflineReportRow[]>([]);
   const [showOfflineDetails, setShowOfflineDetails] = useState(false);
+  const [showTopLoading, setShowTopLoading] = useState(false);
+  const topLoadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Dynamic header height based on the active view
   const headerHeight = viewMode === 'Events' ? 482 : 440;
-  
+
   // Natural (expanded) height of just the collapsible chunk of the header — the
   // greeting text. Fixed, not measured: measuring this at runtime means attaching
   // onLayout to a view whose height we're animating, and RN fires onLayout on every
@@ -218,25 +223,47 @@ export default function HomeScreen() {
 
   const handleNotificationPress = useCallback(
     async (item: AppNotification) => {
-      if (!item.read) {
-        try {
-          await markNotificationRead(item.id);
-          setNotifications((prev) =>
-            prev.map((n) => (n.id === item.id ? { ...n, read: true } : n)),
-          );
-        } catch {
-          /* ignore */
+      setShowTopLoading(true);
+      try {
+        if (!item.read) {
+          try {
+            await markNotificationRead(item.id);
+            setNotifications((prev) =>
+              prev.map((n) => (n.id === item.id ? { ...n, read: true } : n)),
+            );
+          } catch {
+            /* ignore */
+          }
         }
-      }
-      setShowNotifications(false);
-      if (item.type === 'report' && item.relatedId) {
-        router.push({ pathname: '/view-report', params: { id: item.relatedId } });
-      } else if (item.type === 'event' && item.relatedId) {
-        router.push({ pathname: '/view-event', params: { id: item.relatedId } });
+        setShowNotifications(false);
+        if (item.type === 'report' && item.relatedId) {
+          router.push({ pathname: '/view-report', params: { id: item.relatedId } });
+        } else if (item.type === 'event' && item.relatedId) {
+          router.push({ pathname: '/view-event', params: { id: item.relatedId } });
+        }
+      } finally {
+        setShowTopLoading(false);
       }
     },
     [router],
   );
+
+  // For actions with no promise to await (plain navigation) — flashes the indicator
+  // for a fixed window so the tap has visible feedback before the new screen takes
+  // over, rather than nothing happening on screen for the gap between tap and
+  // transition. Self-clears via timeout since router.navigate/push don't resolve
+  // when the destination is actually ready.
+  const flashTopLoading = useCallback(() => {
+    setShowTopLoading(true);
+    if (topLoadingTimeoutRef.current) clearTimeout(topLoadingTimeoutRef.current);
+    topLoadingTimeoutRef.current = setTimeout(() => setShowTopLoading(false), 700);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (topLoadingTimeoutRef.current) clearTimeout(topLoadingTimeoutRef.current);
+    };
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -334,6 +361,10 @@ export default function HomeScreen() {
       <StatusBar barStyle="dark-content" backgroundColor="#9FC37F" />
       <Stack.Screen options={{ headerShown: false }} />
 
+      {/* Replaces the old in-list ActivityIndicator (isLoading) and also flashes for
+          button presses that don't otherwise give feedback (showTopLoading). */}
+      <TopLoadingIndicator visible={isLoading || showTopLoading} />
+
       <View style={styles.screenWrapper}>
         <Animated.View style={styles.headerContainer}>
           <View style={styles.greenSection}>
@@ -367,7 +398,13 @@ export default function HomeScreen() {
                   ) : null}
                 </TouchableOpacity>
 
-                <TouchableOpacity activeOpacity={0.7} onPress={() => router.navigate('/profile')}>
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  onPress={() => {
+                    flashTopLoading();
+                    router.navigate('/profile');
+                  }}
+                >
                   <Image source={require('@/assets/images/settings_icon.png')} style={styles.iconPlaceholder} />
                 </TouchableOpacity>
               </View>
@@ -392,7 +429,10 @@ export default function HomeScreen() {
               <TouchableOpacity
                 activeOpacity={0.75}
                 style={styles.actionButton}
-                onPress={() => router.navigate('/create-report')}
+                onPress={() => {
+                  flashTopLoading();
+                  router.navigate('/create-report');
+                }}
               >
                 <LinearGradient
                   colors={['#7ad5c433', '#e1ec6749']}
@@ -408,7 +448,10 @@ export default function HomeScreen() {
               <TouchableOpacity
                 activeOpacity={0.75}
                 style={styles.actionButton}
-                onPress={() => router.navigate('/create-event')}
+                onPress={() => {
+                  flashTopLoading();
+                  router.navigate('/create-event');
+                }}
               >
                 <LinearGradient
                   colors={['#7ad5c433', '#e1ec6749']}
@@ -426,7 +469,7 @@ export default function HomeScreen() {
               <View style={styles.segmentedControl}>
                 {/* Sliding Animated Background Background */}
                 <Animated.View style={[styles.segmentedSlider, { left: sliderPosition }]} />
-                
+
                 <TouchableOpacity
                   activeOpacity={0.8}
                   style={styles.segmentedButton}
@@ -546,9 +589,11 @@ export default function HomeScreen() {
           }
         >
           {isLoading ? (
-            <View style={styles.emptyStateContainer}>
-              <ActivityIndicator size="large" color="#3f5c2b" />
-            </View>
+            // Not literally empty: a ScrollView needs enough content height for
+            // RefreshControl's pull gesture to register reliably (especially on
+            // Android) — an empty/too-short list here was what broke pull-to-refresh.
+            // minHeight guarantees overflow regardless of device size or headerHeight.
+            <View style={{ minHeight: SCREEN_HEIGHT }} />
           ) : isEventsMode ? (
             filteredEvents.length === 0 ? (
               <View style={styles.emptyStateContainer}>
@@ -609,12 +654,13 @@ export default function HomeScreen() {
 
                         <TouchableOpacity
                           activeOpacity={0.9}
-                          onPress={() =>
+                          onPress={() => {
+                            flashTopLoading();
                             router.navigate({
                               pathname: '/view-event',
                               params: { id: event.id },
-                            })
-                          }
+                            });
+                          }}
                         >
                           <LinearGradient colors={['#849a62', '#3f5c2b']} style={styles.cardContent}>
                             <View style={styles.cardHeaderRow}>
@@ -705,12 +751,13 @@ export default function HomeScreen() {
 
                     <TouchableOpacity
                       activeOpacity={0.9}
-                      onPress={() =>
+                      onPress={() => {
+                        flashTopLoading();
                         router.navigate({
                           pathname: '/view-report',
                           params: { id: report.id },
-                        })
-                      }
+                        });
+                      }}
                     >
                       <LinearGradient colors={['#849a62', '#3f5c2b']} style={styles.cardContent}>
                         <View style={styles.cardHeaderRow}>
@@ -855,8 +902,13 @@ export default function HomeScreen() {
                 <TouchableOpacity
                   onPress={async () => {
                     if (!user?.uid) return;
-                    await markAllNotificationsRead(user.uid);
-                    setNotifications((prev) => prev.map((item) => ({ ...item, read: true })));
+                    setShowTopLoading(true);
+                    try {
+                      await markAllNotificationsRead(user.uid);
+                      setNotifications((prev) => prev.map((item) => ({ ...item, read: true })));
+                    } finally {
+                      setShowTopLoading(false);
+                    }
                   }}
                 >
                   <Text style={styles.notificationMarkAll}>Mark all read</Text>
@@ -1066,7 +1118,7 @@ const styles = StyleSheet.create({
 
   fadeLeft: {
     position: 'absolute',
-    left: 24, 
+    left: 24,
     top: 0,
     bottom: 0,
     width: 24,
@@ -1074,7 +1126,7 @@ const styles = StyleSheet.create({
   },
   fadeRight: {
     position: 'absolute',
-    right: 24, 
+    right: 24,
     top: 0,
     bottom: 0,
     width: 24,

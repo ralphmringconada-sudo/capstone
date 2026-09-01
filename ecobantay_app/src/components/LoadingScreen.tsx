@@ -1,24 +1,24 @@
 import React from 'react';
-import { View, ActivityIndicator, StyleSheet, Image, Text } from 'react-native';
+import { View, Image, StyleSheet } from 'react-native';
+import AnimatedTracedLogo from '@/components/AnimatedTracedLogo';
+
+const LOGO_SIZE = 100;
 
 /**
  * Purpose: Presents branded feedback while an application workflow is pending.
- * How it works: 1) renders the EcoBantay logo. 2) displays activity feedback. 3) shows the supplied status message.
+ * How it works: renders the static wordmark above the animated traced-logo mark, full-screen and centered.
  * Technologies Used: React and React Native.
  * Why this implementation: A reusable full-screen state prevents blank interfaces during startup and authentication.
  */
-export default function LoadingScreen({ message = 'Loading...' }: { message?: string }) {
+export default function LoadingScreen() {
   return (
     <View style={styles.container}>
       <Image
         source={require('@/assets/images/Ecobantay_Logo.png')}
-        style={styles.logo}
+        style={styles.wordmark}
         resizeMode="contain"
       />
-
-      <ActivityIndicator size="large" color="#ffffff" />
-
-      <Text style={styles.messageText}>{message}</Text>
+      <AnimatedTracedLogo size={LOGO_SIZE} lines={1} />
     </View>
   );
 }
@@ -30,18 +30,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  logo: {
+  wordmark: {
     width: 320,
     height: 90,
     marginBottom: 40,
     transform: [{ translateX: -20 }],
-  },
-  messageText: {
-    fontFamily: 'Montserrat-Regular',
-    color: '#ffffff',
-    fontSize: 16,
-    marginTop: 24,
-    letterSpacing: 1,
-    fontWeight: '600',
   },
 });

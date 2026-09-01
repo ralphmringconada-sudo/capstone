@@ -56,7 +56,7 @@ export default function RootLayout() {
           <AppNavigator />
           {!isAppReady ? (
             <View style={styles.loadingOverlay} pointerEvents="auto">
-              <LoadingScreen message="Ecobantay is Loading..." />
+              <LoadingScreen />
             </View>
           ) : null}
         </ThemeProvider>

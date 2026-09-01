@@ -15,6 +15,7 @@ import {
   Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { useAuth } from '@/context/AuthContext';
 import { FIREBASE_SETUP_MESSAGE } from '@/config/firebase';
 import { useGoogleAuth } from '@/hooks/useGoogleAuth';
@@ -35,32 +36,16 @@ export default function SignUpScreen() {
   const [contactNumber, setContactNumber] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [birthdayText, setBirthdayText] = useState('');
+  const [birthday, setBirthday] = useState<Date | null>(null);
+  const [showBirthdayPicker, setShowBirthdayPicker] = useState(false);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const submissionLockRef = useRef(false);
 
-  const parseBirthday = (value: string): Date | null => {
-    const trimmed = value.trim();
-    // Accept MM/DD/YYYY
-    const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(trimmed);
-    if (!match) return null;
-    const month = Number(match[1]) - 1;
-    const day = Number(match[2]);
-    const year = Number(match[3]);
-    const date = new Date(year, month, day);
-    if (
-      date.getFullYear() !== year ||
-      date.getMonth() !== month ||
-      date.getDate() !== day
-    ) {
-      return null;
-    }
-    if (date > new Date()) return null;
-    return date;
-  };
+  const formatBirthdayDisplay = (date: Date): string =>
+    date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
   const handleSignUp = async () => {
     if (submissionLockRef.current) return;
@@ -71,9 +56,8 @@ export default function SignUpScreen() {
       return;
     }
 
-    const birthday = parseBirthday(birthdayText);
     if (!birthday) {
-      setError('Enter birthday as MM/DD/YYYY (for example 01/15/2000).');
+      setError('Please select your birthday.');
       return;
     }
 
@@ -110,28 +94,7 @@ export default function SignUpScreen() {
         params: { email: email.trim().toLowerCase() },
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to create account.';
-      if (message.toLowerCase().includes('already exists')) {
-        setError(message);
-        Alert.alert(
-          'Account already exists',
-          'If you already signed up, open Verify Email or Sign in. If you never verified, use Verify Email and tap Resend.',
-          [
-            {
-              text: 'Verify Email',
-              onPress: () =>
-                router.replace({
-                  pathname: '/verify-email',
-                  params: { email: email.trim().toLowerCase() },
-                }),
-            },
-            { text: 'Sign in', onPress: () => router.replace('/login') },
-            { text: 'OK', style: 'cancel' },
-          ],
-        );
-        return;
-      }
-      setError(message);
+      setError(err instanceof Error ? err.message : 'Unable to create account.');
     } finally {
       submissionLockRef.current = false;
       setIsSubmitting(false);
@@ -199,7 +162,7 @@ export default function SignUpScreen() {
       <StatusBar barStyle="dark-content" backgroundColor="#E1F0B9" />
 
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.flex}
       >
         <ScrollView
@@ -240,15 +203,33 @@ export default function SignUpScreen() {
             editable={!isBusy}
           />
 
-          <TextInput
-            style={[styles.input, styles.groupBottom]}
-            placeholder="Birthday (MM/DD/YYYY)"
-            placeholderTextColor="#83a96e"
-            value={birthdayText}
-            onChangeText={setBirthdayText}
-            keyboardType="numbers-and-punctuation"
-            editable={!isBusy}
-          />
+          <TouchableOpacity
+            style={[styles.input, styles.groupBottom, styles.birthdayInput]}
+            activeOpacity={0.8}
+            onPress={() => !isBusy && setShowBirthdayPicker(true)}
+            disabled={isBusy}
+          >
+            <Text style={birthday ? styles.birthdayText : styles.birthdayPlaceholder}>
+              {birthday ? formatBirthdayDisplay(birthday) : 'Birthday'}
+            </Text>
+            <Image
+              source={require('@/assets/images/calendar_icon.png')}
+              style={styles.birthdayIcon}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
+
+          {showBirthdayPicker ? (
+            <DateTimePicker
+              value={birthday || new Date(2000, 0, 1)}
+              mode="date"
+              maximumDate={new Date()}
+              onChange={(_, date) => {
+                setShowBirthdayPicker(Platform.OS === 'ios');
+                if (date) setBirthday(date);
+              }}
+            />
+          ) : null}
 
           <TextInput
             style={styles.input}
@@ -385,6 +366,26 @@ const styles = StyleSheet.create({
   },
   groupBottom: {
     marginBottom: 24,
+  },
+  birthdayInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  birthdayText: {
+    fontFamily: 'Montserrat-Regular',
+    fontSize: 16,
+    color: '#ffffff',
+  },
+  birthdayPlaceholder: {
+    fontFamily: 'Montserrat-Regular',
+    fontSize: 16,
+    color: '#83a96e',
+  },
+  birthdayIcon: {
+    width: 20,
+    height: 20,
+    tintColor: '#c2dc68',
   },
   passwordRow: {
     width: '100%',
