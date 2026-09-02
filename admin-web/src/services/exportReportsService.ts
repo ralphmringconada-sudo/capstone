@@ -6,6 +6,7 @@ import { firebaseConfig } from '@/config/firebaseConfig';
 import type { Report } from '@/types/admin';
 import { isWithinDateRange } from '@/utils/dateRange';
 
+
 export type ExportFilters = {
   fromDate?: string;
   toDate?: string;
@@ -14,6 +15,7 @@ export type ExportFilters = {
   category?: string;
 };
 
+
 export type ExportSummary = {
   total: number;
   inReview: number;
@@ -21,6 +23,7 @@ export type ExportSummary = {
   resolved: number;
   rejected: number;
 };
+
 
 async function loadAllReports(): Promise<Report[]> {
   const mapDoc = (item: { id: string; data: () => Record<string, unknown> }): Report => {
@@ -39,6 +42,7 @@ async function loadAllReports(): Promise<Report[]> {
     };
   };
 
+
   try {
     const snapshot = await getDocs(query(collection(db, 'reports'), orderBy('createdAt', 'desc')));
     return snapshot.docs.map((item) => mapDoc(item));
@@ -49,6 +53,7 @@ async function loadAllReports(): Promise<Report[]> {
       .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
   }
 }
+
 
 function legacyDateRangeToBounds(dateRange: string): { fromDate: string; toDate: string } {
   const trimmed = dateRange.trim();
@@ -67,16 +72,20 @@ function legacyDateRangeToBounds(dateRange: string): { fromDate: string; toDate:
   return { fromDate: '', toDate: '' };
 }
 
+
 function normalizeCategory(value: string): string {
   return value.trim().toLowerCase();
 }
+
 
 function matchesCategory(reportCategory: string, selected: string): boolean {
   if (!selected || selected === 'All Categories') return true;
   const report = normalizeCategory(reportCategory || '');
   const wanted = normalizeCategory(selected);
 
+
   if (report === wanted) return true;
+
 
   // Tolerate naming differences between mobile app and export dropdown.
   const aliases: Record<string, string[]> = {
@@ -91,9 +100,11 @@ function matchesCategory(reportCategory: string, selected: string): boolean {
     other: ['other'],
   };
 
+
   const group = aliases[wanted] || [wanted];
   return group.some((alias) => report === alias || report.includes(alias));
 }
+
 
 /** Collect every image reference from both schema generations (URLs and storage paths). */
 export function getReportImageRefs(report: Report): string[] {
@@ -103,10 +114,12 @@ export function getReportImageRefs(report: Report): string[] {
   return Array.from(new Set(refs));
 }
 
+
 /** HTTP(S) URLs only — used in CSV/JSON columns. */
 export function getReportImageUrls(report: Report): string[] {
   return getReportImageRefs(report).filter((value) => /^https?:\/\//i.test(value));
 }
+
 
 function storagePathFromRef(value: string): string | null {
   const trimmed = value.trim();
@@ -114,6 +127,7 @@ function storagePathFromRef(value: string): string | null {
   if (!/^https?:\/\//i.test(trimmed)) {
     return trimmed.replace(/^\/+/, '');
   }
+
 
   try {
     const parsed = new URL(trimmed);
@@ -132,6 +146,7 @@ function storagePathFromRef(value: string): string | null {
   return null;
 }
 
+
 function storageBucketsToTry(): string[] {
   const configured = firebaseConfig.storageBucket || '';
   const projectId = firebaseConfig.projectId || '';
@@ -148,6 +163,7 @@ function storageBucketsToTry(): string[] {
   );
 }
 
+
 export function filterReportsForExport(reports: Report[], filters: ExportFilters): Report[] {
   let fromDate = filters.fromDate || '';
   let toDate = filters.toDate || '';
@@ -156,6 +172,7 @@ export function filterReportsForExport(reports: Report[], filters: ExportFilters
     fromDate = legacy.fromDate;
     toDate = legacy.toDate;
   }
+
 
   return reports.filter((report) => {
     if (filters.status && filters.status !== 'All Statuses' && report.status !== filters.status) {
@@ -168,6 +185,7 @@ export function filterReportsForExport(reports: Report[], filters: ExportFilters
   });
 }
 
+
 export function summarizeReports(reports: Report[]): ExportSummary {
   return {
     total: reports.length,
@@ -178,6 +196,7 @@ export function summarizeReports(reports: Report[]): ExportSummary {
   };
 }
 
+
 export async function previewExportFilters(filters: ExportFilters): Promise<{
   reports: Report[];
   summary: ExportSummary;
@@ -187,11 +206,13 @@ export async function previewExportFilters(filters: ExportFilters): Promise<{
   return { reports, summary: summarizeReports(reports) };
 }
 
+
 function escapeCsv(value: unknown): string {
   const text = String(value ?? '');
   if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
   return text;
 }
+
 
 function escapeHtml(value: unknown): string {
   return String(value ?? '')
@@ -200,6 +221,7 @@ function escapeHtml(value: unknown): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
+
 
 export function reportsToCsv(reports: Report[]): string {
   const headers = [
@@ -236,6 +258,7 @@ export function reportsToCsv(reports: Report[]): string {
   return [headers.join(','), ...rows].join('\n');
 }
 
+
 export function reportsToJson(reports: Report[]): string {
   const payload = reports.map((report) => ({
     ...report,
@@ -243,6 +266,7 @@ export function reportsToJson(reports: Report[]): string {
   }));
   return JSON.stringify(payload, null, 2);
 }
+
 
 type FetchedImage = {
   reportId: string;
@@ -253,6 +277,7 @@ type FetchedImage = {
   fileName: string;
 };
 
+
 function extensionFromContentType(contentType: string, fallbackUrl: string): string {
   if (contentType.includes('png')) return 'png';
   if (contentType.includes('webp')) return 'webp';
@@ -262,6 +287,7 @@ function extensionFromContentType(contentType: string, fallbackUrl: string): str
   return match ? match[1].toLowerCase().replace('jpeg', 'jpg') : 'jpg';
 }
 
+
 async function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -270,6 +296,7 @@ async function blobToDataUrl(blob: Blob): Promise<string> {
     reader.readAsDataURL(blob);
   });
 }
+
 
 async function downloadViaProxy(imageUrl: string): Promise<Blob | null> {
   if (typeof window === 'undefined' || !/^https?:\/\//i.test(imageUrl)) return null;
@@ -285,6 +312,7 @@ async function downloadViaProxy(imageUrl: string): Promise<Blob | null> {
   }
 }
 
+
 function buildMediaUrls(path: string): string[] {
   return storageBucketsToTry().map(
     (bucket) =>
@@ -292,6 +320,7 @@ function buildMediaUrls(path: string): string[] {
       `${encodeURIComponent(path)}?alt=media`,
   );
 }
+
 
 async function downloadImageBlob(imageRef: string): Promise<Blob> {
   const path = storagePathFromRef(imageRef);
@@ -301,12 +330,14 @@ async function downloadImageBlob(imageRef: string): Promise<Blob> {
     ...(path ? buildMediaUrls(path) : []),
   ];
 
+
   // 1) Same-origin Vercel proxy — bypasses Storage CORS in production.
   for (const url of candidateUrls) {
     const proxied = await downloadViaProxy(url);
     if (proxied) return proxied;
     errors.push(`proxy:${url.slice(0, 64)}`);
   }
+
 
   // 2) Firebase SDK (signed-in admin session).
   if (path) {
@@ -324,6 +355,7 @@ async function downloadImageBlob(imageRef: string): Promise<Blob> {
       }
     }
 
+
     try {
       const objectRef = storageRef(storage, path);
       try {
@@ -336,6 +368,7 @@ async function downloadImageBlob(imageRef: string): Promise<Blob> {
       errors.push(`sdk:default:${error instanceof Error ? error.message : String(error)}`);
     }
   }
+
 
   // 3) Authenticated / direct browser fetch (works after CORS is configured).
   const token = await auth.currentUser?.getIdToken().catch(() => null);
@@ -351,11 +384,14 @@ async function downloadImageBlob(imageRef: string): Promise<Blob> {
     }
   }
 
+
   throw new Error(errors.slice(0, 6).join(' | ') || 'Unable to download image');
 }
 
+
 async function fetchReportImages(reports: Report[]): Promise<FetchedImage[]> {
   const jobs: Array<Promise<FetchedImage>> = [];
+
 
   for (const report of reports) {
     const refs = getReportImageRefs(report);
@@ -389,8 +425,10 @@ async function fetchReportImages(reports: Report[]): Promise<FetchedImage[]> {
     });
   }
 
+
   return Promise.all(jobs);
 }
+
 
 export function reportsToPrintableHtml(
   reports: Report[],
@@ -405,6 +443,7 @@ export function reportsToPrintableHtml(
     imagesByReport.set(image.reportId, list);
   }
 
+
   const cards = reports
     .map((report) => {
       const images = (imagesByReport.get(report.id) || []).sort((a, b) => a.index - b.index);
@@ -416,6 +455,7 @@ export function reportsToPrintableHtml(
             })
             .join('')}</div>`
         : '<p class="muted">No images attached.</p>';
+
 
       return `
       <article class="card">
@@ -432,6 +472,7 @@ export function reportsToPrintableHtml(
     })
     .join('');
 
+
   const summaryRows = reports
     .map(
       (report) => `
@@ -446,6 +487,7 @@ export function reportsToPrintableHtml(
       </tr>`,
     )
     .join('');
+
 
   return `<!DOCTYPE html>
 <html>
@@ -486,6 +528,7 @@ export function reportsToPrintableHtml(
 </html>`;
 }
 
+
 function downloadBrowserFile(filename: string, content: Blob | string, mime?: string) {
   if (typeof document === 'undefined') {
     throw new Error('File download is only available in the browser.');
@@ -501,6 +544,7 @@ function downloadBrowserFile(filename: string, content: Blob | string, mime?: st
   URL.revokeObjectURL(url);
 }
 
+
 function rangeLabel(filters: ExportFilters): string {
   const from = filters.fromDate || '';
   const to = filters.toDate || '';
@@ -509,6 +553,7 @@ function rangeLabel(filters: ExportFilters): string {
   if (from) return `From ${from}`;
   return `Until ${to}`;
 }
+
 
 async function buildBackupZip(
   reports: Report[],
@@ -520,18 +565,22 @@ async function buildBackupZip(
   const zip = new JSZip();
   const folder = zip.folder(baseName) || zip;
 
+
   if (format === 'csv' || format === 'excel') {
     folder.file(`${baseName}.csv`, reportsToCsv(reports));
   } else if (format === 'json') {
     folder.file(`${baseName}.json`, reportsToJson(reports));
   }
 
+
   const html = reportsToPrintableHtml(reports, 'EcoBantay Environmental Reports', label, fetchedImages);
   folder.file(`${baseName}.html`, html);
+
 
   const imagesRoot = folder.folder('images');
   let packed = 0;
   const missingLines: string[] = [];
+
 
   for (const image of fetchedImages) {
     if (image.blob && imagesRoot) {
@@ -542,6 +591,7 @@ async function buildBackupZip(
       missingLines.push(`${image.reportId}/${image.fileName} :: ${image.url}`);
     }
   }
+
 
   // Always keep a plain list of image links so backups remain useful if binary pack fails.
   folder.file(
@@ -555,6 +605,7 @@ async function buildBackupZip(
       .join('\n\n'),
   );
 
+
   if (missingLines.length) {
     folder.file(
       'images-missing.txt',
@@ -566,6 +617,7 @@ async function buildBackupZip(
       ].join('\n'),
     );
   }
+
 
   folder.file(
     'README.txt',
@@ -583,12 +635,14 @@ async function buildBackupZip(
     ].join('\n'),
   );
 
+
   return {
     blob: await zip.generateAsync({ type: 'blob' }),
     packed,
     missing: missingLines.length,
   };
 }
+
 
 export async function exportFilteredReports(input: {
   filters: ExportFilters;
@@ -600,6 +654,7 @@ export async function exportFilteredReports(input: {
   const filtered = filterReportsForExport(all, input.filters);
   const baseName = (input.fileName || `ecobantay-reports-${Date.now()}`).replace(/\.[^.]+$/, '');
   const label = rangeLabel(input.filters);
+
 
   if (!filtered.length) {
     throw new Error(
@@ -614,11 +669,14 @@ export async function exportFilteredReports(input: {
     );
   }
 
+
   const fetchedImages = await fetchReportImages(filtered);
   const html = reportsToPrintableHtml(filtered, 'EcoBantay Environmental Reports', label, fetchedImages);
 
+
   const zipResult = await buildBackupZip(filtered, fetchedImages, input.format, baseName, label);
   downloadBrowserFile(`${baseName}.zip`, zipResult.blob, 'application/zip');
+
 
   // Keep a direct HTML download for PDF/Word so Print still works even if ZIP is ignored.
   if (input.format === 'pdf' || input.format === 'word') {
@@ -639,6 +697,7 @@ export async function exportFilteredReports(input: {
     throw new Error(`Unsupported export format: ${input.format}`);
   }
 
+
   return {
     count: filtered.length,
     format: input.format,
@@ -646,3 +705,6 @@ export async function exportFilteredReports(input: {
     imagesMissing: zipResult.missing,
   };
 }
+
+
+

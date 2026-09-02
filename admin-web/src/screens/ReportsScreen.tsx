@@ -12,7 +12,6 @@ import {
 } from "react-native";
 import {
   ClipboardList,
-  Clock,
   Check,
   ChevronDown,
   Eye,
@@ -79,6 +78,58 @@ export default function ReportsScreen() {
     });
   }, [reports, search, category, status, fromDate, toDate]);
 
+  const filteredStats = useMemo(() => {
+  const queryText = search.trim().toLowerCase();
+
+  // Base set only considers search + date.
+  // Category and status are counted separately so their cards stay meaningful.
+  const baseReports = reports.filter((report) => {
+    const matchesSearch =
+      !queryText ||
+      report.title.toLowerCase().includes(queryText) ||
+      report.description.toLowerCase().includes(queryText) ||
+      report.location.toLowerCase().includes(queryText) ||
+      report.reportedByName.toLowerCase().includes(queryText) ||
+      (report.reportedByEmail || "").toLowerCase().includes(queryText);
+
+    const matchesDate = isWithinDateRange(
+      report.createdAt,
+      fromDate,
+      toDate,
+    );
+
+    return matchesSearch && matchesDate;
+  });
+
+  const categoryCount =
+    category === "All Categories"
+      ? baseReports.length
+      : baseReports.filter(
+          (report) => report.category === category,
+        ).length;
+
+  const statusCount =
+    status === "All Statuses"
+      ? baseReports.length
+      : baseReports.filter(
+          (report) => report.status === status,
+        ).length;
+
+  return {
+    totalReports: filteredReports.length,
+    categoryCount,
+    statusCount,
+  };
+}, [
+  reports,
+  filteredReports,
+  search,
+  category,
+  status,
+  fromDate,
+  toDate,
+]);
+
   /**
    * Purpose: Resolves and caches a representative evidence image for one report row.
    * How it works:
@@ -121,14 +172,48 @@ export default function ReportsScreen() {
           Manage and review all environmental reports submitted by users
         </Text>
 
-        <View style={[styles.cards, { gap: width * 0.025, marginTop: height * 0.035 }]}>
-          <DashboardCard title="Total Reports" value={String(stats.totalReports)} color="#DDEAD3" icon={ClipboardList} iconColor="#20B83B" />
-          <DashboardCard title="In Review" value={String(stats.reportsInReview)} color="#CFE6FA" icon={Eye} iconColor="#259BEF" />
-          <DashboardCard title="Pending" value={String(stats.pendingReports)} color="#FCEFCB" icon={Clock} iconColor="#000" />
-          <DashboardCard title="Resolved" value={String(stats.resolvedReports)} color="#DDEAD3" icon={Check} iconColor="#43B64A" />
-        </View>
+        <View
+  style={[
+    styles.cards,
+    {
+      gap: width * 0.025,
+      marginTop: height * 0.035,
+    },
+  ]}
+>
+  <DashboardCard
+    title="Total Reports"
+    value={String(filteredStats.totalReports)}
+    color="#DDEAD3"
+    icon={ClipboardList}
+    iconColor="#20B83B"
+  />
 
-        <View style={[styles.filterPanel, { marginTop: height * 0.025, padding: 14 * s }]}>
+  <DashboardCard
+    title={
+      category === "All Categories"
+        ? "All Categories"
+        : category
+    }
+    value={String(filteredStats.categoryCount)}
+    color="#FCEFCB"
+    icon={Filter}
+    iconColor="#D99A00"
+  />
+
+  <DashboardCard
+    title={
+      status === "All Statuses"
+        ? "All Statuses"
+        : status
+    }
+    value={String(filteredStats.statusCount)}
+    color="#CFE6FA"
+    icon={Eye}
+    iconColor="#259BEF"
+  />
+</View>
+      <View style={[styles.filterPanel, { marginTop: height * 0.025, padding: 14 * s }]}>
           <View style={styles.searchBox}>
             <TextInput
               placeholder="Search reports..."

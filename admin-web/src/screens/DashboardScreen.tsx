@@ -10,7 +10,6 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import {
   CalendarClock,
-  Check,
   ClipboardList,
   UserCircle,
 } from "lucide-react-native";
@@ -41,7 +40,7 @@ export default function DashboardScreen() {
   const { admin } = useAdminAuth();
   const { reports, stats } = useAdminData();
   const [upcomingEvents, setUpcomingEvents] = useState<AdminEvent[]>([]);
-  const [approvedEventsCount, setApprovedEventsCount] = useState(0);
+  const [totalEventsCount, setTotalEventsCount] = useState(0);
   const [reportPage, setReportPage] = useState(1);
   const reportsPerPage = 4;
   const reportPageCount = Math.max(1, Math.ceil(reports.length / reportsPerPage));
@@ -89,14 +88,18 @@ export default function DashboardScreen() {
         const events = await fetchEvents();
         if (!active) return;
         const liveEvents = events.filter(
-          (event) => event.status === "Upcoming" || event.status === "Ongoing",
-        );
-        setApprovedEventsCount(liveEvents.length);
-        setUpcomingEvents(liveEvents.slice(0, 4));
+  (event) => event.status === "Upcoming" || event.status === "Ongoing",
+);
+
+// Count ALL events for the Total Events card.
+setTotalEventsCount(events.length);
+
+// Only Upcoming/Ongoing events appear in the Upcoming Events panel.
+setUpcomingEvents(liveEvents.slice(0, 4));
       } catch {
         if (!active) return;
         setUpcomingEvents([]);
-        setApprovedEventsCount(0);
+        setTotalEventsCount(0);
       }
     };
     void loadEvents();
@@ -125,12 +128,39 @@ export default function DashboardScreen() {
           </Text>
         </View>
 
-        <View style={[styles.cards, { gap: width * 0.025, marginTop: height * 0.065 }]}>
-          <DashboardCard title="Total Reports" value={String(stats.totalReports)} color="#DDEAD3" icon={ClipboardList} iconColor="#20B83B" />
-          <DashboardCard title="Reports In Review" value={String(stats.reportsInReview)} color="#CFE6FA" icon={Check} iconColor="#259BEF" />
-          <DashboardCard title="Approved Events" value={String(approvedEventsCount)} color="#FCE8C8" icon={CalendarClock} iconColor="#FF8A00" />
-          <DashboardCard title="Registered Users" value={String(stats.totalUsers)} color="#E5E8F0" icon={UserCircle} iconColor="#3D8DFF" />
-        </View>
+        <View
+  style={[
+    styles.cards,
+    {
+      gap: width * 0.025,
+      marginTop: height * 0.065,
+    },
+  ]}
+>
+  <DashboardCard
+    title="Total Reports"
+    value={String(stats.totalReports)}
+    color="#DDEAD3"
+    icon={ClipboardList}
+    iconColor="#20B83B"
+  />
+
+  <DashboardCard
+    title="Total Events"
+    value={String(totalEventsCount)}
+    color="#FCE8C8"
+    icon={CalendarClock}
+    iconColor="#FF8A00"
+  />
+
+  <DashboardCard
+    title="Total Users"
+    value={String(stats.totalUsers)}
+    color="#E5E8F0"
+    icon={UserCircle}
+    iconColor="#3D8DFF"
+  />
+</View>
 
         <View style={[styles.contentRow, { gap: width * 0.012, marginTop: height * 0.045 }]}>
           <View style={[styles.reportsPanel, { height: panelHeight, padding: 16 * s }]}>
