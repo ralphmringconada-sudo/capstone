@@ -83,7 +83,22 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
  * Why this implementation: Using the UID as the document key keeps profile writes deterministic.
  */
 async function saveUserProfile(profile: UserProfile) {
-  await setDoc(doc(getDbInstance(), USERS_COLLECTION, profile.uid), profile);
+  // merge:true lets signup retries succeed whether the first write created the doc or not.
+  await setDoc(doc(getDbInstance(), USERS_COLLECTION, profile.uid), profile, { merge: true });
+}
+
+/**
+ * Purpose: Waits until Auth has a current user and a fresh ID token for Firestore rules.
+ * How it works: waits for authStateReady, forces a token refresh, then briefly yields.
+ */
+async function ensureAuthReadyForFirestore(user: User): Promise<void> {
+  const authApi = auth();
+  if (typeof (authApi as { authStateReady?: () => Promise<void> }).authStateReady === 'function') {
+    await (authApi as { authStateReady: () => Promise<void> }).authStateReady();
+  }
+  await user.getIdToken(true);
+  // Give the Firestore client a moment to attach the new token (common race on mobile).
+  await new Promise((resolve) => setTimeout(resolve, 400));
 }
 
 /** Removes all reports owned by the user before account deletion. */
@@ -126,7 +141,7 @@ export async function registerWithEmail(input: {
 
     // Ensure Firestore receives a fresh Auth token before the profile write (avoids hung/denied creates).
     await withTimeout(
-      credential.user.getIdToken(true),
+      ensureAuthReadyForFirestore(credential.user),
       REQUEST_TIMEOUT_MS,
       'Could not refresh your sign-in token. Check your internet connection and try again.',
     );
@@ -352,7 +367,7 @@ export async function registerWithGoogle(idToken: string): Promise<UserProfile> 
   try {
     const authCredential = await signInWithCredential(auth(), credential);
     await withTimeout(
-      authCredential.user.getIdToken(true),
+      ensureAuthReadyForFirestore(authCredential.user),
       REQUEST_TIMEOUT_MS,
       'Could not refresh your Google sign-in token. Check your internet connection and try again.',
     );

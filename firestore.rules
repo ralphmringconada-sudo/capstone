@@ -30,19 +30,11 @@ service cloud.firestore {
     match /users/{userId} {
       allow read: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
 
-      // Sign up / Google register: newly signed-in users must be able to save their own profile.
-      allow create: if isSignedIn()
-        && request.auth.uid == userId
-        && request.resource.data.uid == userId;
+      // Signup must work as soon as Auth issues a UID — own-doc writes only.
+      allow create: if isSignedIn() && request.auth.uid == userId;
 
-      // Citizens may update their own profile document; admins may moderate any user.
-      // (setDoc on an existing doc is an update — keep this open enough for signup retries.)
-      allow update: if isAdmin()
-        || (
-          isSignedIn()
-          && request.auth.uid == userId
-          && request.resource.data.uid == userId
-        );
+      // setDoc retries count as updates; citizens and admins may update own/any profile.
+      allow update: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
 
       allow delete: if isSuperAdmin() || (isSignedIn() && request.auth.uid == userId);
     }
