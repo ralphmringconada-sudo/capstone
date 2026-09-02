@@ -9,10 +9,13 @@ import {
   updatePassword,
   EmailAuthProvider,
   reauthenticateWithCredential,
+  onAuthStateChanged,
   type User,
 } from 'firebase/auth';
 import { deleteDoc, doc, getDoc, setDoc, updateDoc, collection, getDocs, query, where } from 'firebase/firestore';
+import { Platform } from 'react-native';
 import { getAuthInstance, getDbInstance } from '@/config/firebase';
+import { firebaseConfig } from '@/config/firebaseConfig';
 import type { AuthProvider, UserProfile } from '@/types/user';
 import { withTimeout } from '@/utils/async';
 
@@ -78,27 +81,121 @@ export async function getUserProfile(uid: string): Promise<UserProfile | null> {
 
 /**
  * Purpose: Persists a complete EcoBantay user profile.
- * How it works: 1) Targets the UID-based document. 2) Writes the supplied profile.
- * Technologies Used: Firebase Firestore.
- * Why this implementation: Using the UID as the document key keeps profile writes deterministic.
+ * How it works: prefers an authenticated REST write (explicit Bearer token) on native, else SDK setDoc.
+ * Technologies Used: Firebase Auth ID tokens, Firestore REST API, Firebase Firestore SDK.
+ * Why this implementation: On Expo/React Native the SDK sometimes writes before Auth is attached, causing false permission-denied.
  */
 async function saveUserProfile(profile: UserProfile) {
-  // merge:true lets signup retries succeed whether the first write created the doc or not.
-  await setDoc(doc(getDbInstance(), USERS_COLLECTION, profile.uid), profile, { merge: true });
+  const currentUser = auth().currentUser;
+  if (!currentUser || currentUser.uid !== profile.uid) {
+    throw Object.assign(new Error('Not signed in while saving profile.'), {
+      code: 'permission-denied',
+    });
+  }
+
+  const token = await currentUser.getIdToken(true);
+  const cleanProfile: UserProfile = {
+    uid: profile.uid,
+    firstName: profile.firstName ?? '',
+    lastName: profile.lastName ?? '',
+    email: profile.email ?? '',
+    contactNumber: profile.contactNumber ?? '',
+    birthday: profile.birthday ?? '',
+    authProvider: profile.authProvider,
+    createdAt: profile.createdAt,
+    ...(profile.updatedAt ? { updatedAt: profile.updatedAt } : {}),
+  };
+
+  // Native: send the ID token explicitly so Firestore rules always see request.auth.
+  if (Platform.OS !== 'web') {
+    await saveUserProfileWithIdToken(cleanProfile, token);
+    return;
+  }
+
+  await setDoc(doc(getDbInstance(), USERS_COLLECTION, cleanProfile.uid), cleanProfile, { merge: true });
+}
+
+/** Converts a flat profile object into Firestore REST `fields` map. */
+function toFirestoreRestFields(profile: UserProfile): Record<string, { stringValue: string }> {
+  const fields: Record<string, { stringValue: string }> = {};
+  (Object.keys(profile) as (keyof UserProfile)[]).forEach((key) => {
+    const value = profile[key];
+    if (typeof value === 'string') {
+      fields[key] = { stringValue: value };
+    }
+  });
+  return fields;
+}
+
+/**
+ * Purpose: Writes users/{uid} using Firestore REST with Authorization: Bearer <idToken>.
+ * How it works: PATCH the document so create and retry-update both succeed under the same rules.
+ */
+async function saveUserProfileWithIdToken(profile: UserProfile, idToken: string): Promise<void> {
+  const projectId = firebaseConfig.projectId;
+  const url =
+    `https://firestore.googleapis.com/v1/projects/${encodeURIComponent(projectId)}` +
+    `/databases/(default)/documents/users/${encodeURIComponent(profile.uid)}`;
+
+  const response = await fetch(url, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ fields: toFirestoreRestFields(profile) }),
+  });
+
+  if (response.ok) return;
+
+  const bodyText = await response.text();
+  let message = `Profile save failed (${response.status}).`;
+  try {
+    const parsed = JSON.parse(bodyText) as { error?: { message?: string; status?: string } };
+    if (parsed.error?.message) message = parsed.error.message;
+  } catch {
+    if (bodyText) message = bodyText.slice(0, 180);
+  }
+
+  if (response.status === 403 || /permission|PERMISSION_DENIED/i.test(message)) {
+    throw Object.assign(new Error(message), { code: 'permission-denied' });
+  }
+  throw new Error(message);
 }
 
 /**
  * Purpose: Waits until Auth has a current user and a fresh ID token for Firestore rules.
- * How it works: waits for authStateReady, forces a token refresh, then briefly yields.
+ * How it works: waits for onAuthStateChanged for this UID, refreshes the token, then yields briefly.
  */
 async function ensureAuthReadyForFirestore(user: User): Promise<void> {
   const authApi = auth();
+
+  await new Promise<void>((resolve, reject) => {
+    if (authApi.currentUser?.uid === user.uid) {
+      resolve();
+      return;
+    }
+
+    const timeout = setTimeout(() => {
+      unsubscribe();
+      reject(new Error('Timed out waiting for Auth session after signup.'));
+    }, 10000);
+
+    const unsubscribe = onAuthStateChanged(authApi, (nextUser) => {
+      if (nextUser?.uid === user.uid) {
+        clearTimeout(timeout);
+        unsubscribe();
+        resolve();
+      }
+    });
+  });
+
   if (typeof (authApi as { authStateReady?: () => Promise<void> }).authStateReady === 'function') {
     await (authApi as { authStateReady: () => Promise<void> }).authStateReady();
   }
+
   await user.getIdToken(true);
-  // Give the Firestore client a moment to attach the new token (common race on mobile).
-  await new Promise((resolve) => setTimeout(resolve, 400));
+  await new Promise((resolve) => setTimeout(resolve, 500));
 }
 
 /** Removes all reports owned by the user before account deletion. */
@@ -597,8 +694,12 @@ function mapServiceError(error: unknown): Error {
   const code = (error as { code?: string })?.code;
 
   if (code === 'permission-denied') {
+    const detail =
+      error instanceof Error && error.message && !error.message.includes('Database permission denied')
+        ? ` (${error.message})`
+        : '';
     return new Error(
-      'Database permission denied. In Firebase Console, set Firestore rules to allow users to save their own profile.',
+      `Database permission denied while saving your profile${detail}. Reload Expo with npx expo start --clear and try a new email.`,
     );
   }
 
