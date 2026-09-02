@@ -16,6 +16,7 @@ import {
 
 import DateTimePicker from "@react-native-community/datetimepicker";
 import * as ImagePicker from "expo-image-picker";
+import { useLocalSearchParams } from "expo-router";
 
 import {
   ArrowLeft,
@@ -262,6 +263,8 @@ export default function EventsScreen() {
   );
 
   const { admin } = useAdminAuth();
+  const { eventId: eventIdParam } = useLocalSearchParams<{ eventId?: string }>();
+  const openedEventFromQueryRef = useRef<string | null>(null);
 
   // =======================================================
   // EVENTS
@@ -974,6 +977,17 @@ export default function EventsScreen() {
         );
       }
     };
+
+  // Open an event when arriving from a notification deep link (?eventId=...).
+  useEffect(() => {
+    const eventId = typeof eventIdParam === "string" ? eventIdParam : undefined;
+    if (!eventId || events.length === 0) return;
+    if (openedEventFromQueryRef.current === eventId) return;
+    const match = events.find((item) => item.id === eventId);
+    if (!match) return;
+    openedEventFromQueryRef.current = eventId;
+    void openEventDetails(match);
+  }, [eventIdParam, events]);
 
   // =======================================================
   // CLOSE EVENT

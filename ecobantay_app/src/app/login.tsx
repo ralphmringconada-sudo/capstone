@@ -61,7 +61,7 @@ export default function LoginScreen() {
       const message = err instanceof Error ? err.message : 'Unable to sign in.';
       if (message.toLowerCase().includes('verify your email')) {
         router.replace({
-          pathname: '/verify-email',
+          pathname: '/verify-email' as '/login',
           params: { email: email.trim().toLowerCase() },
         });
         return;

@@ -236,11 +236,18 @@ export default function HomeScreen() {
           }
         }
         setShowNotifications(false);
-        if (item.type === 'report' && item.relatedId) {
-          router.push({ pathname: '/view-report', params: { id: item.relatedId } });
-        } else if (item.type === 'event' && item.relatedId) {
-          router.push({ pathname: '/view-event', params: { id: item.relatedId } });
-        }
+
+        const relatedId = item.relatedId?.trim();
+        if (!relatedId) return;
+
+        // Close the modal first so navigation is not blocked by the overlay.
+        setTimeout(() => {
+          if (item.type === 'report') {
+            router.push({ pathname: '/view-report', params: { id: relatedId } });
+          } else if (item.type === 'event') {
+            router.push({ pathname: '/view-event', params: { id: relatedId } });
+          }
+        }, 50);
       } finally {
         setShowTopLoading(false);
       }
@@ -956,6 +963,11 @@ export default function HomeScreen() {
                               {formatReportDate(item.createdAt)}
                             </Text>
                           </View>
+                          {item.relatedId ? (
+                            <View style={styles.notificationPillNeutral}>
+                              <Text style={styles.notificationPillNeutralText}>Tap to open</Text>
+                            </View>
+                          ) : null}
                         </View>
                       </View>
                     </TouchableOpacity>
@@ -1313,6 +1325,7 @@ const styles = StyleSheet.create({
   notificationBackdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'transparent',
+    zIndex: 1,
   },
   notificationCard: {
     marginTop: 64,
@@ -1328,7 +1341,9 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 10,
-    elevation: 6,
+    // Keep the panel above the full-screen backdrop so list items receive taps.
+    zIndex: 2,
+    elevation: 8,
   },
   // flexShrink lets the list give up height so the card can honour maxHeight; without
   // it the ScrollView claims its full content height and nothing actually scrolls.

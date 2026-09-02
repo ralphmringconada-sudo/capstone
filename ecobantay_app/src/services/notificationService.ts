@@ -32,8 +32,12 @@ export async function fetchUserNotifications(userId: string, max = 30): Promise<
   );
 
   const items = snapshot.docs.map((item) => {
-    const data = item.data() as Omit<AppNotification, 'id'>;
-    return { id: item.id, ...data };
+    const data = item.data() as Omit<AppNotification, 'id'> & { relatedId?: string | null };
+    return {
+      id: item.id,
+      ...data,
+      relatedId: data.relatedId ?? undefined,
+    };
   });
 
   return items.sort(

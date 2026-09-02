@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Pressable, View, Text, StyleSheet, Modal, ScrollView, TouchableOpacity } from "react-native";
+import { useRouter } from "expo-router";
 import { Bell, Menu, UserCircle } from "lucide-react-native";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import {
@@ -9,7 +10,31 @@ import {
 } from "@/services/adminNotificationService";
 import type { AdminInboxNotification } from "@/types/admin";
 
+/** Maps an inbox item to a report/event screen when a relatedId is present. */
+function routeForAdminNotification(
+  item: AdminInboxNotification,
+): { pathname: "/report-details" | "/events"; params: Record<string, string> } | null {
+  const relatedId = item.relatedId?.trim();
+  if (!relatedId) return null;
+
+  const title = item.title.toLowerCase();
+  if (item.type === "report" || title.startsWith("report") || title.includes("environmental report")) {
+    return { pathname: "/report-details", params: { id: relatedId } };
+  }
+  if (item.type === "event" || title.startsWith("event") || title.includes("new event")) {
+    return { pathname: "/events", params: { eventId: relatedId } };
+  }
+  if (item.type === "approval") {
+    if (title.startsWith("report")) {
+      return { pathname: "/report-details", params: { id: relatedId } };
+    }
+    return { pathname: "/events", params: { eventId: relatedId } };
+  }
+  return null;
+}
+
 export default function Topbar({ onToggleSidebar }: { onToggleSidebar: () => void }) {
+  const router = useRouter();
   const { admin } = useAdminAuth();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<AdminInboxNotification[]>([]);
@@ -30,7 +55,6 @@ export default function Topbar({ onToggleSidebar }: { onToggleSidebar: () => voi
           if (item.type === "event" && !prefs.eventUpdates) return false;
           if (item.type === "approval" && !prefs.approvalUpdates) return false;
           if (item.type === "activity" && !prefs.userActivity) return false;
-          // New citizen submissions use report/event types — also respect userActivity as catch-all.
           return true;
         }),
       );
@@ -51,6 +75,23 @@ export default function Topbar({ onToggleSidebar }: { onToggleSidebar: () => voi
   }, [load]);
 
   const unread = items.filter((item) => !item.read).length;
+
+  const handleNotificationPress = async (item: AdminInboxNotification) => {
+    if (!item.read) {
+      try {
+        await markAdminNotificationRead(item.id);
+      } catch {
+        /* ignore */
+      }
+    }
+    setOpen(false);
+    const route = routeForAdminNotification(item);
+    if (route) {
+      router.push(route as never);
+      return;
+    }
+    await load();
+  };
 
   return (
     <View style={styles.topbar}>
@@ -110,17 +151,13 @@ export default function Topbar({ onToggleSidebar }: { onToggleSidebar: () => voi
                   <TouchableOpacity
                     key={item.id}
                     style={[styles.item, !item.read && styles.itemUnread]}
-                    onPress={async () => {
-                      if (!item.read) {
-                        await markAdminNotificationRead(item.id);
-                        await load();
-                      }
-                    }}
+                    onPress={() => void handleNotificationPress(item)}
                   >
                     <Text style={styles.itemTitle}>{item.title}</Text>
                     <Text style={styles.itemBody}>{item.body}</Text>
                     <Text style={styles.itemMeta}>
                       {item.type.toUpperCase()} · {new Date(item.createdAt).toLocaleString()}
+                      {item.relatedId ? " · Tap to open" : ""}
                     </Text>
                   </TouchableOpacity>
                 ))

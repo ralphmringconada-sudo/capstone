@@ -90,7 +90,7 @@ export default function SignUpScreen() {
       });
       await logout();
       router.replace({
-        pathname: '/verify-email',
+        pathname: '/verify-email' as '/login',
         params: { email: email.trim().toLowerCase() },
       });
     } catch (err) {
