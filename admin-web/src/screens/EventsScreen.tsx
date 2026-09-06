@@ -1,4 +1,4 @@
-import { createElement, useEffect, useMemo, useRef, useState } from "react";
+import { createElement, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import {
   Alert,
   Image,
@@ -7,8 +7,8 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
+  Text as RNText,
+  TextInput as RNTextInput,
   TouchableOpacity,
   useWindowDimensions,
   View,
@@ -24,11 +24,9 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
-  CircleCheckBig,
   Clock3,
   Eye,
   Filter,
-  LoaderCircle,
   MapPin,
   Plus,
   Search,
@@ -46,7 +44,6 @@ import { useAdminAuth } from "@/context/AdminAuthContext";
 
 import {
   createEvent,
-  deleteEvent,
   fetchEventParticipants,
   fetchEvents,
   updateEvent,
@@ -62,6 +59,29 @@ import type {
 
 import { isWithinDateRange } from "@/utils/dateRange";
 import { formatDateTime } from "@/utils/format";
+
+const MONTSERRAT_FONT = "Montserrat_700Bold";
+
+type ScreenTextProps = ComponentProps<typeof RNText>;
+type ScreenTextInputProps = ComponentProps<typeof RNTextInput>;
+
+function Text({ style, ...props }: ScreenTextProps) {
+  return (
+    <RNText
+      {...props}
+      style={[{ fontFamily: MONTSERRAT_FONT }, style]}
+    />
+  );
+}
+
+function TextInput({ style, ...props }: ScreenTextInputProps) {
+  return (
+    <RNTextInput
+      {...props}
+      style={[{ fontFamily: MONTSERRAT_FONT }, style]}
+    />
+  );
+}
 
 // =========================================================
 // TYPES
@@ -239,6 +259,8 @@ const REJECTION_REASONS = [
 // =========================================================
 
 export default function EventsScreen() {
+
+  const [eventImageFailed, setEventImageFailed] = useState(false);
 
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
 
@@ -438,31 +460,6 @@ export default function EventsScreen() {
     void reloadEvents();
   }, []);
 
-  // =======================================================
-  // SUMMARY
-  // =======================================================
-
-  const stats = useMemo(
-    () => ({
-      total: events.length,
-
-      pending: events.filter(
-        (event) =>
-          event.status === "Pending"
-      ).length,
-
-      ongoing: events.filter(
-        (event) =>
-          event.status === "Ongoing"
-      ).length,
-
-      completed: events.filter(
-        (event) =>
-          event.status === "Completed"
-      ).length,
-    }),
-    [events]
-  );
 
   // =======================================================
   // FILTERED EVENTS
@@ -596,6 +593,63 @@ export default function EventsScreen() {
       currentPage *
         pageSize
     );
+
+
+    const filteredStats = useMemo(() => {
+  const query = search.trim().toLowerCase();
+
+  // Search + date are the shared/base filters.
+  const baseEvents = events.filter((event) => {
+    const matchesSearch =
+      !query ||
+      event.title.toLowerCase().includes(query) ||
+      event.description.toLowerCase().includes(query) ||
+      event.location.toLowerCase().includes(query) ||
+      event.id.toLowerCase().includes(query);
+
+    const eventDay = new Date(event.date);
+
+    const dateValue = Number.isNaN(eventDay.getTime())
+      ? event.createdAt
+      : eventDay;
+
+    const matchesDate = isWithinDateRange(
+      dateValue,
+      fromDate,
+      toDate
+    );
+
+    return matchesSearch && matchesDate;
+  });
+
+  const categoryCount =
+    category === "All Types"
+      ? baseEvents.length
+      : baseEvents.filter(
+          (event) => event.category === category
+        ).length;
+
+  const statusCount =
+    status === "All Statuses"
+      ? baseEvents.length
+      : baseEvents.filter(
+          (event) => event.status === status
+        ).length;
+
+  return {
+    total: filteredEvents.length,
+    categoryCount,
+    statusCount,
+  };
+}, [
+  events,
+  filteredEvents,
+  search,
+  category,
+  status,
+  fromDate,
+  toDate,
+]);
 
   // =======================================================
   // TAB
@@ -942,41 +996,28 @@ export default function EventsScreen() {
   // OPEN EVENT
   // =======================================================
 
-  const openEventDetails =
-    async (
-      event: AdminEvent
-    ) => {
-      setSelectedEvent(
-        event
-      );
+  const openEventDetails = async (event: AdminEvent) => {
+  setSelectedEvent(event);
+  setEventImageFailed(false);
 
-      setEventParticipants(
-        []
-      );
+  setEventParticipants([]);
+  setLoadingParticipants(true);
 
-      setLoadingParticipants(
-        true
-      );
-
-      try {
-        setEventParticipants(
-          await fetchEventParticipants(
-            event.id
-          )
-        );
-      } catch (error) {
-        Alert.alert(
-          "Participants unavailable",
-          error instanceof Error
-            ? error.message
-            : "Failed to load participants."
-        );
-      } finally {
-        setLoadingParticipants(
-          false
-        );
-      }
-    };
+  try {
+    setEventParticipants(
+      await fetchEventParticipants(event.id)
+    );
+  } catch (error) {
+    Alert.alert(
+      "Participants unavailable",
+      error instanceof Error
+        ? error.message
+        : "Failed to load participants."
+    );
+  } finally {
+    setLoadingParticipants(false);
+  }
+};
 
   // Open an event when arriving from a notification deep link (?eventId=...).
   useEffect(() => {
@@ -1077,52 +1118,6 @@ const confirmRejectEvent = async () => {
   setRejectionReason("");
   setRejectionRemarks("");
 };
-
-  const handleDeleteSelectedEvent = () => {
-    if (!selectedEvent || !admin) return;
-    Alert.alert(
-      "Delete event",
-      `Permanently delete "${selectedEvent.title}"?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            void (async () => {
-              try {
-                await deleteEvent(selectedEvent.id, admin);
-                closeEventDetails();
-                await reloadEvents();
-              } catch (error) {
-                Alert.alert(
-                  "Delete failed",
-                  error instanceof Error ? error.message : "Failed to delete event."
-                );
-              }
-            })();
-          },
-        },
-      ]
-    );
-  };
-
-  const openEditSelectedEvent = () => {
-    if (!selectedEvent) return;
-    setEditingEventId(selectedEvent.id);
-    setNewTitle(selectedEvent.title || "");
-    setNewCategory(selectedEvent.category || "Clean-up");
-    setNewDescription(selectedEvent.description || "");
-    setNewDate(selectedEvent.date || "");
-    setNewTime(selectedEvent.time || "");
-    setNewLocation(selectedEvent.location || "");
-    setNewCapacity(String(selectedEvent.capacity || 50));
-    setNewImageUri(selectedEvent.imageUrl || null);
-    if (selectedEvent.coordinates) {
-      setNewCoordinates(selectedEvent.coordinates);
-    }
-    setAddModalOpen(true);
-  };
 
   // =======================================================
   // RENDER
@@ -1316,67 +1311,51 @@ const confirmRejectEvent = async () => {
           {/* SUMMARY */}
           {/* =============================================== */}
 
-          {activeTab ===
-            "All Events" && (
-            <View
-              style={[
-                styles.cards,
-                {
-                  gap: 28 * s,
-                },
-              ]}
-            >
-              <SummaryCard
-                title="Total Events"
-                value={
-                  stats.total
-                }
-                color="#ffffff"
-                icon={
-                  CalendarCheck
-                }
-                iconColor="#0aa65b"
-                scale={s}
-              />
+          {activeTab === "All Events" && (
+  <View
+    style={[
+      styles.cards,
+      {
+        gap: 28 * s,
+      },
+    ]}
+  >
+    <SummaryCard
+      title="Total Events"
+      value={filteredStats.total}
+      color="#ffffff"
+      icon={CalendarCheck}
+      iconColor="#0aa65b"
+      scale={s}
+    />
 
-              <SummaryCard
-                title="Pending Approval"
-                value={
-                  stats.pending
-                }
-                color="#fff1c9"
-                icon={Clock3}
-                iconColor="#111111"
-                scale={s}
-              />
+    <SummaryCard
+      title={
+        category === "All Types"
+          ? "All Event Types"
+          : category
+      }
+      value={filteredStats.categoryCount}
+      color="#fff1c9"
+      icon={CalendarDays}
+      iconColor="#D99A00"
+      scale={s}
+    />
 
-              <SummaryCard
-                title="Ongoing Events"
-                value={
-                  stats.ongoing
-                }
-                color="#cfe9fb"
-                icon={
-                  LoaderCircle
-                }
-                iconColor="#168df0"
-                scale={s}
-              />
-
-              <SummaryCard
-                title="Completed Events"
-                value={
-                  stats.completed
-                }
-                color="#cceecb"
-                icon={
-                  CircleCheckBig
-                }
-                iconColor="#42b94d"
-                scale={s}
-              />
-            </View>
-          )}
+    <SummaryCard
+      title={
+        status === "All Statuses"
+          ? "All Statuses"
+          : status
+      }
+      value={filteredStats.statusCount}
+      color="#cfe9fb"
+      icon={Clock3}
+      iconColor="#168df0"
+      scale={s}
+    />
+  </View>
+)}
 
           {/* =============================================== */}
           {/* FILTER PANEL */}
@@ -2276,61 +2255,7 @@ const confirmRejectEvent = async () => {
                               View Event
                             </Text>
                           </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[styles.viewButton, { marginTop: 6 }]}
-                            onPress={() => {
-                              setSelectedEvent(event);
-                              setEditingEventId(event.id);
-                              setNewTitle(event.title || "");
-                              setNewCategory(event.category || "Clean-up");
-                              setNewDescription(event.description || "");
-                              setNewDate(event.date || "");
-                              setNewTime(event.time || "");
-                              setNewLocation(event.location || "");
-                              setNewCapacity(String(event.capacity || 50));
-                              setNewImageUri(event.imageUrl || null);
-                              if (event.coordinates) setNewCoordinates(event.coordinates);
-                              setAddModalOpen(true);
-                            }}
-                          >
-                            <Text style={styles.viewButtonText}>Edit</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[styles.viewButton, { marginTop: 6 }]}
-                            onPress={() => {
-                              if (!admin) return;
-                              Alert.alert(
-                                "Delete event",
-                                `Permanently delete "${event.title}"?`,
-                                [
-                                  { text: "Cancel", style: "cancel" },
-                                  {
-                                    text: "Delete",
-                                    style: "destructive",
-                                    onPress: () => {
-                                      void (async () => {
-                                        try {
-                                          await deleteEvent(event.id, admin);
-                                          await reloadEvents();
-                                        } catch (error) {
-                                          Alert.alert(
-                                            "Delete failed",
-                                            error instanceof Error
-                                              ? error.message
-                                              : "Failed to delete event."
-                                          );
-                                        }
-                                      })();
-                                    },
-                                  },
-                                ]
-                              );
-                            }}
-                          >
-                            <Text style={[styles.viewButtonText, { color: "#b42318" }]}>
-                              Delete
-                            </Text>
-                          </TouchableOpacity>
+                        
                         </View>
                       </View>
                     )
@@ -3157,404 +3082,424 @@ const confirmRejectEvent = async () => {
       </Modal>
 
       {/* ================================================= */}
-      {/* NON-PENDING EVENT DETAILS MODAL */}
-      {/* Pending events DO NOT use this modal anymore */}
-      {/* ================================================= */}
+{/* EVENT DETAILS MODAL */}
+{/* ================================================= */}
 
-      <Modal
-        visible={
-          selectedEvent !==
-            null &&
-          selectedEvent.status !==
-            "Pending"
-        }
-        transparent
-        animationType="fade"
-        onRequestClose={
-          closeEventDetails
-        }
-      >
-        <View
-          style={
-            styles.modalOverlay
-          }
-        >
-          {selectedEvent && (
-            <ScrollView
-              style={
-                styles.detailsModalScroll
-              }
-              contentContainerStyle={
-                styles.detailsModal
-              }
-            >
+<Modal
+  visible={
+    selectedEvent !== null &&
+    selectedEvent.status !== "Pending"
+  }
+  transparent
+  animationType="fade"
+  onRequestClose={closeEventDetails}
+>
+  <View style={styles.modalOverlay}>
+    {selectedEvent ? (
+      <View style={styles.eventDetailsModal}>
+        {/* HEADER */}
+        <View style={styles.eventDetailsHeader}>
+          <View style={styles.eventDetailsHeaderLeft}>
+            <Text style={styles.eventDetailsTitle}>
+              {selectedEvent.title}
+            </Text>
+
+            <Text style={styles.eventDetailsId}>
+              Event ID: #{selectedEvent.id.slice(0, 10).toUpperCase()}
+            </Text>
+
+            <View style={styles.eventDetailsBadges}>
               <View
-                style={
-                  styles.modalHeader
-                }
+                style={[
+                  styles.eventDetailsBadge,
+                  {
+                    backgroundColor: categoryColor(
+                      selectedEvent.category
+                    ),
+                  },
+                ]}
               >
-                <View
-                  style={
-                    styles.modalTitleWrap
-                  }
-                >
-                  <Text
-                    style={
-                      styles.modalTitle
-                    }
-                  >
-                    {
-                      selectedEvent.title
-                    }
-                  </Text>
+                <Text style={styles.eventDetailsBadgeText}>
+                  {selectedEvent.category}
+                </Text>
+              </View>
 
-                  <Text
-                    style={
-                      styles.modalSubtitle
+              <View
+                style={[
+                  styles.eventDetailsBadge,
+                  {
+                    backgroundColor: statusColor(
+                      selectedEvent.status
+                    ),
+                  },
+                ]}
+              >
+                <Text style={styles.eventDetailsBadgeText}>
+                  {selectedEvent.status}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          <Pressable
+            style={styles.eventDetailsClose}
+            onPress={closeEventDetails}
+          >
+            <X size={22} color="#333333" />
+          </Pressable>
+        </View>
+
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.eventDetailsScrollContent}
+        >
+          <View style={styles.eventDetailsColumns}>
+            {/* ================= LEFT ================= */}
+            <View style={styles.eventDetailsLeft}>
+              {/* IMAGE */}
+              <View style={styles.eventHeroCard}>
+                {getEventImages(selectedEvent)[0] && !eventImageFailed ? (
+                  <Pressable
+                    style={styles.eventHeroPressable}
+                    onPress={() =>
+                      setPreviewImageUrl(
+                        getEventImages(selectedEvent)[0]
+                      )
                     }
                   >
-                    #
-                    {
-                      selectedEvent.id
-                    }
-                  </Text>
+                    <Image
+                      source={{
+                        uri: getEventImages(selectedEvent)[0],
+                      }}
+                      style={styles.eventDetailsHeroImage}
+                      resizeMode="cover"
+                      onError={() => setEventImageFailed(true)}
+                    />
+                  </Pressable>
+                ) : (
+                  <View style={styles.eventDetailsImagePlaceholder}>
+                    <CalendarDays
+                      size={48}
+                      color="#7d8c7c"
+                    />
+
+                    <Text style={styles.eventDetailsPlaceholderText}>
+                      No event image available
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {/* ABOUT */}
+              <View style={styles.eventDetailsCard}>
+                <Text style={styles.eventDetailsSectionTitle}>
+                  About the Event
+                </Text>
+
+                <Text style={styles.eventDetailsDescription}>
+                  {selectedEvent.description}
+                </Text>
+              </View>
+
+              {/* INFORMATION */}
+              <View style={styles.eventDetailsCard}>
+                <Text style={styles.eventDetailsSectionTitle}>
+                  Event Information
+                </Text>
+
+                <View style={styles.eventInfoGrid}>
+                  <View style={styles.eventInfoItem}>
+                    <View style={styles.eventInfoIcon}>
+                      <CalendarDays
+                        size={20}
+                        color="#34733B"
+                      />
+                    </View>
+
+                    <View style={styles.eventInfoCopy}>
+                      <Text style={styles.eventInfoLabel}>
+                        Date
+                      </Text>
+
+                      <Text style={styles.eventInfoValue}>
+                        {selectedEvent.date}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.eventInfoItem}>
+                    <View style={styles.eventInfoIcon}>
+                      <Clock3
+                        size={20}
+                        color="#34733B"
+                      />
+                    </View>
+
+                    <View style={styles.eventInfoCopy}>
+                      <Text style={styles.eventInfoLabel}>
+                        Time
+                      </Text>
+
+                      <Text style={styles.eventInfoValue}>
+                        {selectedEvent.time}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.eventInfoItem}>
+                    <View style={styles.eventInfoIcon}>
+                      <Users
+                        size={20}
+                        color="#34733B"
+                      />
+                    </View>
+
+                    <View style={styles.eventInfoCopy}>
+                      <Text style={styles.eventInfoLabel}>
+                        Participants
+                      </Text>
+
+                      <Text style={styles.eventInfoValue}>
+                        {selectedEvent.participants} /{" "}
+                        {selectedEvent.capacity}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.eventInfoItem}>
+                    <View style={styles.eventInfoIcon}>
+                      <UserRound
+                        size={20}
+                        color="#34733B"
+                      />
+                    </View>
+
+                    <View style={styles.eventInfoCopy}>
+                      <Text style={styles.eventInfoLabel}>
+                        Submitted By
+                      </Text>
+
+                      <Text style={styles.eventInfoValue}>
+                        {selectedEvent.submittedBy}
+                      </Text>
+
+                      <Text style={styles.eventInfoSubValue}>
+                        {selectedEvent.submittedArea}
+                      </Text>
+                    </View>
+                  </View>
                 </View>
 
-                <Pressable
-                  style={
-                    styles.closeButton
-                  }
-                  onPress={
-                    closeEventDetails
-                  }
-                >
-                  <X
-                    size={20}
-                    color="#222"
-                  />
-                </Pressable>
+                <View style={styles.eventLocationRow}>
+                  <View style={styles.eventInfoIcon}>
+                    <MapPin
+                      size={20}
+                      color="#34733B"
+                    />
+                  </View>
+
+                  <View style={styles.eventInfoCopy}>
+                    <Text style={styles.eventInfoLabel}>
+                      Location
+                    </Text>
+
+                    <Text style={styles.eventInfoValue}>
+                      {selectedEvent.location}
+                    </Text>
+                  </View>
+                </View>
               </View>
+            </View>
 
-              {getEventImages(selectedEvent)[0] ? (
-                <Pressable
-                  onPress={() =>
-                    setPreviewImageUrl(
-                      getEventImages(selectedEvent)[0]
-                    )
-                  }
-                >
-                  <Image
-                    source={{
-                      uri: getEventImages(selectedEvent)[0],
-                    }}
-                    style={
-                      styles.detailsHeroImage
-                    }
+            {/* ================= RIGHT ================= */}
+            <View style={styles.eventDetailsRight}>
+              {/* MAP */}
+              <View style={styles.eventDetailsCard}>
+                <Text style={styles.eventDetailsSectionTitle}>
+                  Event Location
+                </Text>
+
+                <View style={styles.eventDetailsMap}>
+                  <InteractiveLocationMap
+                    coordinates={selectedEvent.coordinates}
+                    height={250}
                   />
-                </Pressable>
-              ) : null}
+                </View>
 
-              <Text
-                style={
-                  styles.detailsDescription
-                }
-              >
-                {
-                  selectedEvent.description
-                }
-              </Text>
-
-              <InteractiveLocationMap
-                coordinates={
-                  selectedEvent.coordinates
-                }
-                height={180}
-              />
-
-              <DetailRow
-                label="Category"
-                value={
-                  selectedEvent.category
-                }
-              />
-
-              <DetailRow
-                label="Date & Time"
-                value={`${selectedEvent.date} · ${selectedEvent.time}`}
-              />
-
-              <DetailRow
-                label="Location"
-                value={
-                  selectedEvent.location
-                }
-              />
-
-              {selectedEvent.coordinates ? (
-                <DetailRow
-                  label="GPS"
-                  value={`${selectedEvent.coordinates.latitude.toFixed(
-                    6
-                  )}, ${selectedEvent.coordinates.longitude.toFixed(
-                    6
-                  )}`}
-                />
-              ) : null}
-
-              <DetailRow
-                label="Status"
-                value={
-                  selectedEvent.status
-                }
-              />
-
-              <DetailRow
-                label="Participants"
-                value={`${selectedEvent.participants} of ${selectedEvent.capacity}`}
-              />
-
-              <DetailRow
-                label="Submitted By"
-                value={
-                  selectedEvent.submittedBy
-                }
-              />
+                {selectedEvent.coordinates ? (
+                  <Text style={styles.eventCoordinates}>
+                    GPS:{" "}
+                    {selectedEvent.coordinates.latitude.toFixed(6)},{" "}
+                    {selectedEvent.coordinates.longitude.toFixed(6)}
+                  </Text>
+                ) : null}
+              </View>
 
               {/* PARTICIPANTS */}
+              <View style={styles.eventDetailsCard}>
+                <View style={styles.participantHeader}>
+                  <View>
+                    <Text style={styles.eventDetailsSectionTitle}>
+                      Participant List
+                    </Text>
 
-              <Text
-                style={
-                  styles.participantsHeading
-                }
-              >
-                Participant List
-              </Text>
+                    <Text style={styles.participantCount}>
+                      {eventParticipants.length} registered participant
+                      {eventParticipants.length === 1 ? "" : "s"}
+                    </Text>
+                  </View>
 
-              {loadingParticipants ? (
-                <Text
-                  style={
-                    styles.smallText
-                  }
-                >
-                  Loading
-                  participants...
-                </Text>
-              ) : eventParticipants.length ===
-                0 ? (
-                <Text
-                  style={
-                    styles.smallText
-                  }
-                >
-                  No users have
-                  joined this event
-                  yet.
-                </Text>
-              ) : (
-                eventParticipants.map(
-                  (
-                    participant
-                  ) => {
-                    const joined =
-                      participant.joinedAt
-                        ? formatDateTime(
-                            participant.joinedAt
-                          )
+                  <View style={styles.participantCapacityBadge}>
+                    <Users
+                      size={15}
+                      color="#34733B"
+                    />
+
+                    <Text style={styles.participantCapacityText}>
+                      {selectedEvent.participants}/
+                      {selectedEvent.capacity}
+                    </Text>
+                  </View>
+                </View>
+
+                {loadingParticipants ? (
+                  <View style={styles.participantEmpty}>
+                    <Text style={styles.participantEmptyText}>
+                      Loading participants...
+                    </Text>
+                  </View>
+                ) : eventParticipants.length === 0 ? (
+                  <View style={styles.participantEmpty}>
+                    <Users
+                      size={34}
+                      color="#AAB4AA"
+                    />
+
+                    <Text style={styles.participantEmptyTitle}>
+                      No participants yet
+                    </Text>
+
+                    <Text style={styles.participantEmptyText}>
+                      Users who join this event will appear here.
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={styles.participantList}>
+                    {eventParticipants.map((participant) => {
+                      const joined = participant.joinedAt
+                        ? formatDateTime(participant.joinedAt)
                         : null;
 
-                    return (
-                      <View
-                        key={
-                          participant.uid
-                        }
-                        style={
-                          styles.participantRow
-                        }
-                      >
+                      return (
                         <View
-                          style={
-                            styles.submitterIcon
-                          }
+                          key={participant.uid}
+                          style={styles.eventParticipantRow}
                         >
-                          <UserRound
-                            size={
-                              13
-                            }
-                            color="#ffffff"
-                          />
-                        </View>
+                          <View style={styles.eventParticipantAvatar}>
+                            <UserRound
+                              size={18}
+                              color="#ffffff"
+                            />
+                          </View>
 
-                        <View
-                          style={{
-                            flex: 1,
-                          }}
-                        >
-                          <Text
-                            style={
-                              styles.eventTitle
-                            }
-                          >
-                            {
-                              participant.name
-                            }
-                          </Text>
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.eventParticipantName}>
+                              {participant.name}
+                            </Text>
 
-                          <Text
-                            style={
-                              styles.smallText
-                            }
-                          >
-                            {
-                              participant.email
-                            }
-                          </Text>
+                            <Text style={styles.eventParticipantEmail}>
+                              {participant.email}
+                            </Text>
+                          </View>
 
                           {joined ? (
-                            <Text
-                              style={
-                                styles.smallText
-                              }
-                            >
-                              Joined{" "}
-                              {
-                                joined.date
-                              }{" "}
-                              ·{" "}
-                              {
-                                joined.time
-                              }
-                            </Text>
+                            <View style={styles.eventParticipantJoined}>
+                              <Text
+                                style={
+                                  styles.eventParticipantJoinedLabel
+                                }
+                              >
+                                Joined
+                              </Text>
+
+                              <Text
+                                style={
+                                  styles.eventParticipantJoinedDate
+                                }
+                              >
+                                {joined.date}
+                              </Text>
+                            </View>
                           ) : null}
                         </View>
-                      </View>
-                    );
-                  }
-                )
-              )}
-
-              {/* ACTIONS */}
-
-              <View
-                style={
-                  styles.moderationActions
-                }
-              >
-                {selectedEvent.status ===
-                  "Upcoming" && (
-                  <TouchableOpacity
-                    style={[
-                      styles.saveButton,
-                      isModerating && {
-                        opacity: 0.7,
-                      },
-                    ]}
-                    onPress={() =>
-                      moderateEvent(
-                        "Ongoing"
-                      )
-                    }
-                    disabled={
-                      isModerating
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.saveText
-                      }
-                    >
-                      {isModerating
-                        ? "Please wait..."
-                        : "Mark Ongoing"}
-                    </Text>
-                  </TouchableOpacity>
+                      );
+                    })}
+                  </View>
                 )}
-
-                {selectedEvent.status ===
-                  "Ongoing" && (
-                  <TouchableOpacity
-                    style={[
-                      styles.saveButton,
-                      isModerating && {
-                        opacity: 0.7,
-                      },
-                    ]}
-                    onPress={() =>
-                      moderateEvent(
-                        "Completed"
-                      )
-                    }
-                    disabled={
-                      isModerating
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.saveText
-                      }
-                    >
-                      {isModerating
-                        ? "Please wait..."
-                        : "Mark Completed"}
-                    </Text>
-                  </TouchableOpacity>
-                )}
-
-                <TouchableOpacity
-                  style={[
-                    styles.saveButton,
-                    isModerating && {
-                      opacity: 0.7,
-                    },
-                  ]}
-                  onPress={openEditSelectedEvent}
-                  disabled={isModerating}
-                >
-                  <Text style={styles.saveText}>Edit Event</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.cancelButton,
-                    isModerating && {
-                      opacity: 0.6,
-                    },
-                  ]}
-                  onPress={handleDeleteSelectedEvent}
-                  disabled={isModerating}
-                >
-                  <Text style={[styles.cancelText, { color: "#b42318" }]}>
-                    Delete Event
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.cancelButton,
-                    isModerating && {
-                      opacity: 0.6,
-                    },
-                  ]}
-                  onPress={() =>
-                    !isModerating &&
-                    closeEventDetails()
-                  }
-                  disabled={
-                    isModerating
-                  }
-                >
-                  <Text
-                    style={
-                      styles.cancelText
-                    }
-                  >
-                    Close
-                  </Text>
-                </TouchableOpacity>
               </View>
-            </ScrollView>
-          )}
+            </View>
+          </View>
+        </ScrollView>
+
+        {/* FOOTER */}
+        <View style={styles.eventDetailsFooter}>
+          <TouchableOpacity
+            style={styles.eventDetailsCloseButton}
+            onPress={closeEventDetails}
+            disabled={isModerating}
+          >
+            <Text style={styles.eventDetailsCloseButtonText}>
+              Close
+            </Text>
+          </TouchableOpacity>
+
+          {selectedEvent.status === "Upcoming" ? (
+            <TouchableOpacity
+              style={[
+                styles.eventStatusButton,
+                isModerating && { opacity: 0.65 },
+              ]}
+              onPress={() =>
+                void moderateEvent("Ongoing")
+              }
+              disabled={isModerating}
+            >
+              <Text style={styles.eventStatusButtonText}>
+                {isModerating
+                  ? "Please wait..."
+                  : "Mark as Ongoing"}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {selectedEvent.status === "Ongoing" ? (
+            <TouchableOpacity
+              style={[
+                styles.eventStatusButton,
+                isModerating && { opacity: 0.65 },
+              ]}
+              onPress={() =>
+                void moderateEvent("Completed")
+              }
+              disabled={isModerating}
+            >
+              <Check
+                size={17}
+                color="#ffffff"
+              />
+
+              <Text style={styles.eventStatusButtonText}>
+                {isModerating
+                  ? "Please wait..."
+                  : "Mark as Completed"}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
-      </Modal>
+      </View>
+    ) : null}
+  </View>
+</Modal>
       <EventImageLightbox
         uri={previewImageUrl}
         onClose={() => setPreviewImageUrl(null)}
@@ -4751,8 +4696,7 @@ const webPickerStyle = {
     "#ffffff",
   boxSizing:
     "border-box" as const,
-  fontFamily:
-    "Montserrat, sans-serif",
+  fontFamily: MONTSERRAT_FONT,
 };
 
 // =========================================================
@@ -4886,7 +4830,7 @@ const styles =
 
     pageTitle: {
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#145b22",
       lineHeight: 44,
     },
@@ -4894,7 +4838,7 @@ const styles =
     subtitle: {
       color: "#4f8154",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       marginTop: 2,
     },
 
@@ -4914,7 +4858,7 @@ const styles =
     addButtonText: {
       color: "#ffffff",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     // =====================================================
@@ -4954,7 +4898,7 @@ const styles =
 
     tabText: {
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#252525",
     },
 
@@ -4994,14 +4938,14 @@ const styles =
 
     summaryTitle: {
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       textAlign:
         "center",
     },
 
     summaryValue: {
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#111",
       lineHeight: 40,
     },
@@ -5079,7 +5023,7 @@ const styles =
 
     filterLabel: {
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#555",
       marginBottom: 1,
       fontSize: 11,
@@ -5097,7 +5041,7 @@ const styles =
 
     filterValue: {
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#252525",
       flexShrink: 1,
     },
@@ -5119,7 +5063,7 @@ const styles =
     resetText: {
       color: "#34733B",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     // =====================================================
@@ -5160,7 +5104,7 @@ const styles =
       fontSize: 14,
       color: "#202020",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     tableRow: {
@@ -5227,7 +5171,7 @@ const styles =
     cellText: {
       fontSize: 14,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#242424",
     },
 
@@ -5285,7 +5229,7 @@ const styles =
     eventTitle: {
       fontSize: 14,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#1c1c1c",
     },
 
@@ -5308,13 +5252,13 @@ const styles =
       fontSize: 12,
       color: "#2e502f",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     dateText: {
       fontSize: 13,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#222",
     },
 
@@ -5342,7 +5286,7 @@ const styles =
       fontSize: 12,
       color: "#34733B",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     emptyRow: {
@@ -5357,7 +5301,7 @@ const styles =
       fontSize: 14,
       color: "#777",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     // =====================================================
@@ -5378,7 +5322,7 @@ const styles =
     paginationText: {
       fontSize: 12,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#333",
     },
 
@@ -5412,7 +5356,7 @@ const styles =
       fontSize: 12,
       color: "#333",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     activePageButtonText: {
@@ -5464,7 +5408,7 @@ rejectModalTitle: {
 
   color: "#145B22",
 
-  fontFamily: "Montserrat_700Bold",
+  fontFamily: MONTSERRAT_FONT,
 
   marginBottom: 7,
 },
@@ -5475,7 +5419,7 @@ rejectModalDescription: {
 
   color: "#555555",
 
-  fontFamily: "Montserrat_500Medium",
+  fontFamily: MONTSERRAT_FONT,
 
   marginBottom: 18,
 },
@@ -5490,7 +5434,7 @@ rejectLabel: {
 
   color: "#222222",
 
-  fontFamily: "Montserrat_700Bold",
+  fontFamily: MONTSERRAT_FONT,
 
   marginBottom: 6,
 },
@@ -5544,7 +5488,7 @@ rejectDropdownText: {
 
   color: "#222222",
 
-  fontFamily: "Montserrat_500Medium",
+  fontFamily: MONTSERRAT_FONT,
 
   marginRight: 10,
 },
@@ -5611,13 +5555,13 @@ rejectDropdownOptionText: {
 
   color: "#222222",
 
-  fontFamily: "Montserrat_500Medium",
+  fontFamily: MONTSERRAT_FONT,
 },
 
 rejectDropdownOptionTextSelected: {
   color: "#145B22",
 
-  fontFamily: "Montserrat_700Bold",
+  fontFamily: MONTSERRAT_FONT,
 },
 
 // REMARKS
@@ -5639,7 +5583,7 @@ rejectRemarksInput: {
 
   color: "#222222",
 
-  fontFamily: "Montserrat_500Medium",
+  fontFamily: MONTSERRAT_FONT,
 
   outlineStyle: "none",
 } as any,
@@ -5678,7 +5622,7 @@ rejectCancelText: {
 
   fontSize: 11,
 
-  fontFamily: "Montserrat_700Bold",
+  fontFamily: MONTSERRAT_FONT,
 },
 
 rejectConfirmButton: {
@@ -5700,7 +5644,7 @@ rejectConfirmText: {
 
   fontSize: 11,
 
-  fontFamily: "Montserrat_700Bold",
+  fontFamily: MONTSERRAT_FONT,
 },
 
     modalOverlay: {
@@ -5752,7 +5696,7 @@ rejectConfirmText: {
       fontSize: 15,
       color: "#1c1c1c",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     participantRow: {
@@ -5786,7 +5730,7 @@ rejectConfirmText: {
       fontSize: 22,
       color: "#145b22",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     modalSubtitle: {
@@ -5819,7 +5763,7 @@ rejectConfirmText: {
       fontSize: 12,
       color: "#333",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       marginBottom: 6,
     },
 
@@ -5854,7 +5798,7 @@ rejectConfirmText: {
       fontSize: 14,
       color: "#222",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     multilineInput: {
@@ -5879,7 +5823,7 @@ rejectConfirmText: {
       marginTop: 6,
       marginBottom: 10,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     inlineFields: {
@@ -5946,7 +5890,7 @@ rejectConfirmText: {
       color: "#555",
       fontSize: 9,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     uploadBox: {
@@ -5968,7 +5912,7 @@ rejectConfirmText: {
       fontSize: 12,
       color: "#222",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       marginTop: 5,
     },
 
@@ -6011,7 +5955,7 @@ rejectConfirmText: {
       fontSize: 11,
       color: "#333",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     choiceTextActive: {
@@ -6059,7 +6003,7 @@ rejectConfirmText: {
     cancelText: {
       color: "#555",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     saveButton: {
@@ -6080,7 +6024,7 @@ rejectConfirmText: {
     saveText: {
       color: "#ffffff",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       fontSize: 13,
     },
 
@@ -6097,7 +6041,7 @@ rejectConfirmText: {
       fontSize: 17,
       color: "#145b22",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       marginBottom: 8,
     },
 
@@ -6122,7 +6066,7 @@ rejectConfirmText: {
       fontSize: 13,
       color: "#222",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     detailsDescription: {
@@ -6148,7 +6092,7 @@ rejectConfirmText: {
       fontSize: 13,
       color: "#555",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     detailValue: {
@@ -6156,7 +6100,7 @@ rejectConfirmText: {
       fontSize: 13,
       color: "#222",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     // =====================================================
@@ -6227,7 +6171,7 @@ rejectConfirmText: {
       flex: 1,
       fontSize: 13,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#222222",
     },
 
@@ -6330,7 +6274,7 @@ rejectConfirmText: {
       color: "#667066",
       marginTop: 5,
       fontFamily:
-        "Montserrat_600SemiBold",
+        MONTSERRAT_FONT,
     },
 
     pendingEventHeading: {
@@ -6357,7 +6301,7 @@ rejectConfirmText: {
       color: "#E47920",
       fontSize: 14,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       textAlign:
         "center",
     },
@@ -6367,7 +6311,7 @@ rejectConfirmText: {
       lineHeight: 26,
       color: "#111111",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       marginBottom: 5,
     },
 
@@ -6382,14 +6326,14 @@ rejectConfirmText: {
       color: "#207529",
       fontSize: 14,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     pendingEventId: {
       color: "#222222",
       fontSize: 10,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     // INFORMATION
@@ -6421,7 +6365,7 @@ rejectConfirmText: {
       color: "#666666",
       fontSize: 14,
       fontFamily:
-        "Montserrat_600SemiBold",
+        MONTSERRAT_FONT,
     },
 
     pendingInfoValueBox: {
@@ -6433,7 +6377,7 @@ rejectConfirmText: {
       color: "#444444",
       fontSize: 14,
       lineHeight: 18,
-      fontFamily: "Montserrat_600SemiBold",
+      fontFamily: MONTSERRAT_FONT,
       paddingLeft: 25,
     },
 
@@ -6441,7 +6385,7 @@ rejectConfirmText: {
       color: "#555555",
       fontSize: 12,
       lineHeight: 15,
-      fontFamily: "Montserrat_500Medium",
+      fontFamily: MONTSERRAT_FONT,
       paddingLeft: 25,
     },
 
@@ -6463,7 +6407,7 @@ rejectConfirmText: {
       fontSize: 13,
       color: "#111111",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       marginBottom: 12,
     },
 
@@ -6499,7 +6443,7 @@ rejectConfirmText: {
       color: "#777777",
       marginTop: 2,
       fontFamily:
-        "Montserrat_500Medium",
+        MONTSERRAT_FONT,
     },
 
     // ABOUT
@@ -6520,7 +6464,7 @@ rejectConfirmText: {
       fontSize: 11,
       lineHeight: 17,
       fontFamily:
-        "Montserrat_500Medium",
+        MONTSERRAT_FONT,
     },
 
     // MAP
@@ -6576,7 +6520,7 @@ rejectConfirmText: {
       color: "#111111",
       fontSize: 16,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     pendingSubmitterArea: {
@@ -6584,7 +6528,7 @@ rejectConfirmText: {
       color: "#555555",
       fontSize: 9,
       fontFamily:
-        "Montserrat_500Medium",
+        MONTSERRAT_FONT,
     },
 
     // ACTIONS
@@ -6619,7 +6563,7 @@ rejectConfirmText: {
       color: "#DE1919",
       fontSize: 11,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     pendingApproveButton: {
@@ -6638,6 +6582,403 @@ rejectConfirmText: {
       color: "#ffffff",
       fontSize: 11,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
+
+    eventDetailsModal: {
+  width: "94%",
+  maxWidth: 1120,
+  maxHeight: "92%",
+  backgroundColor: "#FFFFFF",
+  borderRadius: 16,
+  overflow: "hidden",
+
+  shadowColor: "#000000",
+  shadowOpacity: 0.18,
+  shadowRadius: 18,
+  shadowOffset: {
+    width: 0,
+    height: 7,
+  },
+
+  elevation: 15,
+},
+
+eventDetailsHeader: {
+  minHeight: 100,
+  paddingHorizontal: 28,
+  paddingVertical: 20,
+
+  flexDirection: "row",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+
+  borderBottomWidth: 1,
+  borderBottomColor: "#E7E7E7",
+
+  backgroundColor: "#FAFCFA",
+},
+
+eventDetailsHeaderLeft: {
+  flex: 1,
+  paddingRight: 20,
+},
+
+eventDetailsTitle: {
+  fontSize: 26,
+  lineHeight: 32,
+  color: "#145B22",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventDetailsId: {
+  marginTop: 4,
+  fontSize: 11,
+  color: "#777777",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventDetailsBadges: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+  marginTop: 10,
+},
+
+eventDetailsBadge: {
+  borderRadius: 20,
+  paddingHorizontal: 12,
+  paddingVertical: 5,
+},
+
+eventDetailsBadgeText: {
+  fontSize: 11,
+  color: "#264D2A",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventDetailsClose: {
+  width: 38,
+  height: 38,
+  borderRadius: 19,
+  backgroundColor: "#EEEEEE",
+  alignItems: "center",
+  justifyContent: "center",
+},
+
+eventDetailsScrollContent: {
+  padding: 24,
+},
+
+eventDetailsColumns: {
+  flexDirection: "row",
+  alignItems: "flex-start",
+  gap: 20,
+  flexWrap: "wrap",
+},
+
+eventDetailsLeft: {
+  flex: 1.25,
+  minWidth: 420,
+  gap: 16,
+},
+
+eventDetailsRight: {
+  flex: 0.85,
+  minWidth: 320,
+  gap: 16,
+},
+
+eventHeroCard: {
+  width: "100%",
+  height: 270,
+  borderRadius: 12,
+  overflow: "hidden",
+  backgroundColor: "#E7EBE7",
+},
+
+eventHeroPressable: {
+  width: "100%",
+  height: "100%",
+},
+
+eventDetailsHeroImage: {
+  width: "100%",
+  height: "100%",
+},
+
+eventDetailsImagePlaceholder: {
+  width: "100%",
+  height: "100%",
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: "#EEF2EE",
+},
+
+eventDetailsPlaceholderText: {
+  marginTop: 8,
+  fontSize: 12,
+  color: "#778077",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventDetailsCard: {
+  width: "100%",
+  borderWidth: 1,
+  borderColor: "#DFE3DF",
+  borderRadius: 12,
+  backgroundColor: "#FFFFFF",
+  padding: 18,
+},
+
+eventDetailsSectionTitle: {
+  fontSize: 16,
+  color: "#145B22",
+  fontFamily: MONTSERRAT_FONT,
+  marginBottom: 13,
+},
+
+eventDetailsDescription: {
+  fontSize: 13,
+  lineHeight: 21,
+  color: "#555555",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventInfoGrid: {
+  flexDirection: "row",
+  flexWrap: "wrap",
+  gap: 12,
+},
+
+eventInfoItem: {
+  width: "48%",
+  minHeight: 72,
+  borderRadius: 9,
+  backgroundColor: "#F7F9F7",
+  paddingHorizontal: 12,
+  paddingVertical: 11,
+
+  flexDirection: "row",
+  alignItems: "flex-start",
+},
+
+eventInfoIcon: {
+  width: 34,
+  height: 34,
+  borderRadius: 17,
+  backgroundColor: "#E8F2E7",
+  alignItems: "center",
+  justifyContent: "center",
+  marginRight: 10,
+},
+
+eventInfoCopy: {
+  flex: 1,
+},
+
+eventInfoLabel: {
+  fontSize: 10,
+  color: "#777777",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventInfoValue: {
+  marginTop: 3,
+  fontSize: 13,
+  lineHeight: 18,
+  color: "#222222",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventInfoSubValue: {
+  marginTop: 2,
+  fontSize: 10,
+  color: "#777777",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventLocationRow: {
+  marginTop: 12,
+  minHeight: 68,
+  borderRadius: 9,
+  backgroundColor: "#F7F9F7",
+  paddingHorizontal: 12,
+  paddingVertical: 11,
+
+  flexDirection: "row",
+  alignItems: "flex-start",
+},
+
+eventDetailsMap: {
+  borderRadius: 9,
+  overflow: "hidden",
+},
+
+eventCoordinates: {
+  marginTop: 8,
+  fontSize: 10,
+  color: "#777777",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+participantHeader: {
+  flexDirection: "row",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+},
+
+participantCount: {
+  marginTop: -8,
+  marginBottom: 12,
+  fontSize: 10,
+  color: "#777777",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+participantCapacityBadge: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 5,
+  backgroundColor: "#EDF5EB",
+  borderRadius: 16,
+  paddingHorizontal: 10,
+  paddingVertical: 6,
+},
+
+participantCapacityText: {
+  color: "#34733B",
+  fontSize: 11,
+  fontFamily: MONTSERRAT_FONT,
+},
+
+participantList: {
+  width: "100%",
+},
+
+eventParticipantRow: {
+  minHeight: 62,
+  flexDirection: "row",
+  alignItems: "center",
+  borderTopWidth: 1,
+  borderTopColor: "#EEEEEE",
+  paddingVertical: 9,
+},
+
+eventParticipantAvatar: {
+  width: 38,
+  height: 38,
+  borderRadius: 19,
+  backgroundColor: "#34733B",
+  alignItems: "center",
+  justifyContent: "center",
+  marginRight: 11,
+},
+
+eventParticipantName: {
+  fontSize: 12,
+  color: "#222222",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventParticipantEmail: {
+  marginTop: 2,
+  fontSize: 10,
+  color: "#777777",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventParticipantJoined: {
+  alignItems: "flex-end",
+  marginLeft: 8,
+},
+
+eventParticipantJoinedLabel: {
+  fontSize: 9,
+  color: "#888888",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventParticipantJoinedDate: {
+  marginTop: 2,
+  fontSize: 10,
+  color: "#444444",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+participantEmpty: {
+  minHeight: 160,
+  alignItems: "center",
+  justifyContent: "center",
+  paddingHorizontal: 20,
+},
+
+participantEmptyTitle: {
+  marginTop: 7,
+  fontSize: 12,
+  color: "#333333",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+participantEmptyText: {
+  marginTop: 4,
+  fontSize: 10,
+  color: "#888888",
+  textAlign: "center",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventDetailsFooter: {
+  minHeight: 70,
+  paddingHorizontal: 24,
+
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: 10,
+
+  borderTopWidth: 1,
+  borderTopColor: "#E7E7E7",
+
+  backgroundColor: "#FAFCFA",
+},
+
+eventDetailsCloseButton: {
+  minWidth: 95,
+  height: 40,
+
+  borderWidth: 1,
+  borderColor: "#CACACA",
+  borderRadius: 7,
+
+  alignItems: "center",
+  justifyContent: "center",
+},
+
+eventDetailsCloseButtonText: {
+  color: "#444444",
+  fontSize: 12,
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventStatusButton: {
+  minWidth: 155,
+  height: 40,
+
+  backgroundColor: "#34733B",
+  borderRadius: 7,
+
+  paddingHorizontal: 16,
+
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 6,
+},
+
+eventStatusButtonText: {
+  color: "#FFFFFF",
+  fontSize: 12,
+  fontFamily: MONTSERRAT_FONT,
+},
   });
