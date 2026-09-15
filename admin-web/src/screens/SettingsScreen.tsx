@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    fontFamily: "Montserrat_500Medium",
+    fontFamily: "Montserrat_700Bold",
   },
   inputDisabled: { backgroundColor: "#f3f3f3", color: "#777" },
   button: {
@@ -276,9 +276,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   buttonText: { color: "#fff", fontFamily: "Montserrat_700Bold" },
-  error: { color: "#b42318", marginTop: 8, fontFamily: "Montserrat_500Medium" },
-  infoLine: { fontFamily: "Montserrat_500Medium", color: "#333", marginBottom: 8 },
-  help: { fontFamily: "Montserrat_400Regular", color: "#666", marginBottom: 12 },
+  error: { color: "#b42318", marginTop: 8, fontFamily: "Montserrat_700Bold" },
+  infoLine: { fontFamily: "Montserrat_700Bold", color: "#333", marginBottom: 8 },
+  help: { fontFamily: "Montserrat_700Bold", color: "#666", marginBottom: 12 },
   prefRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -287,5 +287,5 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: "#eee",
   },
-  prefLabel: { fontFamily: "Montserrat_600SemiBold", color: "#222" },
+  prefLabel: { fontFamily: "Montserrat_700Bold", color: "#222" },
 });

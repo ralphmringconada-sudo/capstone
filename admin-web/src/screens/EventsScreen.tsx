@@ -24,11 +24,9 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
-  CircleCheckBig,
   Clock3,
   Eye,
   Filter,
-  LoaderCircle,
   MapPin,
   Plus,
   Search,
@@ -46,7 +44,6 @@ import { useAdminAuth } from "@/context/AdminAuthContext";
 
 import {
   createEvent,
-  deleteEvent,
   fetchEventParticipants,
   fetchEvents,
   updateEvent,
@@ -262,6 +259,22 @@ export default function EventsScreen() {
     )
   );
 
+  // Measure the ACTUAL content area inside AdminLayout instead of using
+  // the full browser width. This keeps the page responsive even when
+  // the sidebar takes up part of the screen.
+  const [contentWidth, setContentWidth] = useState(0);
+
+  const estimatedContentWidth = Math.max(width - 300, 0);
+  const usableWidth = contentWidth || estimatedContentWidth;
+
+  const isLaptop = usableWidth < 1250;
+  const isCompact = usableWidth < 1080;
+  const isNarrow = usableWidth < 900;
+  const denseTable = usableWidth < 1180;
+  const hideIdColumn = usableWidth < 1030;
+
+  const pageHorizontalPadding = isCompact ? 10 : isLaptop ? 14 : 20;
+
   const { admin } = useAdminAuth();
   const { eventId: eventIdParam } = useLocalSearchParams<{ eventId?: string }>();
   const openedEventFromQueryRef = useRef<string | null>(null);
@@ -438,31 +451,6 @@ export default function EventsScreen() {
     void reloadEvents();
   }, []);
 
-  // =======================================================
-  // SUMMARY
-  // =======================================================
-
-  const stats = useMemo(
-    () => ({
-      total: events.length,
-
-      pending: events.filter(
-        (event) =>
-          event.status === "Pending"
-      ).length,
-
-      ongoing: events.filter(
-        (event) =>
-          event.status === "Ongoing"
-      ).length,
-
-      completed: events.filter(
-        (event) =>
-          event.status === "Completed"
-      ).length,
-    }),
-    [events]
-  );
 
   // =======================================================
   // FILTERED EVENTS
@@ -572,6 +560,54 @@ export default function EventsScreen() {
       fromDate,
       toDate,
     ]);
+
+  const filteredStats = useMemo(() => {
+    const query = search.trim().toLowerCase();
+
+    // Search and date are shared by the Event Type and Status cards.
+    const baseEvents = events.filter((event) => {
+      const matchesSearch =
+        !query ||
+        event.title.toLowerCase().includes(query) ||
+        event.description.toLowerCase().includes(query) ||
+        event.location.toLowerCase().includes(query) ||
+        event.id.toLowerCase().includes(query);
+
+      const eventDay = new Date(event.date);
+      const dateValue = Number.isNaN(eventDay.getTime())
+        ? event.createdAt
+        : eventDay;
+
+      return (
+        matchesSearch &&
+        isWithinDateRange(dateValue, fromDate, toDate)
+      );
+    });
+
+    const categoryCount =
+      category === "All Types"
+        ? baseEvents.length
+        : baseEvents.filter((event) => event.category === category).length;
+
+    const statusCount =
+      status === "All Statuses"
+        ? baseEvents.length
+        : baseEvents.filter((event) => event.status === status).length;
+
+    return {
+      total: filteredEvents.length,
+      categoryCount,
+      statusCount,
+    };
+  }, [
+    events,
+    filteredEvents,
+    search,
+    category,
+    status,
+    fromDate,
+    toDate,
+  ]);
 
   const totalPages =
     Math.max(
@@ -1078,51 +1114,6 @@ const confirmRejectEvent = async () => {
   setRejectionRemarks("");
 };
 
-  const handleDeleteSelectedEvent = () => {
-    if (!selectedEvent || !admin) return;
-    Alert.alert(
-      "Delete event",
-      `Permanently delete "${selectedEvent.title}"?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: () => {
-            void (async () => {
-              try {
-                await deleteEvent(selectedEvent.id, admin);
-                closeEventDetails();
-                await reloadEvents();
-              } catch (error) {
-                Alert.alert(
-                  "Delete failed",
-                  error instanceof Error ? error.message : "Failed to delete event."
-                );
-              }
-            })();
-          },
-        },
-      ]
-    );
-  };
-
-  const openEditSelectedEvent = () => {
-    if (!selectedEvent) return;
-    setEditingEventId(selectedEvent.id);
-    setNewTitle(selectedEvent.title || "");
-    setNewCategory(selectedEvent.category || "Clean-up");
-    setNewDescription(selectedEvent.description || "");
-    setNewDate(selectedEvent.date || "");
-    setNewTime(selectedEvent.time || "");
-    setNewLocation(selectedEvent.location || "");
-    setNewCapacity(String(selectedEvent.capacity || 50));
-    setNewImageUri(selectedEvent.imageUrl || null);
-    if (selectedEvent.coordinates) {
-      setNewCoordinates(selectedEvent.coordinates);
-    }
-    setAddModalOpen(true);
-  };
 
   // =======================================================
   // RENDER
@@ -1158,8 +1149,11 @@ const confirmRejectEvent = async () => {
 
         <ScrollView
           style={styles.page}
+          onLayout={(event) =>
+            setContentWidth(event.nativeEvent.layout.width)
+          }
           contentContainerStyle={{
-            paddingHorizontal: 20,
+            paddingHorizontal: pageHorizontalPadding,
             paddingTop:
               height * 0.018,
             paddingBottom: 30,
@@ -1175,9 +1169,10 @@ const confirmRejectEvent = async () => {
           {/* =============================================== */}
 
           <View
-            style={
-              styles.headingRow
-            }
+            style={[
+              styles.headingRow,
+              isNarrow && styles.headingRowNarrow,
+            ]}
           >
             <View>
               <Text
@@ -1316,63 +1311,47 @@ const confirmRejectEvent = async () => {
           {/* SUMMARY */}
           {/* =============================================== */}
 
-          {activeTab ===
-            "All Events" && (
+          {activeTab === "All Events" && (
             <View
               style={[
                 styles.cards,
                 {
-                  gap: 28 * s,
+                  gap: isCompact ? 12 : 18,
                 },
               ]}
             >
               <SummaryCard
                 title="Total Events"
-                value={
-                  stats.total
-                }
+                value={filteredStats.total}
                 color="#ffffff"
-                icon={
-                  CalendarCheck
-                }
+                icon={CalendarCheck}
                 iconColor="#0aa65b"
                 scale={s}
               />
 
               <SummaryCard
-                title="Pending Approval"
-                value={
-                  stats.pending
+                title={
+                  category === "All Types"
+                    ? "All Event Types"
+                    : category
                 }
+                value={filteredStats.categoryCount}
                 color="#fff1c9"
-                icon={Clock3}
-                iconColor="#111111"
+                icon={CalendarDays}
+                iconColor="#D99A00"
                 scale={s}
               />
 
               <SummaryCard
-                title="Ongoing Events"
-                value={
-                  stats.ongoing
+                title={
+                  status === "All Statuses"
+                    ? "All Statuses"
+                    : status
                 }
+                value={filteredStats.statusCount}
                 color="#cfe9fb"
-                icon={
-                  LoaderCircle
-                }
+                icon={Clock3}
                 iconColor="#168df0"
-                scale={s}
-              />
-
-              <SummaryCard
-                title="Completed Events"
-                value={
-                  stats.completed
-                }
-                color="#cceecb"
-                icon={
-                  CircleCheckBig
-                }
-                iconColor="#42b94d"
                 scale={s}
               />
             </View>
@@ -1387,15 +1366,17 @@ const confirmRejectEvent = async () => {
               styles.filterPanel,
               {
                 padding: 14 * s,
+                flexWrap: isLaptop ? "wrap" : "nowrap",
               },
             ]}
           >
             {/* SEARCH */}
 
             <View
-              style={
-                styles.searchBox
-              }
+              style={[
+                styles.searchBox,
+                isCompact && styles.searchBoxCompact,
+              ]}
             >
               <TextInput
                 value={search}
@@ -1428,9 +1409,10 @@ const confirmRejectEvent = async () => {
             {/* CATEGORY */}
 
             <View
-              style={
-                styles.dropdownContainer
-              }
+              style={[
+                styles.dropdownContainer,
+                isCompact && styles.dropdownContainerCompact,
+              ]}
             >
               <TouchableOpacity
                 activeOpacity={0.82}
@@ -1565,9 +1547,10 @@ const confirmRejectEvent = async () => {
             {/* STATUS */}
 
             <View
-              style={
-                styles.dropdownContainer
-              }
+              style={[
+                styles.dropdownContainer,
+                isCompact && styles.dropdownContainerCompact,
+              ]}
             >
               <TouchableOpacity
                 activeOpacity={0.82}
@@ -1728,8 +1711,8 @@ const confirmRejectEvent = async () => {
                   setPage(1);
                 }}
                 style={{
-                  flex: 1.5,
-                  minWidth: 220,
+                  flex: isLaptop ? 1 : 1.5,
+                  minWidth: isCompact ? 280 : 320,
                 }}
               />
             ) : (
@@ -1818,31 +1801,18 @@ const confirmRejectEvent = async () => {
               styles.tablePanel
             }
           >
-            <ScrollView
-              horizontal={
-                width < 1100
-              }
-              showsHorizontalScrollIndicator={
-                width < 1100
-              }
-            >
-              <View
-                style={[
-                  styles.table,
-                  width >= 1100
-                    ? styles.tableFullWidth
-                    : null,
-                ]}
-              >
+            <View style={styles.table}>
                 {/* TABLE HEADER */}
 
                 <View
-                  style={
-                    styles.tableHeader
-                  }
+                  style={[
+                    styles.tableHeader,
+                    denseTable && styles.tableHeaderCompact,
+                  ]}
                 >
                   {activeTab ===
-                    "All Events" && (
+                    "All Events" &&
+                    !hideIdColumn && (
                     <Text
                       style={[
                         styles.th,
@@ -1913,30 +1883,27 @@ const confirmRejectEvent = async () => {
                     </Text>
                   )}
 
-                  <Text
+                  <View
                     style={[
-                      styles.th,
                       styles.participantsColumn,
+                      styles.headerCenteredColumn,
                     ]}
                   >
-                    Participants
-                  </Text>
+                    <Text style={styles.th}>
+                      Participants
+                    </Text>
+                  </View>
 
-                  <Text
+                  <View
                     style={[
-                      styles.th,
                       styles.actionColumn,
-                      {
-                        transform: [
-                          {
-                            translateX: 50,
-                          },
-                        ],
-                      },
+                      styles.headerCenteredColumn,
                     ]}
                   >
-                    Action
-                  </Text>
+                    <Text style={styles.th}>
+                      Action
+                    </Text>
+                  </View>
                 </View>
 
                 {/* TABLE BODY */}
@@ -1945,15 +1912,15 @@ const confirmRejectEvent = async () => {
                   visibleEvents.map(
                     (event) => (
                       <View
-                        key={
-                          event.id
-                        }
-                        style={
-                          styles.tableRow
-                        }
+                        key={event.id}
+                        style={[
+                          styles.tableRow,
+                          denseTable && styles.tableRowCompact,
+                        ]}
                       >
                         {activeTab ===
-                          "All Events" && (
+                          "All Events" &&
+                          !hideIdColumn && (
                           <Text
                             style={[
                               styles.cellText,
@@ -2205,41 +2172,11 @@ const confirmRejectEvent = async () => {
                             styles.participantsColumn
                           }
                         >
-                          <Text
-                            style={[
-                              styles.smallText,
-                              {
-                                transform:
-                                  [
-                                    {
-                                      translateX: 25,
-                                    },
-                                  ],
-                              },
-                            ]}
-                          >
-                            {
-                              event.participants
-                            }{" "}
-                            /{" "}
-                            {
-                              event.capacity
-                            }
+                          <Text style={styles.participantValue}>
+                            {event.participants} / {event.capacity}
                           </Text>
 
-                          <Text
-                            style={[
-                              styles.smallText,
-                              {
-                                transform:
-                                  [
-                                    {
-                                      translateX: 18,
-                                    },
-                                  ],
-                              },
-                            ]}
-                          >
+                          <Text style={styles.participantSubtext}>
                             Expected
                           </Text>
                         </View>
@@ -2273,64 +2210,10 @@ const confirmRejectEvent = async () => {
                                 styles.viewButtonText
                               }
                             >
-                              View Event
+                              {isNarrow ? "View" : "View Event"}
                             </Text>
                           </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[styles.viewButton, { marginTop: 6 }]}
-                            onPress={() => {
-                              setSelectedEvent(event);
-                              setEditingEventId(event.id);
-                              setNewTitle(event.title || "");
-                              setNewCategory(event.category || "Clean-up");
-                              setNewDescription(event.description || "");
-                              setNewDate(event.date || "");
-                              setNewTime(event.time || "");
-                              setNewLocation(event.location || "");
-                              setNewCapacity(String(event.capacity || 50));
-                              setNewImageUri(event.imageUrl || null);
-                              if (event.coordinates) setNewCoordinates(event.coordinates);
-                              setAddModalOpen(true);
-                            }}
-                          >
-                            <Text style={styles.viewButtonText}>Edit</Text>
-                          </TouchableOpacity>
-                          <TouchableOpacity
-                            style={[styles.viewButton, { marginTop: 6 }]}
-                            onPress={() => {
-                              if (!admin) return;
-                              Alert.alert(
-                                "Delete event",
-                                `Permanently delete "${event.title}"?`,
-                                [
-                                  { text: "Cancel", style: "cancel" },
-                                  {
-                                    text: "Delete",
-                                    style: "destructive",
-                                    onPress: () => {
-                                      void (async () => {
-                                        try {
-                                          await deleteEvent(event.id, admin);
-                                          await reloadEvents();
-                                        } catch (error) {
-                                          Alert.alert(
-                                            "Delete failed",
-                                            error instanceof Error
-                                              ? error.message
-                                              : "Failed to delete event."
-                                          );
-                                        }
-                                      })();
-                                    },
-                                  },
-                                ]
-                              );
-                            }}
-                          >
-                            <Text style={[styles.viewButtonText, { color: "#b42318" }]}>
-                              Delete
-                            </Text>
-                          </TouchableOpacity>
+
                         </View>
                       </View>
                     )
@@ -2352,8 +2235,7 @@ const confirmRejectEvent = async () => {
                     </Text>
                   </View>
                 )}
-              </View>
-            </ScrollView>
+            </View>
 
             {/* PAGINATION */}
 
@@ -3499,33 +3381,9 @@ const confirmRejectEvent = async () => {
                   </TouchableOpacity>
                 )}
 
-                <TouchableOpacity
-                  style={[
-                    styles.saveButton,
-                    isModerating && {
-                      opacity: 0.7,
-                    },
-                  ]}
-                  onPress={openEditSelectedEvent}
-                  disabled={isModerating}
-                >
-                  <Text style={styles.saveText}>Edit Event</Text>
-                </TouchableOpacity>
+                
 
-                <TouchableOpacity
-                  style={[
-                    styles.cancelButton,
-                    isModerating && {
-                      opacity: 0.6,
-                    },
-                  ]}
-                  onPress={handleDeleteSelectedEvent}
-                  disabled={isModerating}
-                >
-                  <Text style={[styles.cancelText, { color: "#b42318" }]}>
-                    Delete Event
-                  </Text>
-                </TouchableOpacity>
+                
 
                 <TouchableOpacity
                   style={[
@@ -4752,7 +4610,7 @@ const webPickerStyle = {
   boxSizing:
     "border-box" as const,
   fontFamily:
-    "Montserrat, sans-serif",
+    "Montserrat_700Bold",
 };
 
 // =========================================================
@@ -4876,12 +4734,15 @@ const styles =
     },
 
     headingRow: {
-      flexDirection:
-        "row",
-      justifyContent:
-        "space-between",
-      alignItems:
-        "center",
+      flexDirection: "row",
+      justifyContent: "space-between",
+      alignItems: "center",
+      gap: 12,
+    },
+
+    headingRowNarrow: {
+      flexWrap: "wrap",
+      alignItems: "flex-start",
     },
 
     pageTitle: {
@@ -4963,14 +4824,15 @@ const styles =
     // =====================================================
 
     cards: {
-      flexDirection:
-        "row",
-      marginTop: 28,
+      flexDirection: "row",
+      flexWrap: "wrap",
+      marginTop: 22,
+      width: "100%",
     },
 
     summaryCard: {
       flex: 1,
-      minWidth: 180,
+      minWidth: 220,
       borderWidth: 1,
       borderColor:
         "#d7d7d7",
@@ -5011,10 +4873,10 @@ const styles =
     // =====================================================
 
     filterPanel: {
-      marginTop: 22,
-      flexDirection:
-        "row",
-      gap: 14,
+      marginTop: 18,
+      flexDirection: "row",
+      width: "100%",
+      gap: 12,
       borderWidth: 1,
       borderColor:
         "#d3d3d3",
@@ -5041,9 +4903,15 @@ const styles =
         "center",
     },
 
+    searchBoxCompact: {
+      minWidth: 220,
+      flexBasis: 260,
+    },
+
     searchInput: {
       flex: 1,
       color: "#222",
+      fontFamily: "Montserrat_700Bold",
       outlineStyle:
         "none",
     } as never,
@@ -5136,96 +5004,111 @@ const styles =
     },
 
     table: {
-      minWidth: 980,
-    },
-
-    tableFullWidth: {
-      minWidth: "100%",
       width: "100%",
+      minWidth: 0,
     },
 
     tableHeader: {
       height: 50,
-      flexDirection:
-        "row",
-      alignItems:
-        "center",
+      flexDirection: "row",
+      alignItems: "center",
       borderBottomWidth: 1,
-      borderBottomColor:
-        "#d7d7d7",
-      paddingHorizontal: 16,
+      borderBottomColor: "#d7d7d7",
+      paddingHorizontal: 8,
+      width: "100%",
+    },
+
+    tableHeaderCompact: {
+      paddingHorizontal: 8,
     },
 
     th: {
-      fontSize: 14,
+      fontSize: 12,
       color: "#202020",
-      fontFamily:
-        "Montserrat_700Bold",
+      fontFamily: "Montserrat_700Bold",
+      flexShrink: 1,
     },
 
     tableRow: {
       minHeight: 78,
-      flexDirection:
-        "row",
-      alignItems:
-        "center",
+      flexDirection: "row",
+      alignItems: "center",
       borderBottomWidth: 1,
-      borderBottomColor:
-        "#dddddd",
-      paddingHorizontal: 16,
+      borderBottomColor: "#dddddd",
+      paddingHorizontal: 8,
+      width: "100%",
+    },
+
+    tableRowCompact: {
+      minHeight: 72,
+      paddingHorizontal: 8,
     },
 
     idColumn: {
-      flex: 0.8,
-      minWidth: 90,
+      flex: 0.65,
+      minWidth: 0,
+      paddingHorizontal: 10,
     },
 
     detailsColumn: {
-      flex: 2,
-      minWidth: 240,
+      flex: 2.1,
+      minWidth: 0,
+      paddingHorizontal: 10,
     },
 
     submittedColumn: {
-      flex: 1.3,
-      minWidth: 150,
+      flex: 1.2,
+      minWidth: 0,
+      paddingHorizontal: 10,
     },
 
     categoryColumn: {
-      flex: 1.2,
-      minWidth: 130,
+      flex: 1.05,
+      minWidth: 0,
+      paddingHorizontal: 10,
     },
 
     dateColumn: {
-      flex: 1.2,
-      minWidth: 130,
+      flex: 1.05,
+      minWidth: 0,
+      paddingHorizontal: 10,
     },
 
     locationColumn: {
-      flex: 1,
-      minWidth: 300,
+      flex: 1.65,
+      minWidth: 0,
+      paddingHorizontal: 10,
     },
 
     statusColumn: {
-      flex: 1,
-      minWidth: 80,
+      flex: 0.95,
+      minWidth: 0,
+      paddingHorizontal: 10,
     },
 
     participantsColumn: {
-      flex: 1,
-      minWidth: 110,
+      flex: 0.95,
+      minWidth: 0,
+      paddingHorizontal: 10,
+      alignItems: "center",
+      justifyContent: "center",
     },
 
     actionColumn: {
-      flex: 1,
-      minWidth: 130,
-      alignItems:
-        "center",
-      justifyContent:
-        "center",
+      flex: 1.05,
+      minWidth: 0,
+      paddingHorizontal: 10,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+
+    headerCenteredColumn: {
+      alignItems: "center",
+      justifyContent: "center",
     },
 
     cellText: {
-      fontSize: 14,
+      fontSize: 12,
       fontFamily:
         "Montserrat_700Bold",
       color: "#242424",
@@ -5283,15 +5166,16 @@ const styles =
     },
 
     eventTitle: {
-      fontSize: 14,
+      fontSize: 12,
       fontFamily:
         "Montserrat_700Bold",
       color: "#1c1c1c",
     },
 
     eventDescription: {
-      fontSize: 12,
+      fontSize: 10,
       color: "#555",
+      fontFamily: "Montserrat_700Bold",
       lineHeight: 12,
       marginTop: 2,
     },
@@ -5312,34 +5196,53 @@ const styles =
     },
 
     dateText: {
-      fontSize: 13,
+      fontSize: 11,
       fontFamily:
         "Montserrat_700Bold",
       color: "#222",
     },
 
     smallText: {
-      fontSize: 12,
+      fontSize: 10,
       color: "#555",
+      fontFamily: "Montserrat_700Bold",
+      marginTop: 2,
+    },
+
+    participantValue: {
+      fontSize: 10,
+      color: "#333333",
+      fontFamily: "Montserrat_700Bold",
+      textAlign: "center",
+    },
+
+    participantSubtext: {
+      fontSize: 10,
+      color: "#555555",
+      fontFamily: "Montserrat_700Bold",
+      textAlign: "center",
       marginTop: 2,
     },
 
     viewButton: {
+      minWidth: 90,
+      maxWidth: "100%",
       borderWidth: 1,
       borderColor:
         "#4b9b52",
       borderRadius: 6,
       paddingVertical: 5,
-      paddingHorizontal: 7,
+      paddingHorizontal: 6,
       flexDirection:
         "row",
       alignItems:
         "center",
       gap: 4,
+      justifyContent: "center",
     },
 
     viewButtonText: {
-      fontSize: 12,
+      fontSize: 10,
       color: "#34733B",
       fontFamily:
         "Montserrat_700Bold",
@@ -5367,12 +5270,12 @@ const styles =
     pagination: {
       minHeight: 52,
       paddingHorizontal: 16,
-      flexDirection:
-        "row",
-      alignItems:
-        "center",
-      justifyContent:
-        "space-between",
+      paddingVertical: 8,
+      flexDirection: "row",
+      flexWrap: "wrap",
+      gap: 10,
+      alignItems: "center",
+      justifyContent: "space-between",
     },
 
     paginationText: {
@@ -5475,7 +5378,7 @@ rejectModalDescription: {
 
   color: "#555555",
 
-  fontFamily: "Montserrat_500Medium",
+  fontFamily: "Montserrat_700Bold",
 
   marginBottom: 18,
 },
@@ -5544,7 +5447,7 @@ rejectDropdownText: {
 
   color: "#222222",
 
-  fontFamily: "Montserrat_500Medium",
+  fontFamily: "Montserrat_700Bold",
 
   marginRight: 10,
 },
@@ -5611,7 +5514,7 @@ rejectDropdownOptionText: {
 
   color: "#222222",
 
-  fontFamily: "Montserrat_500Medium",
+  fontFamily: "Montserrat_700Bold",
 },
 
 rejectDropdownOptionTextSelected: {
@@ -5639,7 +5542,7 @@ rejectRemarksInput: {
 
   color: "#222222",
 
-  fontFamily: "Montserrat_500Medium",
+  fontFamily: "Montserrat_700Bold",
 
   outlineStyle: "none",
 } as any,
@@ -5792,6 +5695,7 @@ rejectConfirmText: {
     modalSubtitle: {
       fontSize: 12,
       color: "#777",
+      fontFamily: "Montserrat_700Bold",
       marginTop: 3,
     },
 
@@ -5825,6 +5729,7 @@ rejectConfirmText: {
 
     input: {
       height: 44,
+      fontFamily: "Montserrat_700Bold",
       borderWidth: 1,
       borderColor:
         "#cfcfcf",
@@ -5975,6 +5880,7 @@ rejectConfirmText: {
     uploadHint: {
       fontSize: 9,
       color: "#777",
+      fontFamily: "Montserrat_700Bold",
       marginTop: 2,
     },
 
@@ -6127,6 +6033,7 @@ rejectConfirmText: {
 
     detailsDescription: {
       fontSize: 14,
+      fontFamily: "Montserrat_700Bold",
       lineHeight: 20,
       color: "#555",
       marginBottom: 16,
@@ -6171,6 +6078,11 @@ rejectConfirmText: {
       zIndex: 100,
       overflow:
         "visible",
+    },
+
+    dropdownContainerCompact: {
+      minWidth: 180,
+      flexBasis: 190,
     },
 
     dropdownMenu: {
@@ -6330,7 +6242,7 @@ rejectConfirmText: {
       color: "#667066",
       marginTop: 5,
       fontFamily:
-        "Montserrat_600SemiBold",
+        "Montserrat_700Bold",
     },
 
     pendingEventHeading: {
@@ -6421,7 +6333,7 @@ rejectConfirmText: {
       color: "#666666",
       fontSize: 14,
       fontFamily:
-        "Montserrat_600SemiBold",
+        "Montserrat_700Bold",
     },
 
     pendingInfoValueBox: {
@@ -6433,7 +6345,7 @@ rejectConfirmText: {
       color: "#444444",
       fontSize: 14,
       lineHeight: 18,
-      fontFamily: "Montserrat_600SemiBold",
+      fontFamily: "Montserrat_700Bold",
       paddingLeft: 25,
     },
 
@@ -6441,7 +6353,7 @@ rejectConfirmText: {
       color: "#555555",
       fontSize: 12,
       lineHeight: 15,
-      fontFamily: "Montserrat_500Medium",
+      fontFamily: "Montserrat_700Bold",
       paddingLeft: 25,
     },
 
@@ -6499,7 +6411,7 @@ rejectConfirmText: {
       color: "#777777",
       marginTop: 2,
       fontFamily:
-        "Montserrat_500Medium",
+        "Montserrat_700Bold",
     },
 
     // ABOUT
@@ -6520,7 +6432,7 @@ rejectConfirmText: {
       fontSize: 11,
       lineHeight: 17,
       fontFamily:
-        "Montserrat_500Medium",
+        "Montserrat_700Bold",
     },
 
     // MAP
@@ -6584,7 +6496,7 @@ rejectConfirmText: {
       color: "#555555",
       fontSize: 9,
       fontFamily:
-        "Montserrat_500Medium",
+        "Montserrat_700Bold",
     },
 
     // ACTIONS
