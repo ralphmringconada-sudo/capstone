@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState } from "react";
+import { createElement, useMemo, useRef, useState } from "react";
 import {
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -28,7 +29,6 @@ import {
 import { auth } from "@/config/firebase";
 import AdminLayout from "../components/AdminLayout";
 import DashboardCard from "../components/DashboardCard";
-import DateRangeFilter from "@/components/DateRangeFilter";
 import { useAdminAuth } from "@/context/AdminAuthContext";
 import { useAdminData } from "@/hooks/useAdminData";
 import {
@@ -615,19 +615,24 @@ const filteredUserStats = useMemo(() => {
   />
 </View>
 
-        <View style={[styles.filterPanel, { marginTop: height * 0.025, padding: 14 * s }]}>
+        <View
+          style={[
+            styles.filterPanel,
+            { marginTop: height * 0.025 },
+          ]}
+        >
           <View style={styles.searchBox}>
             <TextInput
               placeholder="Search users..."
               placeholderTextColor="#777"
-              style={[styles.searchInput, { fontSize: 16 * s }]}
+              style={styles.searchInput}
               value={search}
               onChangeText={(value) => {
                 setSearch(value);
                 setUserPage(1);
               }}
             />
-            <Search size={20 * s} color="#000" />
+            <Search size={17} color="#555" />
           </View>
 
           <FilterDropdown
@@ -638,7 +643,6 @@ const filteredUserStats = useMemo(() => {
                 ? ["All Roles", "User", "Admin", "Super Admin"]
                 : ["All Roles", "User"]
             }
-            s={s}
             isOpen={openFilter === "role"}
             onToggle={() =>
               setOpenFilter((current) =>
@@ -656,7 +660,6 @@ const filteredUserStats = useMemo(() => {
             label="Status"
             value={statusFilter}
             options={["All Statuses", "Active", "Flagged"]}
-            s={s}
             isOpen={openFilter === "status"}
             onToggle={() =>
               setOpenFilter((current) =>
@@ -670,7 +673,7 @@ const filteredUserStats = useMemo(() => {
             }}
           />
 
-          <DateRangeFilter
+          <DateRangeBox
             label="Date Registered"
             fromDate={fromDate}
             toDate={toDate}
@@ -682,7 +685,6 @@ const filteredUserStats = useMemo(() => {
               setToDate(value);
               setUserPage(1);
             }}
-            style={{ flex: 1.6 }}
           />
 
           <TouchableOpacity
@@ -697,8 +699,8 @@ const filteredUserStats = useMemo(() => {
               setUserPage(1);
             }}
           >
-            <Filter size={14 * s} color="#34733B" />
-            <Text style={[styles.buttonText, { fontSize: 16 * s }]}>Reset</Text>
+            <Filter size={16} color="#43884C" />
+            <Text style={styles.buttonText}>Reset</Text>
           </TouchableOpacity>
         </View>
 
@@ -1463,7 +1465,6 @@ function FilterDropdown({
   label,
   value,
   options,
-  s,
   isOpen,
   onToggle,
   onClose,
@@ -1472,7 +1473,6 @@ function FilterDropdown({
   label: string;
   value: string;
   options: string[];
-  s: number;
   isOpen: boolean;
   onToggle: () => void;
   onClose: () => void;
@@ -1496,12 +1496,7 @@ function FilterDropdown({
         ]}
         onPress={onToggle}
       >
-        <Text
-          style={[
-            styles.filterLabel,
-            { fontSize: 11 * s },
-          ]}
-        >
+        <Text style={styles.filterLabel}>
           {label}
         </Text>
 
@@ -1510,7 +1505,6 @@ function FilterDropdown({
             numberOfLines={1}
             style={[
               styles.filterValue,
-              { fontSize: 16 * s },
               isOpen && styles.filterValueOpen,
             ]}
           >
@@ -1518,7 +1512,7 @@ function FilterDropdown({
           </Text>
 
           <ChevronDown
-            size={16 * s}
+            size={16}
             color={isOpen ? "#34733B" : "#333333"}
             strokeWidth={2}
             style={{
@@ -1554,7 +1548,6 @@ function FilterDropdown({
                 <Text
                   style={[
                     styles.dropdownText,
-                    { fontSize: 16 * s },
                     selected && styles.dropdownTextSelected,
                   ]}
                 >
@@ -1563,7 +1556,7 @@ function FilterDropdown({
 
                 {selected ? (
                   <Check
-                    size={16 * s}
+                    size={16}
                     color="#34733B"
                     strokeWidth={2.5}
                   />
@@ -1576,6 +1569,105 @@ function FilterDropdown({
     </View>
   );
 }
+
+
+// =========================================================
+// DATE RANGE FILTER
+// Matches the Events page filter design
+// =========================================================
+
+function DateRangeBox({
+  label,
+  fromDate,
+  toDate,
+  onChangeFrom,
+  onChangeTo,
+}: {
+  label: string;
+  fromDate: string;
+  toDate: string;
+  onChangeFrom: (value: string) => void;
+  onChangeTo: (value: string) => void;
+}) {
+  return (
+    <View style={styles.dateRangeBox}>
+      <Text style={styles.dateRangeLabel}>
+        {label}
+      </Text>
+
+      <View style={styles.dateRangeInputRow}>
+        <View style={styles.dateRangeSingleBox}>
+          {Platform.OS === "web"
+            ? createElement("input", {
+                type: "date",
+                value: fromDate,
+                "aria-label": "From date",
+                onChange: (event: {
+                  target: {
+                    value: string;
+                  };
+                }) => onChangeFrom(event.target.value),
+                style: dateRangeWebInputStyle,
+              })
+            : (
+              <TextInput
+                value={fromDate}
+                onChangeText={onChangeFrom}
+                placeholder="From date"
+                placeholderTextColor="#888888"
+                style={styles.dateRangeNativeInput}
+              />
+            )}
+        </View>
+
+        <Text style={styles.dateRangeSeparator}>–</Text>
+
+        <View style={styles.dateRangeSingleBox}>
+          {Platform.OS === "web"
+            ? createElement("input", {
+                type: "date",
+                value: toDate,
+                min: fromDate || undefined,
+                "aria-label": "To date",
+                onChange: (event: {
+                  target: {
+                    value: string;
+                  };
+                }) => onChangeTo(event.target.value),
+                style: dateRangeWebInputStyle,
+              })
+            : (
+              <TextInput
+                value={toDate}
+                onChangeText={onChangeTo}
+                placeholder="To date"
+                placeholderTextColor="#888888"
+                style={styles.dateRangeNativeInput}
+              />
+            )}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+const dateRangeWebInputStyle = {
+  width: "100%",
+  height: 23,
+  minWidth: 0,
+  maxWidth: "100%",
+  border: "none",
+  outline: "none",
+  padding: 0,
+  margin: 0,
+  fontSize: 10,
+  lineHeight: "23px",
+  color: "#252525",
+  backgroundColor: "transparent",
+  boxSizing: "border-box" as const,
+  fontFamily: "Montserrat_700Bold",
+  cursor: "pointer",
+};
 
 /**
  * Purpose: Renders a consistent labeled field for administrator creation forms.
@@ -1700,11 +1792,12 @@ const styles = StyleSheet.create({
   filterPanel: {
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#D3D3D3",
-    borderRadius: 9,
+    borderColor: "#D9DEDA",
+    borderRadius: 10,
+    padding: 12,
     flexDirection: "row",
     alignItems: "center",
-    gap: 14,
+    gap: 10,
     flexWrap: "wrap",
     position: "relative",
     zIndex: 50,
@@ -1712,22 +1805,27 @@ const styles = StyleSheet.create({
   },
 
   searchBox: {
-    flex: 1.15,
-    minWidth: 180,
-    height: 54,
+    height: 52,
+    flexGrow: 1.35,
+    flexShrink: 1,
+    flexBasis: 250,
+    minWidth: 220,
     borderWidth: 1,
-    borderColor: "#DDDDDD",
+    borderColor: "#D9DEDA",
     borderRadius: 8,
-    backgroundColor: "#F4F4F4",
-    paddingHorizontal: 14,
+    backgroundColor: "#F7F8F7",
+    paddingHorizontal: 13,
     flexDirection: "row",
     alignItems: "center",
+    gap: 8,
   },
 
   searchInput: {
     flex: 1,
+    minWidth: 0,
+    fontSize: 12,
     fontFamily: "Montserrat_700Bold",
-    color: "#000",
+    color: "#252525",
     outlineStyle: "none" as any,
   },
 
@@ -1737,8 +1835,11 @@ const styles = StyleSheet.create({
   // =====================================================
 
   dropdownContainer: {
-    flex: 1,
-    minWidth: 150,
+    height: 52,
+    flexGrow: 0.8,
+    flexShrink: 1,
+    flexBasis: 165,
+    minWidth: 155,
     position: "relative",
     zIndex: 100,
     overflow: "visible",
@@ -1750,11 +1851,11 @@ const styles = StyleSheet.create({
 
   filterBox: {
     width: "100%",
-    height: 54,
+    height: 52,
     borderRadius: 8,
-    backgroundColor: "#F4F4F4",
+    backgroundColor: "#F7F8F7",
     borderWidth: 1,
-    borderColor: "#DDDDDD",
+    borderColor: "#D9DEDA",
     paddingHorizontal: 12,
     paddingVertical: 6,
     justifyContent: "center",
@@ -1763,17 +1864,19 @@ const styles = StyleSheet.create({
 
   filterBoxOpen: {
     borderColor: "#34733B",
-    backgroundColor: "#F8FBF7",
+    backgroundColor: "#F7FBF5",
   },
 
   filterLabel: {
     fontFamily: "Montserrat_700Bold",
-    color: "#555555",
-    marginBottom: 1,
+    color: "#686F68",
+    marginBottom: 2,
+    fontSize: 10,
+    lineHeight: 12,
   },
 
   filterValueRow: {
-    minHeight: 18,
+    minHeight: 20,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -1782,7 +1885,9 @@ const styles = StyleSheet.create({
 
   filterValue: {
     flex: 1,
-    flexShrink: 1,
+    minWidth: 0,
+    fontSize: 12,
+    lineHeight: 16,
     fontFamily: "Montserrat_700Bold",
     color: "#252525",
   },
@@ -1793,7 +1898,7 @@ const styles = StyleSheet.create({
 
   dropdownMenu: {
     position: "absolute",
-    top: 58,
+    top: 56,
     left: 0,
     right: 0,
     backgroundColor: "#FFFFFF",
@@ -1831,6 +1936,7 @@ const styles = StyleSheet.create({
 
   dropdownText: {
     flex: 1,
+    fontSize: 13,
     fontFamily: "Montserrat_700Bold",
     color: "#222222",
   },
@@ -1839,21 +1945,91 @@ const styles = StyleSheet.create({
     color: "#34733B",
   },
 
-  smallButton: {
-    height: 38,
-    minWidth: 82,
-    paddingHorizontal: 13,
-    borderWidth: 1,
-    borderColor: "#86BE8D",
+  dateRangeBox: {
+    height: 52,
+    flexGrow: 0,
+    flexShrink: 1,
+    flexBasis: 300,
+    minWidth: 286,
+    maxWidth: 320,
     borderRadius: 8,
+    backgroundColor: "#F7F8F7",
+    borderWidth: 1,
+    borderColor: "#D9DEDA",
+    paddingHorizontal: 10,
+    paddingTop: 4,
+    paddingBottom: 5,
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+
+  dateRangeLabel: {
+    fontSize: 10,
+    lineHeight: 12,
+    color: "#686F68",
+    fontFamily: "Montserrat_700Bold",
+    marginBottom: 2,
+  },
+
+  dateRangeInputRow: {
+    height: 27,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    gap: 5,
+  },
+
+  dateRangeSingleBox: {
+    width: 128,
+    height: 27,
+    borderWidth: 1,
+    borderColor: "#CDD3CD",
+    borderRadius: 6,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 7,
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+
+  dateRangeSeparator: {
+    width: 10,
+    textAlign: "center",
+    fontSize: 11,
+    lineHeight: 14,
+    color: "#656B65",
+    fontFamily: "Montserrat_700Bold",
+  },
+
+  dateRangeNativeInput: {
+    width: "100%",
+    minWidth: 0,
+    height: 23,
+    padding: 0,
+    margin: 0,
+    borderWidth: 0,
+    fontSize: 10,
+    color: "#252525",
+    fontFamily: "Montserrat_700Bold",
+  },
+
+  smallButton: {
+    width: 94,
+    height: 52,
+    flexShrink: 0,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: "#D9DEDA",
+    borderRadius: 8,
+    backgroundColor: "#F7F8F7",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 5,
+    gap: 6,
     cursor: "pointer",
   } as any,
 
   buttonText: {
+    fontSize: 12,
     fontFamily: "Montserrat_700Bold",
     color: "#34733B",
   },

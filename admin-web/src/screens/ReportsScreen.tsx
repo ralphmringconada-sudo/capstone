@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { createElement, useEffect, useMemo, useState } from "react";
 import {
   ScrollView,
   StyleSheet,
@@ -9,6 +9,7 @@ import {
   useWindowDimensions,
   Image,
   Modal,
+  Platform,
 } from "react-native";
 import {
   ClipboardList,
@@ -22,7 +23,6 @@ import {
 import { router } from "expo-router";
 import AdminLayout from "../components/AdminLayout";
 import DashboardCard from "../components/DashboardCard";
-import DateRangeFilter from "@/components/DateRangeFilter";
 import { useAdminData } from "@/hooks/useAdminData";
 import { resolveReportImageUrls } from "@/services/reportImageService";
 import { isWithinDateRange } from "@/utils/dateRange";
@@ -60,6 +60,10 @@ export default function ReportsScreen() {
   const [viewerReport, setViewerReport] = useState<Report | null>(null);
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
 
+  // Show a maximum of 5 reports per page.
+  const reportsPerPage = 5;
+  const [reportPage, setReportPage] = useState(1);
+
   const filteredReports = useMemo(() => {
     const queryText = search.trim().toLowerCase();
     return reports.filter((report) => {
@@ -77,6 +81,25 @@ export default function ReportsScreen() {
       return matchesSearch && matchesCategory && matchesStatus && matchesDate;
     });
   }, [reports, search, category, status, fromDate, toDate]);
+
+  const reportPageCount = Math.max(
+    1,
+    Math.ceil(filteredReports.length / reportsPerPage),
+  );
+
+  const currentReportPage = Math.min(
+    reportPage,
+    reportPageCount,
+  );
+
+  const visibleReports = filteredReports.slice(
+    (currentReportPage - 1) * reportsPerPage,
+    currentReportPage * reportsPerPage,
+  );
+
+  useEffect(() => {
+    setReportPage(1);
+  }, [search, category, status, fromDate, toDate]);
 
   const filteredStats = useMemo(() => {
   const queryText = search.trim().toLowerCase();
@@ -148,12 +171,12 @@ export default function ReportsScreen() {
   };
 
   useEffect(() => {
-    // Resolve previews for only the first visible records to bound initial image work.
-    filteredReports.slice(0, 20).forEach((report) => {
+    // Resolve previews only for the reports shown on the current page.
+    visibleReports.forEach((report) => {
       ensureThumbnail(report);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredReports]);
+  }, [visibleReports]);
 
   return (
     <AdminLayout activePage="Reports">
@@ -213,23 +236,27 @@ export default function ReportsScreen() {
     iconColor="#259BEF"
   />
 </View>
-      <View style={[styles.filterPanel, { marginTop: height * 0.025, padding: 14 * s }]}>
+      <View
+        style={[
+          styles.filterPanel,
+          { marginTop: height * 0.025 },
+        ]}
+      >
           <View style={styles.searchBox}>
             <TextInput
               placeholder="Search reports..."
               placeholderTextColor="#777"
-              style={[styles.searchInput, { fontSize: 15 * s }]}
+              style={styles.searchInput}
               value={search}
               onChangeText={setSearch}
             />
-            <Search size={20 * s} color="#000" />
+            <Search size={17} color="#555" />
           </View>
 
           <FilterDropdown
             label="Category"
             value={category}
             options={CATEGORIES}
-            s={s}
             isOpen={openFilter === "category"}
             onToggle={() =>
               setOpenFilter((current) =>
@@ -246,7 +273,6 @@ export default function ReportsScreen() {
             label="Status"
             value={status}
             options={STATUSES}
-            s={s}
             isOpen={openFilter === "status"}
             onToggle={() =>
               setOpenFilter((current) =>
@@ -259,7 +285,7 @@ export default function ReportsScreen() {
             }}
           />
 
-          <DateRangeFilter
+          <DateRangeBox
             label="Date Reported"
             fromDate={fromDate}
             toDate={toDate}
@@ -267,22 +293,20 @@ export default function ReportsScreen() {
             onChangeTo={setToDate}
           />
 
-          <View style={styles.buttonColumn}>
-            <TouchableOpacity
-              style={styles.smallButton}
-              onPress={() => {
-                setSearch("");
-                setCategory("All Categories");
-                setStatus("All Statuses");
-                setOpenFilter(null);
-                setFromDate("");
-                setToDate("");
-              }}
-            >
-              <Filter size={14 * s} color="#34733B" />
-              <Text style={[styles.buttonText, { fontSize: 14 * s }]}>Reset</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            style={styles.smallButton}
+            onPress={() => {
+              setSearch("");
+              setCategory("All Categories");
+              setStatus("All Statuses");
+              setOpenFilter(null);
+              setFromDate("");
+              setToDate("");
+            }}
+          >
+            <Filter size={16} color="#43884C" />
+            <Text style={styles.buttonText}>Reset</Text>
+          </TouchableOpacity>
         </View>
 
         <View style={[styles.tablePanel, { marginTop: height * 0.02 }]}>
@@ -299,7 +323,7 @@ export default function ReportsScreen() {
             <Text style={[styles.th, styles.actionCol, { fontSize: 18 * s, transform: [{ translateX: 40 }] }]}>Action</Text>
           </View>
 
-          {filteredReports.map((report) => {
+          {visibleReports.map((report) => {
             const submitted = formatDateTime(report.createdAt);
             return (
               <View key={report.id} style={[styles.tableRow, { minHeight: 88 * s }]}>
@@ -386,8 +410,84 @@ export default function ReportsScreen() {
 
           <View style={[styles.paginationRow, { padding: 18 * s }]}>
             <Text style={[styles.showing, { fontSize: 16 * s }]}>
-              Showing {filteredReports.length} of {stats.totalReports} reports
+              Showing{" "}
+              {filteredReports.length
+                ? (currentReportPage - 1) * reportsPerPage + 1
+                : 0}{" "}
+              to{" "}
+              {Math.min(
+                currentReportPage * reportsPerPage,
+                filteredReports.length,
+              )}{" "}
+              of {filteredReports.length} reports
             </Text>
+
+            <View style={styles.paginationButtons}>
+              <TouchableOpacity
+                style={styles.paginationButton}
+                disabled={currentReportPage === 1}
+                onPress={() =>
+                  setReportPage((value) =>
+                    Math.max(1, value - 1)
+                  )
+                }
+              >
+                <Text
+                  style={[
+                    styles.paginationText,
+                    currentReportPage === 1 &&
+                      styles.paginationTextDisabled,
+                  ]}
+                >
+                  ‹
+                </Text>
+              </TouchableOpacity>
+
+              {Array.from(
+                { length: reportPageCount },
+                (_, index) => index + 1,
+              ).map((number) => (
+                <TouchableOpacity
+                  key={number}
+                  style={[
+                    styles.paginationButton,
+                    currentReportPage === number &&
+                      styles.paginationButtonActive,
+                  ]}
+                  onPress={() => setReportPage(number)}
+                >
+                  <Text
+                    style={[
+                      styles.paginationText,
+                      currentReportPage === number &&
+                        styles.paginationTextActive,
+                    ]}
+                  >
+                    {number}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+
+              <TouchableOpacity
+                style={styles.paginationButton}
+                disabled={currentReportPage === reportPageCount}
+                onPress={() =>
+                  setReportPage((value) =>
+                    Math.min(reportPageCount, value + 1)
+                  )
+                }
+              >
+                <Text
+                  style={[
+                    styles.paginationText,
+                    currentReportPage === reportPageCount &&
+                      styles.paginationTextDisabled,
+                  ]}
+                >
+                  ›
+                </Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -435,7 +535,6 @@ function FilterDropdown({
   label,
   value,
   options,
-  s,
   isOpen,
   onToggle,
   onClose,
@@ -444,7 +543,6 @@ function FilterDropdown({
   label: string;
   value: string;
   options: string[];
-  s: number;
   isOpen: boolean;
   onToggle: () => void;
   onClose: () => void;
@@ -468,12 +566,7 @@ function FilterDropdown({
         ]}
         onPress={onToggle}
       >
-        <Text
-          style={[
-            styles.filterLabel,
-            { fontSize: 11 * s },
-          ]}
-        >
+        <Text style={styles.filterLabel}>
           {label}
         </Text>
 
@@ -482,7 +575,6 @@ function FilterDropdown({
             numberOfLines={1}
             style={[
               styles.filterValue,
-              { fontSize: 15 * s },
               isOpen && styles.filterValueOpen,
             ]}
           >
@@ -490,7 +582,7 @@ function FilterDropdown({
           </Text>
 
           <ChevronDown
-            size={16 * s}
+            size={16}
             color={isOpen ? "#34733B" : "#333333"}
             strokeWidth={2}
             style={{
@@ -526,7 +618,6 @@ function FilterDropdown({
                 <Text
                   style={[
                     styles.dropdownText,
-                    { fontSize: 16 * s },
                     selected && styles.dropdownTextSelected,
                   ]}
                 >
@@ -535,7 +626,7 @@ function FilterDropdown({
 
                 {selected ? (
                   <Check
-                    size={16 * s}
+                    size={16}
                     color="#34733B"
                     strokeWidth={2.5}
                   />
@@ -548,6 +639,105 @@ function FilterDropdown({
     </View>
   );
 }
+
+
+// =========================================================
+// DATE RANGE FILTER
+// Matches Events / Users filter design
+// =========================================================
+
+function DateRangeBox({
+  label,
+  fromDate,
+  toDate,
+  onChangeFrom,
+  onChangeTo,
+}: {
+  label: string;
+  fromDate: string;
+  toDate: string;
+  onChangeFrom: (value: string) => void;
+  onChangeTo: (value: string) => void;
+}) {
+  return (
+    <View style={styles.dateRangeBox}>
+      <Text style={styles.dateRangeLabel}>
+        {label}
+      </Text>
+
+      <View style={styles.dateRangeInputRow}>
+        <View style={styles.dateRangeSingleBox}>
+          {Platform.OS === "web"
+            ? createElement("input", {
+                type: "date",
+                value: fromDate,
+                "aria-label": "From date",
+                onChange: (event: {
+                  target: {
+                    value: string;
+                  };
+                }) => onChangeFrom(event.target.value),
+                style: dateRangeWebInputStyle,
+              })
+            : (
+              <TextInput
+                value={fromDate}
+                onChangeText={onChangeFrom}
+                placeholder="From date"
+                placeholderTextColor="#888888"
+                style={styles.dateRangeNativeInput}
+              />
+            )}
+        </View>
+
+        <Text style={styles.dateRangeSeparator}>–</Text>
+
+        <View style={styles.dateRangeSingleBox}>
+          {Platform.OS === "web"
+            ? createElement("input", {
+                type: "date",
+                value: toDate,
+                min: fromDate || undefined,
+                "aria-label": "To date",
+                onChange: (event: {
+                  target: {
+                    value: string;
+                  };
+                }) => onChangeTo(event.target.value),
+                style: dateRangeWebInputStyle,
+              })
+            : (
+              <TextInput
+                value={toDate}
+                onChangeText={onChangeTo}
+                placeholder="To date"
+                placeholderTextColor="#888888"
+                style={styles.dateRangeNativeInput}
+              />
+            )}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+const dateRangeWebInputStyle = {
+  width: "100%",
+  height: 23,
+  minWidth: 0,
+  maxWidth: "100%",
+  border: "none",
+  outline: "none",
+  padding: 0,
+  margin: 0,
+  fontSize: 10,
+  lineHeight: "23px",
+  color: "#252525",
+  backgroundColor: "transparent",
+  boxSizing: "border-box" as const,
+  fontFamily: "Montserrat_700Bold",
+  cursor: "pointer",
+};
 
 /**
  * Purpose: Maps report categories to consistent table badge colors.
@@ -587,33 +777,49 @@ const styles = StyleSheet.create({
   filterPanel: {
     backgroundColor: "#FFFFFF",
     borderWidth: 1,
-    borderColor: "#D3D3D3",
-    borderRadius: 9,
+    borderColor: "#D9DEDA",
+    borderRadius: 10,
+    padding: 12,
     flexDirection: "row",
     alignItems: "center",
-    gap: 14,
+    gap: 10,
     flexWrap: "wrap",
     position: "relative",
     zIndex: 50,
     overflow: "visible",
   },
+
   searchBox: {
-    flex: 1.15,
-    minWidth: 180,
-    height: 54,
+    height: 52,
+    flexGrow: 1.35,
+    flexShrink: 1,
+    flexBasis: 250,
+    minWidth: 220,
     borderWidth: 1,
-    borderColor: "#DDDDDD",
+    borderColor: "#D9DEDA",
     borderRadius: 8,
-    backgroundColor: "#F4F4F4",
-    paddingHorizontal: 14,
+    backgroundColor: "#F7F8F7",
+    paddingHorizontal: 13,
     flexDirection: "row",
     alignItems: "center",
+    gap: 8,
   },
-  searchInput: { flex: 1, fontFamily: "Montserrat_700Bold", outlineStyle: "none" as any },
+
+  searchInput: {
+    flex: 1,
+    minWidth: 0,
+    fontSize: 12,
+    color: "#252525",
+    fontFamily: "Montserrat_700Bold",
+    outlineStyle: "none" as any,
+  },
 
   dropdownContainer: {
-    flex: 1,
-    minWidth: 150,
+    height: 52,
+    flexGrow: 0.8,
+    flexShrink: 1,
+    flexBasis: 165,
+    minWidth: 155,
     position: "relative",
     zIndex: 100,
     overflow: "visible",
@@ -625,11 +831,11 @@ const styles = StyleSheet.create({
 
   filterBox: {
     width: "100%",
-    height: 54,
+    height: 52,
     borderRadius: 8,
-    backgroundColor: "#F4F4F4",
+    backgroundColor: "#F7F8F7",
     borderWidth: 1,
-    borderColor: "#DDDDDD",
+    borderColor: "#D9DEDA",
     paddingHorizontal: 12,
     paddingVertical: 6,
     justifyContent: "center",
@@ -638,27 +844,19 @@ const styles = StyleSheet.create({
 
   filterBoxOpen: {
     borderColor: "#34733B",
-    backgroundColor: "#F8FBF7",
+    backgroundColor: "#F7FBF5",
   },
 
-  dateBox: {
-    minWidth: 160,
-    borderWidth: 1,
-    borderColor: "#d6d6d6",
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  
-  dateInner: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
   filterLabel: {
     fontFamily: "Montserrat_700Bold",
-    color: "#555555",
-    marginBottom: 1,
+    color: "#686F68",
+    marginBottom: 2,
+    fontSize: 10,
+    lineHeight: 12,
   },
 
   filterValueRow: {
-    minHeight: 18,
+    minHeight: 20,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -667,7 +865,9 @@ const styles = StyleSheet.create({
 
   filterValue: {
     flex: 1,
-    flexShrink: 1,
+    minWidth: 0,
+    fontSize: 12,
+    lineHeight: 16,
     fontFamily: "Montserrat_700Bold",
     color: "#252525",
   },
@@ -675,21 +875,96 @@ const styles = StyleSheet.create({
   filterValueOpen: {
     color: "#34733B",
   },
-  buttonColumn: { justifyContent: "center" },
-  smallButton: {
-    height: 38,
-    minWidth: 82,
-    paddingHorizontal: 13,
-    borderWidth: 1,
-    borderColor: "#86BE8D",
+
+  dateRangeBox: {
+    height: 52,
+    flexGrow: 0,
+    flexShrink: 1,
+    flexBasis: 300,
+    minWidth: 286,
+    maxWidth: 320,
     borderRadius: 8,
+    backgroundColor: "#F7F8F7",
+    borderWidth: 1,
+    borderColor: "#D9DEDA",
+    paddingHorizontal: 10,
+    paddingTop: 4,
+    paddingBottom: 5,
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+
+  dateRangeLabel: {
+    fontSize: 10,
+    lineHeight: 12,
+    color: "#686F68",
+    fontFamily: "Montserrat_700Bold",
+    marginBottom: 2,
+  },
+
+  dateRangeInputRow: {
+    height: 27,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-start",
+    gap: 5,
+  },
+
+  dateRangeSingleBox: {
+    width: 128,
+    height: 27,
+    borderWidth: 1,
+    borderColor: "#CDD3CD",
+    borderRadius: 6,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 7,
+    justifyContent: "center",
+    overflow: "hidden",
+  },
+
+  dateRangeSeparator: {
+    width: 10,
+    textAlign: "center",
+    fontSize: 11,
+    lineHeight: 14,
+    color: "#656B65",
+    fontFamily: "Montserrat_700Bold",
+  },
+
+  dateRangeNativeInput: {
+    width: "100%",
+    minWidth: 0,
+    height: 23,
+    padding: 0,
+    margin: 0,
+    borderWidth: 0,
+    fontSize: 10,
+    color: "#252525",
+    fontFamily: "Montserrat_700Bold",
+  },
+
+  smallButton: {
+    width: 94,
+    height: 52,
+    flexShrink: 0,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: "#D9DEDA",
+    borderRadius: 8,
+    backgroundColor: "#F7F8F7",
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 5,
+    gap: 6,
     cursor: "pointer",
   } as any,
-  buttonText: { fontFamily: "Montserrat_700Bold", color: "#34733B" },
+
+  buttonText: {
+    fontSize: 12,
+    fontFamily: "Montserrat_700Bold",
+    color: "#34733B",
+  },
+
   tablePanel: { borderWidth: 1, borderColor: "#d6d6d6", borderRadius: 8, overflow: "hidden", position: "relative", zIndex: 1 },
   table: { minWidth: 1100 },
   tableFullWidth: { minWidth: "100%", width: "100%" },
@@ -743,6 +1018,7 @@ reportedCol: {
 dateCol: {
   flex: 1.1,
   minWidth: 120,
+  paddingLeft: 12,
 },
 
 statusCol: {
@@ -800,8 +1076,57 @@ viewReportButtonText: {
   badgeWrap: { alignItems: "flex-start" },
   badge: { borderRadius: 5, overflow: "hidden", fontFamily: "Montserrat_700Bold" },
   actions: { flexDirection: "row", gap: 8 },
-  paginationRow: { flexDirection: "row", justifyContent: "space-between" },
-  showing: { fontFamily: "Montserrat_700Bold", color: "#555" },
+  paginationRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+
+  showing: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#555",
+  },
+
+  paginationButtons: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 5,
+  },
+
+  paginationButton: {
+    minWidth: 28,
+    height: 28,
+    paddingHorizontal: 6,
+    borderWidth: 1,
+    borderColor: "#A9B3A9",
+    borderRadius: 5,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+
+  paginationButtonActive: {
+    backgroundColor: "#34733B",
+    borderColor: "#34733B",
+  },
+
+  paginationText: {
+    fontSize: 12,
+    fontFamily: "Montserrat_700Bold",
+    color: "#34733B",
+  },
+
+  paginationTextActive: {
+    color: "#FFFFFF",
+  },
+
+  paginationTextDisabled: {
+    color: "#A5ACA5",
+  },
   menuOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.25)",
@@ -844,7 +1169,7 @@ viewReportButtonText: {
 
 dropdownMenu: {
   position: "absolute",
-  top: 58,
+  top: 56,
   left: 0,
   right: 0,
   backgroundColor: "#FFFFFF",
@@ -882,6 +1207,7 @@ dropdownItemSelected: {
 
 dropdownText: {
   flex: 1,
+  fontSize: 13,
   fontFamily: "Montserrat_700Bold",
   color: "#222222",
 },
