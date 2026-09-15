@@ -394,9 +394,16 @@ export default function CreateReportScreen() {
         locationText: locationText || `${barangay}, ${VALENCIA_CITY}`,
         coordinates,
         city: VALENCIA_CITY,
-        barangay: barangay.trim() || undefined,
         platform: Platform.OS,
-        accuracy: locationAccuracy,
+
+        // Firestore rejects undefined values, so optional fields are
+        // included only when they actually contain a value.
+        ...(barangay.trim()
+          ? { barangay: barangay.trim() }
+          : {}),
+        ...(typeof locationAccuracy === 'number'
+          ? { accuracy: locationAccuracy }
+          : {}),
       };
 
       const payload = {
