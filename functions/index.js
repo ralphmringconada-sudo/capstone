@@ -142,3 +142,63 @@ exports.requestPasswordReset = functions.https.onRequest(async (req, res) => {
     res.status(500).json({ error: message || 'Unable to send password reset email.' });
   }
 });
+
+exports.issueGoogleLinkToken = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    res.status(204).send('');
+    return;
+  }
+  if (req.method !== 'POST') {
+    res.status(405).json({ error: 'Method not allowed' });
+    return;
+  }
+
+  const idToken = String(req.body?.idToken || '').trim();
+  if (!idToken) {
+    res.status(400).json({ error: 'Google sign-in token is required.' });
+    return;
+  }
+
+  try {
+    const tokenResponse = await fetch(
+      `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`,
+    );
+    const payload = (await tokenResponse.json().catch(() => ({}))) || {};
+    if (!tokenResponse.ok || !payload.email) {
+      res.status(401).json({ error: 'Google sign-in could not be verified. Try again.' });
+      return;
+    }
+
+    const verified = payload.email_verified === true || payload.email_verified === 'true';
+    if (!verified) {
+      res.status(403).json({ error: 'This Google email is not verified.' });
+      return;
+    }
+
+    const email = String(payload.email).trim().toLowerCase();
+    const snapshot = await admin.firestore().collection('users').where('email', '==', email).limit(1).get();
+    if (snapshot.empty) {
+      res.status(404).json({ error: 'Account does not exist. Please sign up first.' });
+      return;
+    }
+
+    const uid = snapshot.docs[0].id;
+    const userRecord = await admin.auth().getUser(uid);
+    if (!userRecord.emailVerified) {
+      res.status(403).json({
+        error: 'Please verify your email before signing in with Google.',
+      });
+      return;
+    }
+
+    const token = await admin.auth().createCustomToken(uid);
+    res.status(200).json({ token });
+  } catch (error) {
+    console.error('issueGoogleLinkToken failed', error);
+    res.status(500).json({ error: 'Unable to complete Google sign-in for this email.' });
+  }
+});

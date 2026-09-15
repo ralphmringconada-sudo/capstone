@@ -2,6 +2,7 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signInWithCredential,
+  signInWithCustomToken,
   signOut,
   deleteUser,
   GoogleAuthProvider,
@@ -9,6 +10,7 @@ import {
   updatePassword,
   EmailAuthProvider,
   reauthenticateWithCredential,
+  linkWithCredential,
   onAuthStateChanged,
   type User,
 } from 'firebase/auth';
@@ -341,7 +343,6 @@ export async function loginWithEmail(email: string, password: string): Promise<U
       } catch {
         // Ignore resend failures; the main message still asks the user to verify.
       }
-      await signOut(auth());
       throw new Error(
         'Please verify your email before signing in. We sent a verification link to your inbox.',
       );
@@ -375,75 +376,98 @@ export async function loginWithEmail(email: string, password: string): Promise<U
 }
 
 /**
- * Purpose: Resends the Firebase verification email for an unverified password account.
- * How it works: signs in briefly, sends verification when needed, then signs out.
+ * Purpose: Resends the Firebase verification email for the signed-in unverified account.
+ * How it works: uses the current Auth session so the user does not re-enter a password.
  */
-export async function resendEmailVerification(email: string, password: string): Promise<void> {
-  const trimmedEmail = email.trim().toLowerCase();
-  const credential = await signInWithEmailAndPassword(auth(), trimmedEmail, password);
+export async function resendEmailVerification(): Promise<void> {
+  const currentUser = auth().currentUser;
+  if (!currentUser?.email) {
+    throw new Error('Your sign-up session expired. Please sign in with your password to resend verification.');
+  }
+  await assertNotAdminAccount(currentUser.uid);
+  await currentUser.reload();
+  if (currentUser.emailVerified) {
+    throw new Error('This email is already verified. You can continue into EcoBantay now.');
+  }
+  await sendEmailVerification(currentUser);
+}
+
+const GOOGLE_LINK_TOKEN_URL =
+  'https://us-central1-ecobantay-18061.cloudfunctions.net/issueGoogleLinkToken';
+
+async function requestGoogleLinkToken(idToken: string): Promise<string> {
+  const response = await fetch(GOOGLE_LINK_TOKEN_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idToken }),
+  });
+  const data = (await response.json().catch(() => ({}))) as { error?: string; token?: string };
+  if (!response.ok || !data.token) {
+    throw new Error(data.error || 'Unable to sign in with Google for this email.');
+  }
+  return data.token;
+}
+
+/**
+ * Purpose: Signs into an existing verified EcoBantay account and attaches Google as a login method.
+ * How it works: 1) asks Cloud Functions for a custom token for the signup UID. 2) signs in. 3) links Google.
+ */
+async function completeGoogleLoginForExistingEmail(
+  idToken: string,
+  credential: ReturnType<typeof GoogleAuthProvider.credential>,
+): Promise<UserProfile> {
+  const customToken = await requestGoogleLinkToken(idToken);
+  const result = await signInWithCustomToken(auth(), customToken);
+  await assertNotAdminAccount(result.user.uid);
+
   try {
-    await assertNotAdminAccount(credential.user.uid);
-    if (credential.user.emailVerified) {
-      await signOut(auth());
-      throw new Error('This email is already verified. You can sign in now.');
+    await linkWithCredential(result.user, credential);
+  } catch (linkError: unknown) {
+    const linkCode = (linkError as { code?: string }).code;
+    if (linkCode !== 'auth/provider-already-linked' && linkCode !== 'auth/credential-already-in-use') {
+      console.warn('Google provider could not be linked:', linkError);
     }
-    await sendEmailVerification(credential.user);
-  } finally {
-    await signOut(auth()).catch(() => undefined);
   }
-}
 
-/**
- * Purpose: Confirms the inbox link was opened and activates a mobile session.
- * How it works: signs in, reloads Auth user, keeps the session only when emailVerified is true.
- */
-export async function checkEmailVerifiedAndSignIn(
-  email: string,
-  password: string,
-): Promise<boolean> {
-  const trimmedEmail = email.trim().toLowerCase();
-  const credential = await signInWithEmailAndPassword(auth(), trimmedEmail, password);
-  await assertNotAdminAccount(credential.user.uid);
-  await credential.user.reload();
-  if (!credential.user.emailVerified) {
+  const profile = await getUserProfile(result.user.uid);
+  if (!profile) {
     await signOut(auth());
-    return false;
+    throw new Error('Account does not exist. Please sign up first.');
   }
-  return true;
+  return profile;
 }
 
 /**
- * Purpose: Authenticates an existing account with a Google ID token.
- * How it works: 1) Creates a Google credential. 2) signs in. 3) loads the profile. 4) verifies provider ownership.
- * Technologies Used: Google OAuth, Firebase Authentication, Firebase Firestore.
- * Why this implementation: Provider verification prevents users from entering an email-created account through Google.
+ * Purpose: Authenticates with Google for an account that already completed email signup and verification.
+ * How it works: 1) Tries a direct Google credential. 2) if the email already belongs to a password account, links it.
+ * Technologies Used: Google OAuth, Firebase Authentication, Firebase Cloud Functions, Firebase Firestore.
  */
 export async function loginWithGoogle(idToken: string): Promise<UserProfile> {
   const credential = GoogleAuthProvider.credential(idToken);
 
   try {
-    /* Authentication API call: exchange the Google token for a Firebase session. */
     const authCredential = await signInWithCredential(auth(), credential);
     await assertNotAdminAccount(authCredential.user.uid);
     const profile = await getUserProfile(authCredential.user.uid);
 
-    /* Validation: Google login is only allowed for an already registered application profile. */
-    if (!profile) {
-      await signOut(auth());
-      throw new Error('Account does not exist.');
+    if (profile) {
+      return profile;
     }
 
-    if (profile.authProvider !== 'google') {
-      await signOut(auth());
-      throw new Error('This account was not registered with Google. Please sign in with email and password.');
-    }
-
-    return profile;
+    await signOut(auth()).catch(() => undefined);
+    return completeGoogleLoginForExistingEmail(idToken, credential);
   } catch (error: unknown) {
+    const code = (error as { code?: string })?.code;
+    if (
+      code === 'auth/account-exists-with-different-credential' ||
+      code === 'auth/email-already-in-use'
+    ) {
+      return completeGoogleLoginForExistingEmail(idToken, credential);
+    }
     if (
       error instanceof Error &&
       (error.message.startsWith('Account does not exist') ||
-        error.message.startsWith('This account was not registered') ||
+        error.message.includes('verify your email') ||
         error.message.includes('Admin accounts must use'))
     ) {
       throw error;

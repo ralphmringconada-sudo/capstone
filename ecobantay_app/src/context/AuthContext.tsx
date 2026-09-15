@@ -26,6 +26,7 @@ import type { UserProfile } from '@/types/user';
 
 type AuthContextValue = {
   user: UserProfile | null;
+  pendingVerificationEmail: string | null;
   isLoading: boolean;
   isFirebaseConfigured: boolean;
   login: (email: string, password: string) => Promise<void>;
@@ -41,6 +42,7 @@ type AuthContextValue = {
   registerGoogle: (idToken: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<UserProfile | null>;
+  completeEmailVerification: () => Promise<boolean>;
 };
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -69,6 +71,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * while isLoading prevents routing before Firebase restores a persisted session.
    */
   const [user, setUser] = useState<UserProfile | null>(null);
+  const [pendingVerificationEmail, setPendingVerificationEmail] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(isFirebaseConfigured());
 
   /*
@@ -88,6 +91,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       unsubscribe = onAuthStateChanged(getAuthInstance(), async (firebaseUser) => {
         if (!firebaseUser) {
           setUser(null);
+          setPendingVerificationEmail(null);
           setIsLoading(false);
           return;
         }
@@ -99,20 +103,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
          */
         try {
           await assertNotAdminAccount(firebaseUser.uid);
-          // Email accounts must verify before a mobile session is restored.
           const providers = firebaseUser.providerData.map((item) => item.providerId);
           const isPasswordAccount = providers.includes('password');
           if (isPasswordAccount && !firebaseUser.emailVerified) {
-            await signOut(getAuthInstance());
             setUser(null);
+            setPendingVerificationEmail((firebaseUser.email || '').toLowerCase() || null);
             return;
           }
           const profile = await getUserProfile(firebaseUser.uid);
           if (!profile) {
             await signOut(getAuthInstance());
             setUser(null);
+            setPendingVerificationEmail(null);
           } else {
             setUser(profile);
+            setPendingVerificationEmail(null);
           }
         } catch {
           setUser(null);
@@ -171,8 +176,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       birthday: Date;
     }) => {
       ensureFirebaseConfigured();
-      const profile = await registerWithEmail(input);
-      setUser(profile);
+      await registerWithEmail(input);
+      setUser(null);
     },
     [],
   );
@@ -210,10 +215,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const logout = useCallback(async () => {
     if (!isFirebaseConfigured()) {
       setUser(null);
+      setPendingVerificationEmail(null);
       return;
     }
     await logoutUser();
     setUser(null);
+    setPendingVerificationEmail(null);
   }, []);
 
   /**
@@ -228,9 +235,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       return null;
     }
+    await current.reload();
+    if (!current.emailVerified) {
+      setUser(null);
+      setPendingVerificationEmail((current.email || '').toLowerCase() || null);
+      return null;
+    }
     const profile = await getUserProfile(current.uid);
     setUser(profile);
+    setPendingVerificationEmail(null);
     return profile;
+  }, []);
+
+  /**
+   * Purpose: Activates the app session after the user opens the verification link.
+   * How it works: reloads Firebase Auth and publishes the Firestore profile once emailVerified is true.
+   */
+  const completeEmailVerification = useCallback(async () => {
+    const current = getAuthInstance().currentUser;
+    if (!current) return false;
+    await current.reload();
+    if (!current.emailVerified) return false;
+    await assertNotAdminAccount(current.uid);
+    const profile = await getUserProfile(current.uid);
+    if (!profile) return false;
+    setUser(profile);
+    setPendingVerificationEmail(null);
+    return true;
   }, []);
 
   /*
@@ -240,6 +271,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const value = useMemo(
     () => ({
       user,
+      pendingVerificationEmail,
       isLoading,
       isFirebaseConfigured: isFirebaseConfigured(),
       login,
@@ -248,8 +280,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       registerGoogle,
       logout,
       refreshUser,
+      completeEmailVerification,
     }),
-    [user, isLoading, login, register, loginGoogle, registerGoogle, logout, refreshUser],
+    [
+      user,
+      pendingVerificationEmail,
+      isLoading,
+      login,
+      register,
+      loginGoogle,
+      registerGoogle,
+      logout,
+      refreshUser,
+      completeEmailVerification,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -12,7 +12,7 @@ import { isAppRoute, isAuthRoute } from '@/constants/routes';
  * Why this implementation: Stack must not be wrapped in a layout View or Android navigation can crash.
  */
 export function AppNavigator() {
-  const { user, isLoading } = useAuth();
+  const { user, pendingVerificationEmail, isLoading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
 
@@ -26,10 +26,22 @@ export function AppNavigator() {
       return;
     }
 
+    if (
+      !user &&
+      pendingVerificationEmail &&
+      currentRoute !== 'verify-email'
+    ) {
+      router.replace({
+        pathname: '/verify-email' as '/login',
+        params: { email: pendingVerificationEmail },
+      });
+      return;
+    }
+
     if (user && (isAuthRoute(currentRoute) || currentRoute === 'index')) {
       router.replace('/home');
     }
-  }, [user, segments, isLoading, router]);
+  }, [user, pendingVerificationEmail, segments, isLoading, router]);
 
   return (
     <>

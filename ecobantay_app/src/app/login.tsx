@@ -189,6 +189,10 @@ export default function LoginScreen() {
           </TouchableOpacity>
 
           <Text style={styles.helperText}>
+            Use Google only after you have signed up and verified that email.
+          </Text>
+
+          <Text style={styles.helperText}>
             Don't have an account?{' '}
             <Text style={styles.linkText} onPress={() => router.push('/signup')}>
               create one!

@@ -152,6 +152,43 @@ function toHhMm(date: Date): string {
   ).padStart(2, "0")}`;
 }
 
+function combineEventDateTime(
+  isoDate: string,
+  hhmm: string
+): string {
+  const [year, month, day] = isoDate
+    .split("-")
+    .map(Number);
+
+  const [hours, minutes] = hhmm
+    .split(":")
+    .map(Number);
+
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day) ||
+    !Number.isFinite(hours) ||
+    !Number.isFinite(minutes)
+  ) {
+    return "";
+  }
+
+  const value = new Date(
+    year,
+    month - 1,
+    day,
+    hours,
+    minutes,
+    0,
+    0
+  );
+
+  return Number.isNaN(value.getTime())
+    ? ""
+    : value.toISOString();
+}
+
 function getEventImages(event: {
   imageUrl?: string;
   images?: string[];
@@ -215,7 +252,7 @@ const CATEGORY_OPTIONS = [
 const STATUS_OPTIONS = [
   "All Statuses",
   "Pending",
-  "Upcoming",
+  "Approved",
   "Ongoing",
   "Completed",
   "Rejected",
@@ -371,6 +408,9 @@ export default function EventsScreen() {
     useState("");
 
   const [newTime, setNewTime] =
+    useState("");
+
+  const [newEndTime, setNewEndTime] =
     useState("");
 
   const [
@@ -783,6 +823,7 @@ export default function EventsScreen() {
         !newDescription.trim() ||
         !newDate.trim() ||
         !newTime.trim() ||
+        !newEndTime.trim() ||
         !newLocation.trim() ||
         !newCapacity.trim()
       ) {
@@ -792,6 +833,41 @@ export default function EventsScreen() {
         Alert.alert(
           "Incomplete event",
           "Complete all required event fields."
+        );
+
+        return;
+      }
+
+      const startAt = combineEventDateTime(
+        newDate.trim(),
+        newTime.trim()
+      );
+
+      const endAt = combineEventDateTime(
+        newDate.trim(),
+        newEndTime.trim()
+      );
+
+      if (!startAt || !endAt) {
+        creatingRef.current = false;
+
+        Alert.alert(
+          "Invalid event time",
+          "Select a valid event date, start time, and end time."
+        );
+
+        return;
+      }
+
+      if (
+        new Date(endAt).getTime() <=
+        new Date(startAt).getTime()
+      ) {
+        creatingRef.current = false;
+
+        Alert.alert(
+          "Invalid end time",
+          "End Time must be later than Start Time."
         );
 
         return;
@@ -862,6 +938,11 @@ export default function EventsScreen() {
               time: /^\d{1,2}:\d{2}$/.test(newTime.trim())
                 ? formatEventTime(newTime.trim())
                 : newTime.trim(),
+              endTime: /^\d{1,2}:\d{2}$/.test(newEndTime.trim())
+                ? formatEventTime(newEndTime.trim())
+                : newEndTime.trim(),
+              startAt,
+              endAt,
               location: newLocation.trim(),
               capacity,
               imageUrl: imageUrl || undefined,
@@ -890,6 +971,15 @@ export default function EventsScreen() {
                 formatEventTime(
                   newTime.trim()
                 ),
+
+              endTime:
+                formatEventTime(
+                  newEndTime.trim()
+                ),
+
+              startAt,
+
+              endAt,
 
               location:
                 newLocation.trim(),
@@ -929,6 +1019,7 @@ export default function EventsScreen() {
         setNewDescription("");
         setNewDate("");
         setNewTime("");
+        setNewEndTime("");
         setNewLocation("");
         setNewCapacity("");
         setNewImageUri(null);
@@ -1138,7 +1229,7 @@ const confirmRejectEvent = async () => {
             setRejectModalOpen(true);
           }}
           onApprove={() =>
-            void moderateEvent("Upcoming")
+            void moderateEvent("Approved")
           }
         />
       ) : (
@@ -2058,9 +2149,9 @@ const confirmRejectEvent = async () => {
                               styles.smallText
                             }
                           >
-                            {
-                              event.time
-                            }
+                            {event.endTime
+                              ? `${event.time} - ${event.endTime}`
+                              : event.time}
                           </Text>
                         </View>
 
@@ -2783,12 +2874,28 @@ const confirmRejectEvent = async () => {
                     }
                   >
                     <TimePickerField
-                      label="Time"
+                      label="Start Time"
                       value={
                         newTime
                       }
                       onChange={
                         setNewTime
+                      }
+                    />
+                  </View>
+
+                  <View
+                    style={
+                      styles.inlineField
+                    }
+                  >
+                    <TimePickerField
+                      label="End Time"
+                      value={
+                        newEndTime
+                      }
+                      onChange={
+                        setNewEndTime
                       }
                     />
                   </View>
@@ -2987,7 +3094,7 @@ const confirmRejectEvent = async () => {
       </Modal>
 
       {/* ================================================= */}
-      {/* UPCOMING / ONGOING / COMPLETED EVENT VIEW MODAL */}
+      {/* APPROVED / ONGOING / COMPLETED EVENT VIEW MODAL */}
       {/* ================================================= */}
 
       <Modal
@@ -3143,7 +3250,9 @@ const confirmRejectEvent = async () => {
                               Time
                             </Text>
                             <Text style={styles.eventViewInfoValue}>
-                              {selectedEvent.time}
+                              {selectedEvent.endTime
+                                ? `${selectedEvent.time} - ${selectedEvent.endTime}`
+                                : selectedEvent.time}
                             </Text>
                           </View>
                         </View>
@@ -3318,40 +3427,7 @@ const confirmRejectEvent = async () => {
                   </Text>
                 </TouchableOpacity>
 
-                {selectedEvent.status === "Upcoming" ? (
-                  <TouchableOpacity
-                    style={[
-                      styles.eventViewPrimaryButton,
-                      isModerating && { opacity: 0.65 },
-                    ]}
-                    onPress={() => void moderateEvent("Ongoing")}
-                    disabled={isModerating}
-                  >
-                    <Text style={styles.eventViewPrimaryButtonText}>
-                      {isModerating
-                        ? "Please wait..."
-                        : "Mark as Ongoing"}
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
-
-                {selectedEvent.status === "Ongoing" ? (
-                  <TouchableOpacity
-                    style={[
-                      styles.eventViewPrimaryButton,
-                      isModerating && { opacity: 0.65 },
-                    ]}
-                    onPress={() => void moderateEvent("Completed")}
-                    disabled={isModerating}
-                  >
-                    <Check size={16} color="#FFFFFF" />
-                    <Text style={styles.eventViewPrimaryButtonText}>
-                      {isModerating
-                        ? "Please wait..."
-                        : "Mark as Completed"}
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
+                
               </View>
             </View>
           ) : null}
@@ -3607,7 +3683,9 @@ function PendingEventDetailsPage({
                       styles.pendingInfoSubValue
                     }
                   >
-                    {event.time}
+                    {event.endTime
+                      ? `${event.time} - ${event.endTime}`
+                      : event.time}
                   </Text>
                 </View>
               </View>
@@ -4737,7 +4815,7 @@ function statusColor(
   }
 
   if (
-    status === "Upcoming"
+    status === "Approved"
   ) {
     return "#e7c1ef";
   }
@@ -6322,11 +6400,13 @@ rejectConfirmText: {
     inlineFields: {
       flexDirection:
         "row",
+      flexWrap: "wrap",
       gap: 10,
     },
 
     inlineField: {
       flex: 1,
+      minWidth: 120,
     },
 
     mapPreview: {

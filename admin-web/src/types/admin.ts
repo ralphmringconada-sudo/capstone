@@ -1,4 +1,3 @@
-/** Shared role and document shapes used by the admin dashboard. */
 export type AdminRole = 'admin' | 'super_admin';
 
 export type AdminNotificationPrefs = {
@@ -79,15 +78,32 @@ export type EventParticipant = {
   joinedAt: string;
 };
 
+export type EventStatus =
+  | 'Pending'
+  | 'Approved'
+  | 'Ongoing'
+  | 'Completed'
+  | 'Rejected'
+  | 'Upcoming'; // Legacy only; new events should use Approved.
+
 export type AdminEvent = {
   id: string;
   title: string;
   description: string;
   category: string;
+
+  // Existing display fields.
   date: string;
   time: string;
+
+  // Added for automatic event lifecycle handling.
+  // Optional temporarily so existing Firestore events still load.
+  endTime?: string;
+  startAt?: string;
+  endAt?: string;
+
   location: string;
-  status: 'Pending' | 'Upcoming' | 'Ongoing' | 'Completed' | 'Rejected';
+  status: EventStatus;
   participants: number;
   capacity: number;
   submittedBy: string;
@@ -96,9 +112,14 @@ export type AdminEvent = {
   imageUrl?: string;
   images?: string[];
   coordinates?: { latitude: number; longitude: number };
+
+  approvedAt?: string;
+  approvedBy?: string;
+
   rejectionReason?: string;
   rejectionRemarks?: string;
   rejectedAt?: string;
+
   createdAt: string;
   updatedAt?: string;
 };

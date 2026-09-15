@@ -1,48 +1,84 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
   TouchableOpacity,
   SafeAreaView,
   StatusBar,
   StyleSheet,
   Image,
   ScrollView,
-  KeyboardAvoidingView,
-  Platform,
   ActivityIndicator,
-  Alert,
+  AppState,
+  type AppStateStatus,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useAuth } from '@/context/AuthContext';
-import {
-  checkEmailVerifiedAndSignIn,
-  resendEmailVerification,
-} from '@/services/authService';
+import { resendEmailVerification } from '@/services/authService';
 import { isFirebaseConfigured, FIREBASE_SETUP_MESSAGE } from '@/config/firebase';
 
 /**
- * Purpose: Keeps email/password signups inactive until the user verifies their inbox link.
- * How it works: shows the target email, resends verification, and unlocks login after Firebase marks emailVerified.
+ * Purpose: Keeps email/password signups inactive until the inbox verification link is opened.
+ * How it works: watches Firebase for emailVerified, then signs the user in without a confirm tap.
  */
 export default function VerifyEmailScreen() {
   const router = useRouter();
-  const { refreshUser } = useAuth();
+  const { pendingVerificationEmail, completeEmailVerification, logout } = useAuth();
   const params = useLocalSearchParams<{ email?: string | string[] }>();
   const email = useMemo(() => {
     const value = Array.isArray(params.email) ? params.email[0] : params.email;
-    return (value || '').trim().toLowerCase();
-  }, [params.email]);
+    return (value || pendingVerificationEmail || '').trim().toLowerCase();
+  }, [params.email, pendingVerificationEmail]);
 
-  const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState(
-    'We sent a verification link to your email. Open it to activate your account.',
+    'We sent a verification link to your email. Open that link and this screen will sign you in automatically.',
   );
   const [isResending, setIsResending] = useState(false);
-  const [isChecking, setIsChecking] = useState(false);
+  const [isActivating, setIsActivating] = useState(false);
+  const activatingRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const tryActivate = async () => {
+      if (activatingRef.current || cancelled) return;
+      if (!isFirebaseConfigured()) return;
+
+      try {
+        activatingRef.current = true;
+        const verified = await completeEmailVerification();
+        if (cancelled || !verified) return;
+        setIsActivating(true);
+        setInfo('Email verified. Signing you in…');
+        router.replace('/home');
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Unable to confirm verification.');
+        }
+      } finally {
+        activatingRef.current = false;
+      }
+    };
+
+    void tryActivate();
+    const interval = setInterval(() => {
+      void tryActivate();
+    }, 3000);
+
+    const onAppState = (state: AppStateStatus) => {
+      if (state === 'active') {
+        void tryActivate();
+      }
+    };
+    const appSub = AppState.addEventListener('change', onAppState);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      appSub.remove();
+    };
+  }, [completeEmailVerification, router]);
 
   const handleResend = async () => {
     setError('');
@@ -50,18 +86,10 @@ export default function VerifyEmailScreen() {
       setError(FIREBASE_SETUP_MESSAGE);
       return;
     }
-    if (!email) {
-      setError('Missing email address. Please sign up again.');
-      return;
-    }
-    if (!password) {
-      setError('Enter your password to resend the verification email.');
-      return;
-    }
 
     setIsResending(true);
     try {
-      await resendEmailVerification(email, password);
+      await resendEmailVerification();
       setInfo('Verification email sent again. Check your inbox and spam folder.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to resend verification email.');
@@ -70,122 +98,60 @@ export default function VerifyEmailScreen() {
     }
   };
 
-  const handleVerified = async () => {
-    setError('');
-    if (!isFirebaseConfigured()) {
-      setError(FIREBASE_SETUP_MESSAGE);
-      return;
-    }
-    if (!email) {
-      setError('Missing email address. Please sign up again.');
-      return;
-    }
-    if (!password) {
-      setError('Enter your password to confirm verification.');
-      return;
-    }
-
-    setIsChecking(true);
-    try {
-      const verified = await checkEmailVerifiedAndSignIn(email, password);
-      if (!verified) {
-        setError('Email is not verified yet. Open the link in your inbox, then try again.');
-        return;
-      }
-      await refreshUser();
-      Alert.alert('Account activated', 'Your email is verified. You can use EcoBantay now.', [
-        { text: 'Continue', onPress: () => router.replace('/home') },
-      ]);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to confirm verification.');
-    } finally {
-      setIsChecking(false);
-    }
+  const handleBackToLogin = async () => {
+    await logout();
+    router.replace('/login');
   };
-
-  const busy = isResending || isChecking;
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#E1F0B9" />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.flex}
+      <ScrollView
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <ScrollView
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          <Image
-            source={require('@/assets/images/Ecobantay_Logo.png')}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-          <Text style={styles.title}>Verify your email</Text>
-          <Text style={styles.subtitle}>{info}</Text>
+        <Image
+          source={require('@/assets/images/Ecobantay_Logo.png')}
+          style={styles.logo}
+          resizeMode="contain"
+        />
+        <Text style={styles.title}>Verify your email</Text>
+        <Text style={styles.subtitle}>{info}</Text>
 
-          {email ? (
-            <View style={styles.emailChip}>
-              <Text style={styles.emailLabel}>SENT TO</Text>
-              <Text style={styles.emailValue}>{email}</Text>
-            </View>
-          ) : null}
-
-          <Text style={styles.fieldLabel}>Password</Text>
-          <View style={styles.inputBox}>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter your password"
-              placeholderTextColor="#6B7B6C"
-              secureTextEntry={!showPassword}
-              value={password}
-              onChangeText={setPassword}
-              editable={!busy}
-            />
-            <TouchableOpacity onPress={() => setShowPassword((prev) => !prev)} disabled={busy}>
-              <Text style={styles.toggle}>{showPassword ? 'Hide' : 'Show'}</Text>
-            </TouchableOpacity>
+        {email ? (
+          <View style={styles.emailChip}>
+            <Text style={styles.emailLabel}>SENT TO</Text>
+            <Text style={styles.emailValue}>{email}</Text>
           </View>
+        ) : null}
 
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+        {isActivating ? <ActivityIndicator color="#145C1E" style={styles.spinner} /> : null}
 
-          <TouchableOpacity
-            style={[styles.primaryButton, busy && styles.disabled]}
-            onPress={handleVerified}
-            disabled={busy}
-          >
-            {isChecking ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.primaryText}>I verified my email</Text>
-            )}
-          </TouchableOpacity>
+        {error ? <Text style={styles.error}>{error}</Text> : null}
 
-          <TouchableOpacity
-            style={[styles.secondaryButton, busy && styles.disabled]}
-            onPress={handleResend}
-            disabled={busy}
-          >
-            {isResending ? (
-              <ActivityIndicator color="#145C1E" />
-            ) : (
-              <Text style={styles.secondaryText}>Resend verification email</Text>
-            )}
-          </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.secondaryButton, isResending && styles.disabled]}
+          onPress={handleResend}
+          disabled={isResending || isActivating}
+        >
+          {isResending ? (
+            <ActivityIndicator color="#145C1E" />
+          ) : (
+            <Text style={styles.secondaryText}>Resend verification email</Text>
+          )}
+        </TouchableOpacity>
 
-          <TouchableOpacity onPress={() => router.replace('/login')} disabled={busy}>
-            <Text style={styles.link}>Back to login</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </KeyboardAvoidingView>
+        <TouchableOpacity onPress={handleBackToLogin} disabled={isResending || isActivating}>
+          <Text style={styles.link}>Back to login</Text>
+        </TouchableOpacity>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#E1F0B9' },
-  flex: { flex: 1 },
   content: {
     paddingHorizontal: 24,
     paddingTop: 36,
@@ -224,38 +190,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#145C1E',
   },
-  fieldLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#3F5741',
-    marginBottom: 6,
-  },
-  inputBox: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 10,
-    borderTopRightRadius: 2,
-    borderBottomLeftRadius: 2,
-    borderBottomRightRadius: 10,
-    borderWidth: 1,
-    borderColor: '#C9D9BE',
-    paddingHorizontal: 14,
-    height: 50,
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  input: { flex: 1, fontSize: 15, color: '#1D2B1E' },
-  toggle: { color: '#145C1E', fontWeight: '700', fontSize: 13 },
+  spinner: { marginBottom: 12 },
   error: { color: '#A93131', marginBottom: 10, fontWeight: '600' },
-  primaryButton: {
-    backgroundColor: '#34733B',
-    borderRadius: 12,
-    height: 50,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 8,
-  },
-  primaryText: { color: '#fff', fontWeight: '800', fontSize: 15 },
   secondaryButton: {
     backgroundColor: '#fff',
     borderRadius: 12,

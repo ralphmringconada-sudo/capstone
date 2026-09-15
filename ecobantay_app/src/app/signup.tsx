@@ -12,23 +12,20 @@ import {
   Platform,
   ScrollView,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useAuth } from '@/context/AuthContext';
 import { FIREBASE_SETUP_MESSAGE } from '@/config/firebase';
-import { useGoogleAuth } from '@/hooks/useGoogleAuth';
 import { validateSignUpForm } from '@/utils/validation';
 
 /**
- * Purpose: Creates a new EcoBantay account with email or Google registration.
- * How it works: 1) collects profile fields. 2) validates. 3) registers through auth context. 4) requires email verify for email accounts.
+ * Purpose: Creates a new EcoBantay account from the sign-up form.
+ * How it works: 1) collects profile fields. 2) validates. 3) registers. 4) sends a verification email.
  */
 export default function SignUpScreen() {
   const router = useRouter();
-  const { register, registerGoogle, logout, isFirebaseConfigured } = useAuth();
-  const { request, signInWithGoogle, isGoogleConfigured } = useGoogleAuth();
+  const { register, isFirebaseConfigured } = useAuth();
 
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -40,7 +37,6 @@ export default function SignUpScreen() {
   const [showBirthdayPicker, setShowBirthdayPicker] = useState(false);
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const submissionLockRef = useRef(false);
 
@@ -88,7 +84,6 @@ export default function SignUpScreen() {
         password,
         birthday,
       });
-      await logout();
       router.replace({
         pathname: '/verify-email' as '/login',
         params: { email: email.trim().toLowerCase() },
@@ -101,35 +96,7 @@ export default function SignUpScreen() {
     }
   };
 
-  const handleGoogleSignUp = async () => {
-    if (submissionLockRef.current) return;
-    if (!isGoogleConfigured) {
-      Alert.alert(
-        'Google Sign-In Not Configured',
-        'Add EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID to your .env file (Firebase → Authentication → Google → Web client ID).',
-      );
-      return;
-    }
-
-    setError('');
-    submissionLockRef.current = true;
-    setIsGoogleSubmitting(true);
-    try {
-      const idToken = await signInWithGoogle();
-      if (!idToken) {
-        return;
-      }
-      await registerGoogle(idToken);
-      router.replace('/home');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to sign up with Google.');
-    } finally {
-      submissionLockRef.current = false;
-      setIsGoogleSubmitting(false);
-    }
-  };
-
-  const isBusy = isSubmitting || isGoogleSubmitting;
+  const isBusy = isSubmitting;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -269,18 +236,10 @@ export default function SignUpScreen() {
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity
-            activeOpacity={0.85}
-            style={[styles.googleButton, (isBusy || !request) && styles.buttonDisabled]}
-            onPress={handleGoogleSignUp}
-            disabled={isBusy || !request}
-          >
-            {isGoogleSubmitting ? (
-              <ActivityIndicator color="#3f5c2b" />
-            ) : (
-              <Text style={styles.googleButtonText}>Continue with Google</Text>
-            )}
-          </TouchableOpacity>
+          <Text style={styles.helperText}>
+            We will send a verification link to your email. After you open it, you can also sign in
+            with Google using the same address.
+          </Text>
 
           <Text style={styles.helperText}>
             Already have an account?{' '}
@@ -405,23 +364,6 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   buttonDisabled: { opacity: 0.7 },
-  googleButton: {
-    width: '100%',
-    maxWidth: 260,
-    backgroundColor: '#ffffff',
-    height: 48,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#3f5c2b',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
-  },
-  googleButtonText: {
-    fontFamily: 'Montserrat-Bold',
-    color: '#3f5c2b',
-    fontSize: 15,
-  },
   buttonText: {
     fontFamily: 'Montserrat-Bold',
     color: '#ffffff',

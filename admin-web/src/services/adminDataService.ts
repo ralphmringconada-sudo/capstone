@@ -168,21 +168,36 @@ export async function fetchReports(): Promise<Report[]> {
   return snapshot.docs.map((item) => ({ id: item.id, ...(item.data() as Omit<Report, 'id'>) }));
 }
 
+function normalizeLegacyEventStatus(event: AdminEvent): AdminEvent {
+  if (event.status === 'Upcoming') {
+    return {
+      ...event,
+      status: 'Approved',
+    };
+  }
+
+  return event;
+}
+
 /** Loads persistent events for the administrator event-management workspace. */
 export async function fetchEvents(): Promise<AdminEvent[]> {
   try {
     const snapshot = await getDocs(query(collection(db, 'events'), orderBy('createdAt', 'desc')));
-    return snapshot.docs.map((item) => ({
-      id: item.id,
-      ...(item.data() as Omit<AdminEvent, 'id'>),
-    }));
+    return snapshot.docs.map((item) =>
+      normalizeLegacyEventStatus({
+        id: item.id,
+        ...(item.data() as Omit<AdminEvent, 'id'>),
+      }),
+    );
   } catch {
     const snapshot = await getDocs(collection(db, 'events'));
     return snapshot.docs
-      .map((item) => ({
-        id: item.id,
-        ...(item.data() as Omit<AdminEvent, 'id'>),
-      }))
+      .map((item) =>
+        normalizeLegacyEventStatus({
+          id: item.id,
+          ...(item.data() as Omit<AdminEvent, 'id'>),
+        }),
+      )
       .sort((first, second) => (second.createdAt || '').localeCompare(first.createdAt || ''));
   }
 }
@@ -219,6 +234,12 @@ export async function updateEventStatus(
   admin: AdminProfile,
   details?: { rejectionReason?: string; rejectionRemarks?: string },
 ): Promise<void> {
+  if (status === 'Ongoing' || status === 'Completed') {
+    throw new Error(
+      'Ongoing and Completed are automatic event statuses and cannot be set manually.',
+    );
+  }
+
   const eventRef = doc(db, 'events', eventId);
   const activityRef = doc(collection(db, 'admin_activity_logs'));
   const now = new Date().toISOString();
@@ -228,6 +249,12 @@ export async function updateEventStatus(
   const eventTitle = (existing.title as string | undefined) || 'your event';
 
   const patch: Record<string, unknown> = { status, updatedAt: now };
+
+  if (status === 'Approved') {
+    patch.approvedAt = now;
+    patch.approvedBy = admin.uid;
+  }
+
   if (status === 'Rejected') {
     patch.rejectionReason = details?.rejectionReason || '';
     patch.rejectionRemarks = details?.rejectionRemarks || '';
@@ -273,7 +300,7 @@ export async function updateEventStatus(
     await createAdminNotification({
       title: `Event ${status}`,
       body: `${admin.fullName} set "${eventTitle}" to ${status}.`,
-      type: status === 'Upcoming' || status === 'Rejected' ? 'approval' : 'event',
+      type: status === 'Approved' || status === 'Rejected' ? 'approval' : 'event',
       relatedId: eventId,
       actorUid: admin.uid,
       actorName: admin.fullName,
@@ -294,6 +321,9 @@ export async function updateEvent(
       | 'category'
       | 'date'
       | 'time'
+      | 'endTime'
+      | 'startAt'
+      | 'endAt'
       | 'location'
       | 'submittedArea'
       | 'capacity'
