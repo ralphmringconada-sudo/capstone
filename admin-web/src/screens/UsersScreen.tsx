@@ -19,7 +19,6 @@ import {
   Filter,
   Search,
   UserPlus,
-  Users,
   UsersRound,
   Flag,
   X,
@@ -212,6 +211,16 @@ export default function UsersScreen() {
       return matchesSearch && matchesRole && matchesStatus && matchesDate;
     });
   }, [tableUsers, search, roleFilter, statusFilter, fromDate, toDate, appUsers, admins, flaggedUserIds]);
+
+const filteredUserStats = useMemo(() => {
+  return {
+    totalUsers: filteredTableUsers.length,
+
+    flaggedUsers: filteredTableUsers.filter((user) =>
+      flaggedUserIds.has(user[7]),
+    ).length,
+  };
+}, [filteredTableUsers, flaggedUserIds]);
 
   const userPageCount = Math.max(1, Math.ceil(filteredTableUsers.length / usersPerPage));
   const currentUserPage = Math.min(userPage, userPageCount);
@@ -580,33 +589,31 @@ export default function UsersScreen() {
           ) : null}
         </View>
 
-        <View style={[styles.cards, { gap: width * 0.025, marginTop: height * 0.035 }]}>
-          <DashboardCard
-            title="Total Users"
-            value={String(isSuperAdmin ? stats.totalUsers + admins.length : stats.totalUsers)}
-            color="#DDEAD3"
-            icon={UsersRound}
-            iconColor="#20B83B"
-          />
-          <DashboardCard title="Active Users" value={String(stats.totalUsers)} color="#CFE6FA" icon={Check} iconColor="#259BEF" />
-          <DashboardCard
-            title="New This Month"
-            value={String(
-              appUsers.filter((user) => {
-                const created = new Date(user.createdAt);
-                const now = new Date();
-                return (
-                  created.getFullYear() === now.getFullYear() &&
-                  created.getMonth() === now.getMonth()
-                );
-              }).length,
-            )}
-            color="#FCEFCB"
-            icon={UserPlus}
-            iconColor="#FFC02B"
-          />
-          <DashboardCard title="Inactive Users" value="0" color="#DADAF8" icon={Users} iconColor="#7C7CF2" />
-        </View>
+        <View
+  style={[
+    styles.cards,
+    {
+      gap: width * 0.025,
+      marginTop: height * 0.035,
+    },
+  ]}
+>
+  <DashboardCard
+    title="Total Users"
+    value={String(filteredUserStats.totalUsers)}
+    color="#DDEAD3"
+    icon={UsersRound}
+    iconColor="#20B83B"
+  />
+
+  <DashboardCard
+    title="Flagged"
+    value={String(filteredUserStats.flaggedUsers)}
+    color="#FFDADA"
+    icon={Flag}
+    iconColor="#E53935"
+  />
+</View>
 
         <View style={[styles.filterPanel, { marginTop: height * 0.025, padding: 14 * s }]}>
           <View style={styles.searchBox}>

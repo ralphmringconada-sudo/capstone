@@ -232,7 +232,10 @@ const styles = StyleSheet.create({
   },
   inputBox: {
     backgroundColor: '#fff',
-    borderRadius: 12,
+    borderTopLeftRadius: 10,
+    borderTopRightRadius: 2,
+    borderBottomLeftRadius: 2,
+    borderBottomRightRadius: 10,
     borderWidth: 1,
     borderColor: '#C9D9BE',
     paddingHorizontal: 14,
