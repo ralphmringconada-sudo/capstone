@@ -188,17 +188,16 @@ setUpcomingEvents(liveEvents.slice(0, 4));
 </Text>
 
   <Text
-  style={[
-    styles.th,
-    styles.locationCol,
-    {
-      fontSize: 18 * s,
-      transform: [{ translateX: -10 * s }],
-    },
-  ]}
->
-  Location
-</Text>
+    style={[
+      styles.th,
+      styles.locationCol,
+      {
+        fontSize: 18 * s,
+      },
+    ]}
+  >
+    Location
+  </Text>
 
   <Text
     style={[
@@ -263,17 +262,20 @@ setUpcomingEvents(liveEvents.slice(0, 4));
                 </View>
 
                 <Text
-  style={[
-    styles.td,
-    styles.locationCol,
-    {
-      fontSize: 16 * s,
-      transform: [{ translateX: -15 * s }],
-    },
-  ]}
->
-  {report.location}
-</Text>
+                  numberOfLines={3}
+                  ellipsizeMode="tail"
+                  style={[
+                    styles.td,
+                    styles.locationCol,
+                    styles.locationCellText,
+                    {
+                      fontSize: 16 * s,
+                      lineHeight: 20 * s,
+                    },
+                  ]}
+                >
+                  {report.location}
+                </Text>
 
                 <View style={[styles.categoryCol, styles.badgeWrap]}>
                   <Text
@@ -547,23 +549,29 @@ const styles = StyleSheet.create({
   },
 
   idCol: {
-  width: "10%",
-},
-reportCol: {
-  width: "26%",
-},
-locationCol: {
-  width: "17%",
-},
-categoryCol: {
-  width: "14%",
-},
-statusCol: {
-  width: "15%",
-},
-dateCol: {
-  width: "18%",
-},
+    width: "9%",
+  },
+  reportCol: {
+    width: "24%",
+  },
+  locationCol: {
+    width: "24%",
+    paddingHorizontal: 8,
+  },
+  categoryCol: {
+    width: "15%",
+  },
+  statusCol: {
+    width: "13%",
+  },
+  dateCol: {
+    width: "15%",
+  },
+
+  locationCellText: {
+    flexShrink: 1,
+    textAlign: "left",
+  },
 
   reportTitleBox: {
   flexDirection: "row",

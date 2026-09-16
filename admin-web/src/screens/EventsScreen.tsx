@@ -682,15 +682,16 @@ export default function EventsScreen() {
     setActiveTab(tab);
 
     setStatus(
-      tab ===
-        "Pending Approval"
+      tab === "Pending Approval"
         ? "Pending"
-        : tab ===
-            "Rejected"
+        : tab === "Rejected"
           ? "Rejected"
           : "All Statuses"
     );
 
+    setShowCategoryDropdown(false);
+    setShowStatusDropdown(false);
+    setSelectionMenu(null);
     setPage(1);
   };
 
@@ -701,12 +702,20 @@ export default function EventsScreen() {
   const resetFilters = () => {
     setSearch("");
     setCategory("All Types");
-    setStatus("All Statuses");
+    setStatus(
+      activeTab === "Pending Approval"
+        ? "Pending"
+        : activeTab === "Rejected"
+          ? "Rejected"
+          : "All Statuses"
+    );
     setSortOrder(
       "Newest First"
     );
     setFromDate("");
     setToDate("");
+    setShowCategoryDropdown(false);
+    setShowStatusDropdown(false);
     setPage(1);
   };
 
@@ -1632,10 +1641,16 @@ const confirmRejectEvent = async () => {
                 activeOpacity={0.82}
                 style={[
                   styles.filterBox,
-                  showStatusDropdown &&
+                  activeTab === "All Events" &&
+                    showStatusDropdown &&
                     styles.filterBoxOpen,
                 ]}
+                disabled={activeTab !== "All Events"}
                 onPress={() => {
+                  if (activeTab !== "All Events") {
+                    return;
+                  }
+
                   setShowStatusDropdown(
                     !showStatusDropdown
                   );
@@ -1661,16 +1676,22 @@ const confirmRejectEvent = async () => {
                   <Text
                     style={[
                       styles.filterValue,
-                      showStatusDropdown &&
+                      activeTab === "All Events" &&
+                        showStatusDropdown &&
                         styles.filterValueOpen,
                     ]}
                   >
-                    {status}
+                    {activeTab === "Pending Approval"
+                      ? "Pending"
+                      : activeTab === "Rejected"
+                        ? "Rejected"
+                        : status}
                   </Text>
 
                   <ChevronDown
                     size={16}
                     color={
+                      activeTab === "All Events" &&
                       showStatusDropdown
                         ? "#34733B"
                         : "#333333"
@@ -1679,6 +1700,7 @@ const confirmRejectEvent = async () => {
                       transform: [
                         {
                           rotate:
+                            activeTab === "All Events" &&
                             showStatusDropdown
                               ? "180deg"
                               : "0deg",
@@ -1689,7 +1711,8 @@ const confirmRejectEvent = async () => {
                 </View>
               </TouchableOpacity>
 
-              {showStatusDropdown && (
+              {activeTab === "All Events" &&
+                showStatusDropdown && (
                 <View
                   style={
                     styles.dropdownMenu
@@ -1758,57 +1781,20 @@ const confirmRejectEvent = async () => {
               )}
             </View>
 
-            {/* DATE / SORT */}
+            {/* DATE RANGE - same on every tab */}
 
-            {activeTab ===
-            "All Events" ? (
-              <DateRangeBox
-                fromDate={fromDate}
-                toDate={toDate}
-                onChangeFrom={(value) => {
-                  setFromDate(value);
-                  setPage(1);
-                }}
-                onChangeTo={(value) => {
-                  setToDate(value);
-                  setPage(1);
-                }}
-              />
-            ) : (
-              <TouchableOpacity
-                style={
-                  styles.filterBox
-                }
-                onPress={() =>
-                  setSelectionMenu(
-                    "sort"
-                  )
-                }
-              >
-                <Text
-                  style={styles.filterLabel}
-                >
-                  Sort By
-                </Text>
-
-                <View
-                  style={
-                    styles.filterValueRow
-                  }
-                >
-                  <Text
-                    style={styles.filterValue}
-                  >
-                    {sortOrder}
-                  </Text>
-
-                  <ChevronDown
-                    size={15}
-                    color="#333"
-                  />
-                </View>
-              </TouchableOpacity>
-            )}
+            <DateRangeBox
+              fromDate={fromDate}
+              toDate={toDate}
+              onChangeFrom={(value) => {
+                setFromDate(value);
+                setPage(1);
+              }}
+              onChangeTo={(value) => {
+                setToDate(value);
+                setPage(1);
+              }}
+            />
 
             {/* RESET */}
 
@@ -5225,60 +5211,63 @@ const styles =
       paddingHorizontal: 8,
     },
 
+    // Balanced table columns.
+    // Event Details was previously much wider than the other columns,
+    // which created a large empty gap before Event Category.
     idColumn: {
-      flex: 0.65,
+      flex: 0.7,
       minWidth: 0,
-      paddingHorizontal: 10,
+      paddingHorizontal: 8,
     },
 
     detailsColumn: {
-      flex: 2.1,
+      flex: 1.65,
       minWidth: 0,
-      paddingHorizontal: 10,
+      paddingHorizontal: 8,
     },
 
     submittedColumn: {
       flex: 1.2,
       minWidth: 0,
-      paddingHorizontal: 10,
+      paddingHorizontal: 8,
     },
 
     categoryColumn: {
-      flex: 1.05,
+      flex: 1.15,
       minWidth: 0,
-      paddingHorizontal: 10,
+      paddingHorizontal: 8,
     },
 
     dateColumn: {
-      flex: 1.05,
+      flex: 1.15,
       minWidth: 0,
-      paddingHorizontal: 10,
+      paddingHorizontal: 8,
     },
 
     locationColumn: {
-      flex: 1.65,
+      flex: 1.55,
       minWidth: 0,
-      paddingHorizontal: 10,
+      paddingHorizontal: 8,
     },
 
     statusColumn: {
-      flex: 0.95,
+      flex: 1,
       minWidth: 0,
-      paddingHorizontal: 10,
+      paddingHorizontal: 8,
     },
 
     participantsColumn: {
-      flex: 0.95,
+      flex: 1,
       minWidth: 0,
-      paddingHorizontal: 10,
+      paddingHorizontal: 8,
       alignItems: "center",
       justifyContent: "center",
     },
 
     actionColumn: {
-      flex: 1.05,
+      flex: 1.1,
       minWidth: 0,
-      paddingHorizontal: 10,
+      paddingHorizontal: 8,
       alignItems: "center",
       justifyContent: "center",
     },
@@ -5300,7 +5289,7 @@ const styles =
         "row",
       alignItems:
         "center",
-      gap: 9,
+      gap: 7,
     },
 
     submittedCell: {
