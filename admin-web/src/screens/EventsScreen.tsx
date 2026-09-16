@@ -40,7 +40,6 @@ import {
 } from "lucide-react-native";
 
 import AdminLayout from "@/components/AdminLayout";
-import DateRangeFilter from "@/components/DateRangeFilter";
 import InteractiveLocationMap from "@/components/InteractiveLocationMap";
 
 import { useAdminAuth } from "@/context/AdminAuthContext";
@@ -294,7 +293,9 @@ function resolveAutomaticEventStatus(
   ) {
     return {
       ...event,
-      status: "Upcoming",
+      // Legacy "Upcoming" events are shown as Approved.
+      // Approved remains Approved until the event start time.
+      status: "Approved",
     };
   }
 
@@ -355,7 +356,7 @@ const CATEGORY_OPTIONS = [
 const STATUS_OPTIONS = [
   "All Statuses",
   "Pending",
-  "Upcoming",
+  "Approved",
   "Ongoing",
   "Completed",
   "Rejected",
@@ -462,6 +463,19 @@ export default function EventsScreen() {
 
   const { width, height } =
     useWindowDimensions();
+
+  const [tableContainerWidth, setTableContainerWidth] =
+    useState(0);
+
+  // Responsive table breakpoints. The table always stays inside its panel
+  // and never becomes horizontally scrollable.
+  const compactTable =
+    tableContainerWidth > 0 &&
+    tableContainerWidth < 1120;
+
+  const veryCompactTable =
+    tableContainerWidth > 0 &&
+    tableContainerWidth < 900;
 
   const s = Math.max(
     0.72,
@@ -946,6 +960,9 @@ export default function EventsScreen() {
           : "All Statuses"
     );
 
+    setShowCategoryDropdown(false);
+    setShowStatusDropdown(false);
+    setSelectionMenu(null);
     setPage(1);
   };
 
@@ -956,12 +973,21 @@ export default function EventsScreen() {
   const resetFilters = () => {
     setSearch("");
     setCategory("All Types");
-    setStatus("All Statuses");
+    setStatus(
+      activeTab === "Pending Approval"
+        ? "Pending"
+        : activeTab === "Rejected"
+          ? "Rejected"
+          : "All Statuses"
+    );
     setSortOrder(
       "Newest First"
     );
     setFromDate("");
     setToDate("");
+    setShowCategoryDropdown(false);
+    setShowStatusDropdown(false);
+    setSelectionMenu(null);
     setPage(1);
   };
 
@@ -1812,91 +1838,51 @@ const confirmRejectEvent = async () => {
           {/* FILTER PANEL */}
           {/* =============================================== */}
 
-          <View
-            style={[
-              styles.filterPanel,
-              {
-                padding: 14 * s,
-              },
-            ]}
-          >
+          <View style={styles.filterPanel}>
             {/* SEARCH */}
 
-            <View
-              style={
-                styles.searchBox
-              }
-            >
+            <View style={styles.searchBox}>
               <TextInput
                 value={search}
-                onChangeText={(
-                  value
-                ) => {
-                  setSearch(
-                    value
-                  );
-
+                onChangeText={(value) => {
+                  setSearch(value);
                   setPage(1);
                 }}
                 placeholder="Search events..."
                 placeholderTextColor="#777"
-                style={[
-                  styles.searchInput,
-                  {
-                    fontSize:
-                      15 * s,
-                  },
-                ]}
+                style={styles.searchInput}
               />
 
               <Search
-                size={19 * s}
+                size={17}
                 color="#555"
               />
             </View>
 
-            {/* CATEGORY */}
+            {/* EVENT TYPE */}
 
-            <View
-              style={
-                styles.dropdownContainer
-              }
-            >
+            <View style={styles.dropdownContainer}>
               <TouchableOpacity
                 activeOpacity={0.82}
                 style={[
                   styles.filterBox,
-                  showCategoryDropdown &&
-                    styles.filterBoxOpen,
+                  showCategoryDropdown && styles.filterBoxOpen,
                 ]}
                 onPress={() => {
-                  setShowCategoryDropdown(
-                    !showCategoryDropdown
-                  );
-
-                  setShowStatusDropdown(
-                    false
-                  );
+                  setShowCategoryDropdown(!showCategoryDropdown);
+                  setShowStatusDropdown(false);
                 }}
               >
-                <Text
-                  style={
-                    styles.filterLabel
-                  }
-                >
+                <Text style={styles.filterLabel}>
                   Event Type
                 </Text>
 
-                <View
-                  style={
-                    styles.filterValueRow
-                  }
-                >
+                <View style={styles.filterValueRow}>
                   <Text
+                    numberOfLines={1}
                     style={[
                       styles.filterValue,
-                      showCategoryDropdown &&
-                        styles.filterValueOpen,
+                      showCategoryDropdown && styles.filterValueOpen,
                     ]}
                   >
                     {category}
@@ -1904,18 +1890,11 @@ const confirmRejectEvent = async () => {
 
                   <ChevronDown
                     size={16}
-                    color={
-                      showCategoryDropdown
-                        ? "#34733B"
-                        : "#333333"
-                    }
+                    color={showCategoryDropdown ? "#34733B" : "#333333"}
                     style={{
                       transform: [
                         {
-                          rotate:
-                            showCategoryDropdown
-                              ? "180deg"
-                              : "0deg",
+                          rotate: showCategoryDropdown ? "180deg" : "0deg",
                         },
                       ],
                     }}
@@ -1924,322 +1903,178 @@ const confirmRejectEvent = async () => {
               </TouchableOpacity>
 
               {showCategoryDropdown && (
-                <View
-                  style={
-                    styles.dropdownMenu
-                  }
-                >
-                  {CATEGORY_OPTIONS.map(
-                    (item) => {
-                      const selected =
-                        category === item;
+                <View style={styles.dropdownMenu}>
+                  {CATEGORY_OPTIONS.map((item) => {
+                    const selected = category === item;
 
-                      return (
-                        <TouchableOpacity
-                          key={
-                            item
-                          }
-                          activeOpacity={
-                            0.75
-                          }
+                    return (
+                      <TouchableOpacity
+                        key={item}
+                        activeOpacity={0.75}
+                        style={[
+                          styles.dropdownItem,
+                          selected && styles.dropdownItemSelected,
+                        ]}
+                        onPress={() => {
+                          setCategory(item);
+                          setPage(1);
+                          setShowCategoryDropdown(false);
+                        }}
+                      >
+                        <Text
                           style={[
-                            styles.dropdownItem,
-                            selected &&
-                              styles.dropdownItemSelected,
+                            styles.dropdownText,
+                            selected && styles.dropdownTextSelected,
                           ]}
-                          onPress={() => {
-                            setCategory(
-                              item
-                            );
-
-                            setPage(
-                              1
-                            );
-
-                            setShowCategoryDropdown(
-                              false
-                            );
-                          }}
                         >
-                          <Text
-                            style={[
-                              styles.dropdownText,
-                              selected &&
-                                styles.dropdownTextSelected,
-                            ]}
-                          >
-                            {
-                              item
-                            }
-                          </Text>
+                          {item}
+                        </Text>
 
-                          {selected && (
-                            <Check
-                              size={
-                                16
-                              }
-                              color="#34733B"
-                              strokeWidth={
-                                2.5
-                              }
-                            />
-                          )}
-                        </TouchableOpacity>
-                      );
-                    }
-                  )}
+                        {selected && (
+                          <Check
+                            size={16}
+                            color="#34733B"
+                            strokeWidth={2.5}
+                          />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
               )}
             </View>
 
             {/* STATUS */}
 
-            <View
-              style={
-                styles.dropdownContainer
-              }
-            >
+            <View style={styles.dropdownContainer}>
               <TouchableOpacity
-                activeOpacity={0.82}
+                activeOpacity={activeTab === "All Events" ? 0.82 : 1}
+                disabled={activeTab !== "All Events"}
                 style={[
                   styles.filterBox,
-                  showStatusDropdown &&
+                  activeTab === "All Events" &&
+                    showStatusDropdown &&
                     styles.filterBoxOpen,
                 ]}
                 onPress={() => {
-                  setShowStatusDropdown(
-                    !showStatusDropdown
-                  );
+                  if (activeTab !== "All Events") return;
 
-                  setShowCategoryDropdown(
-                    false
-                  );
+                  setShowStatusDropdown(!showStatusDropdown);
+                  setShowCategoryDropdown(false);
                 }}
               >
-                <Text
-                  style={
-                    styles.filterLabel
-                  }
-                >
+                <Text style={styles.filterLabel}>
                   Status
                 </Text>
 
-                <View
-                  style={
-                    styles.filterValueRow
-                  }
-                >
+                <View style={styles.filterValueRow}>
                   <Text
+                    numberOfLines={1}
                     style={[
                       styles.filterValue,
-                      showStatusDropdown &&
+                      activeTab === "All Events" &&
+                        showStatusDropdown &&
                         styles.filterValueOpen,
                     ]}
                   >
-                    {status}
+                    {activeTab === "Pending Approval"
+                      ? "Pending"
+                      : activeTab === "Rejected"
+                        ? "Rejected"
+                        : status}
                   </Text>
 
-                  <ChevronDown
-                    size={16}
-                    color={
-                      showStatusDropdown
-                        ? "#34733B"
-                        : "#333333"
-                    }
-                    style={{
-                      transform: [
-                        {
-                          rotate:
-                            showStatusDropdown
-                              ? "180deg"
-                              : "0deg",
-                        },
-                      ],
-                    }}
-                  />
+                  {activeTab === "All Events" ? (
+                    <ChevronDown
+                      size={16}
+                      color={showStatusDropdown ? "#34733B" : "#333333"}
+                      style={{
+                        transform: [
+                          {
+                            rotate: showStatusDropdown ? "180deg" : "0deg",
+                          },
+                        ],
+                      }}
+                    />
+                  ) : null}
                 </View>
               </TouchableOpacity>
 
-              {showStatusDropdown && (
-                <View
-                  style={
-                    styles.dropdownMenu
-                  }
-                >
-                  {STATUS_OPTIONS.map(
-                    (item) => {
-                      const selected =
-                        status === item;
+              {activeTab === "All Events" && showStatusDropdown && (
+                <View style={styles.dropdownMenu}>
+                  {STATUS_OPTIONS.map((item) => {
+                    const selected = status === item;
 
-                      return (
-                        <TouchableOpacity
-                          key={
-                            item
-                          }
-                          activeOpacity={
-                            0.75
-                          }
+                    return (
+                      <TouchableOpacity
+                        key={item}
+                        activeOpacity={0.75}
+                        style={[
+                          styles.dropdownItem,
+                          selected && styles.dropdownItemSelected,
+                        ]}
+                        onPress={() => {
+                          setStatus(item);
+                          setPage(1);
+                          setShowStatusDropdown(false);
+                        }}
+                      >
+                        <Text
                           style={[
-                            styles.dropdownItem,
-                            selected &&
-                              styles.dropdownItemSelected,
+                            styles.dropdownText,
+                            selected && styles.dropdownTextSelected,
                           ]}
-                          onPress={() => {
-                            setStatus(
-                              item
-                            );
-
-                            setPage(
-                              1
-                            );
-
-                            setShowStatusDropdown(
-                              false
-                            );
-                          }}
                         >
-                          <Text
-                            style={[
-                              styles.dropdownText,
-                              selected &&
-                                styles.dropdownTextSelected,
-                            ]}
-                          >
-                            {
-                              item
-                            }
-                          </Text>
+                          {item}
+                        </Text>
 
-                          {selected && (
-                            <Check
-                              size={
-                                16
-                              }
-                              color="#34733B"
-                              strokeWidth={
-                                2.5
-                              }
-                            />
-                          )}
-                        </TouchableOpacity>
-                      );
-                    }
-                  )}
+                        {selected && (
+                          <Check
+                            size={16}
+                            color="#34733B"
+                            strokeWidth={2.5}
+                          />
+                        )}
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
               )}
             </View>
 
-            {/* DATE / SORT */}
+            {/* DATE RANGE */}
 
-            {activeTab ===
-            "All Events" ? (
-              <DateRangeFilter
-                label="Date Range"
-                fromDate={
-                  fromDate
-                }
-                toDate={toDate}
-                onChangeFrom={(
-                  value
-                ) => {
-                  setFromDate(
-                    value
-                  );
-
-                  setPage(1);
-                }}
-                onChangeTo={(
-                  value
-                ) => {
-                  setToDate(
-                    value
-                  );
-
-                  setPage(1);
-                }}
-                style={{
-                  flex: 1.5,
-                  minWidth: 220,
-                }}
-              />
-            ) : (
-              <TouchableOpacity
-                style={
-                  styles.filterBox
-                }
-                onPress={() =>
-                  setSelectionMenu(
-                    "sort"
-                  )
-                }
-              >
-                <Text
-                  style={[
-                    styles.filterLabel,
-                    {
-                      fontSize:
-                        11 * s,
-                    },
-                  ]}
-                >
-                  Sort By
-                </Text>
-
-                <View
-                  style={
-                    styles.filterValueRow
-                  }
-                >
-                  <Text
-                    style={[
-                      styles.filterValue,
-                      {
-                        fontSize:
-                          14 * s,
-                      },
-                    ]}
-                  >
-                    {sortOrder}
-                  </Text>
-
-                  <ChevronDown
-                    size={12 * s}
-                    color="#333"
-                  />
-                </View>
-              </TouchableOpacity>
-            )}
+            <DateRangeBox
+              fromDate={fromDate}
+              toDate={toDate}
+              onChangeFrom={(value) => {
+                setFromDate(value);
+                setPage(1);
+              }}
+              onChangeTo={(value) => {
+                setToDate(value);
+                setPage(1);
+              }}
+            />
 
             {/* RESET */}
 
             <TouchableOpacity
-              style={
-                styles.resetButton
-              }
-              onPress={
-                resetFilters
-              }
+              style={styles.resetButton}
+              onPress={resetFilters}
+              activeOpacity={0.82}
             >
               <Filter
-                size={15 * s}
+                size={15}
                 color="#43884c"
               />
 
-              <Text
-                style={[
-                  styles.resetText,
-                  {
-                    fontSize:
-                      12 * s,
-                  },
-                ]}
-              >
+              <Text style={styles.resetText}>
                 Reset
               </Text>
             </TouchableOpacity>
           </View>
 
-          {/* =============================================== */}
           {/* TABLE */}
           {/* =============================================== */}
 
@@ -2247,23 +2082,18 @@ const confirmRejectEvent = async () => {
             style={
               styles.tablePanel
             }
+            onLayout={(event) => {
+              setTableContainerWidth(
+                event.nativeEvent.layout.width
+              );
+            }}
           >
-            <ScrollView
-              horizontal={
-                width < 1100
-              }
-              showsHorizontalScrollIndicator={
-                width < 1100
-              }
+            <View
+              style={[
+                styles.table,
+                styles.tableFullWidth,
+              ]}
             >
-              <View
-                style={[
-                  styles.table,
-                  width >= 1100
-                    ? styles.tableFullWidth
-                    : null,
-                ]}
-              >
                 {/* TABLE HEADER */}
 
                 <View
@@ -2272,7 +2102,8 @@ const confirmRejectEvent = async () => {
                   }
                 >
                   {activeTab ===
-                    "All Events" && (
+                    "All Events" &&
+                    !compactTable && (
                     <Text
                       style={[
                         styles.th,
@@ -2379,7 +2210,8 @@ const confirmRejectEvent = async () => {
                         }
                       >
                         {activeTab ===
-                          "All Events" && (
+                          "All Events" &&
+                          !compactTable && (
                           <Text
                             style={[
                               styles.cellText,
@@ -2405,37 +2237,39 @@ const confirmRejectEvent = async () => {
                             styles.detailsColumn,
                           ]}
                         >
-                          <View
-                            style={
-                              styles.eventThumbnail
-                            }
-                          >
-                            {getEventImages(event)[0] ? (
-                              <Pressable
-                                onPress={() =>
-                                  setPreviewImageUrl(
-                                    getEventImages(event)[0]
-                                  )
-                                }
-                              >
-                                <Image
-                                  source={{
-                                    uri: getEventImages(event)[0],
-                                  }}
-                                  style={
-                                    styles.eventThumbnailImage
+                          {!veryCompactTable ? (
+                            <View
+                              style={
+                                styles.eventThumbnail
+                              }
+                            >
+                              {getEventImages(event)[0] ? (
+                                <Pressable
+                                  onPress={() =>
+                                    setPreviewImageUrl(
+                                      getEventImages(event)[0]
+                                    )
                                   }
+                                >
+                                  <Image
+                                    source={{
+                                      uri: getEventImages(event)[0],
+                                    }}
+                                    style={
+                                      styles.eventThumbnailImage
+                                    }
+                                  />
+                                </Pressable>
+                              ) : (
+                                <CalendarDays
+                                  size={
+                                    18
+                                  }
+                                  color="#7d8c7c"
                                 />
-                              </Pressable>
-                            ) : (
-                              <CalendarDays
-                                size={
-                                  18
-                                }
-                                color="#7d8c7c"
-                              />
-                            )}
-                          </View>
+                              )}
+                            </View>
+                          ) : null}
 
                           <View
                             style={
@@ -2579,8 +2413,9 @@ const confirmRejectEvent = async () => {
 
                         <Text
                           numberOfLines={
-                            2
+                            veryCompactTable ? 1 : 2
                           }
+                          ellipsizeMode="tail"
                           style={[
                             styles.cellText,
                             styles.locationColumn,
@@ -2688,11 +2523,14 @@ const confirmRejectEvent = async () => {
                             />
 
                             <Text
+                              numberOfLines={1}
                               style={
                                 styles.viewButtonText
                               }
                             >
-                              View Event
+                              {compactTable
+                                ? "View"
+                                : "View Event"}
                             </Text>
                           </TouchableOpacity>
                         
@@ -2718,7 +2556,6 @@ const confirmRejectEvent = async () => {
                   </View>
                 )}
               </View>
-            </ScrollView>
 
             {/* PAGINATION */}
 
@@ -4912,6 +4749,79 @@ function FormField({
 }
 
 // =========================================================
+// DATE RANGE FILTER
+// =========================================================
+
+function DateRangeBox({
+  fromDate,
+  toDate,
+  onChangeFrom,
+  onChangeTo,
+}: {
+  fromDate: string;
+  toDate: string;
+  onChangeFrom: (value: string) => void;
+  onChangeTo: (value: string) => void;
+}) {
+  return (
+    <View style={styles.dateRangeBox}>
+      <Text style={styles.dateRangeLabel}>
+        Date Range
+      </Text>
+
+      <View style={styles.dateRangeInputRow}>
+        <View style={styles.dateRangeSingleBox}>
+          {Platform.OS === "web"
+            ? createElement("input", {
+                type: "date",
+                value: fromDate,
+                "aria-label": "From date",
+                onChange: (event: {
+                  target: { value: string };
+                }) => onChangeFrom(event.target.value),
+                style: dateRangeWebInputStyle,
+              })
+            : (
+              <TextInput
+                value={fromDate}
+                onChangeText={onChangeFrom}
+                placeholder="From date"
+                placeholderTextColor="#888888"
+                style={styles.dateRangeNativeInput}
+              />
+            )}
+        </View>
+
+        <Text style={styles.dateRangeSeparator}>–</Text>
+
+        <View style={styles.dateRangeSingleBox}>
+          {Platform.OS === "web"
+            ? createElement("input", {
+                type: "date",
+                value: toDate,
+                min: fromDate || undefined,
+                "aria-label": "To date",
+                onChange: (event: {
+                  target: { value: string };
+                }) => onChangeTo(event.target.value),
+                style: dateRangeWebInputStyle,
+              })
+            : (
+              <TextInput
+                value={toDate}
+                onChangeText={onChangeTo}
+                placeholder="To date"
+                placeholderTextColor="#888888"
+                style={styles.dateRangeNativeInput}
+              />
+            )}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// =========================================================
 // DATE PICKER
 // =========================================================
 
@@ -5258,6 +5168,24 @@ function TimePickerField({
 // WEB PICKER STYLE
 // =========================================================
 
+const dateRangeWebInputStyle = {
+  width: "100%",
+  height: 23,
+  minWidth: 0,
+  maxWidth: "100%",
+  border: "none",
+  outline: "none",
+  padding: 0,
+  margin: 0,
+  fontSize: 10,
+  lineHeight: "23px",
+  color: "#252525",
+  backgroundColor: "transparent",
+  boxSizing: "border-box" as const,
+  fontFamily: MONTSERRAT_FONT,
+  cursor: "pointer",
+};
+
 const webPickerStyle = {
   height: 44,
   width: "100%",
@@ -5563,115 +5491,179 @@ const styles =
     // =====================================================
 
     filterPanel: {
-      marginTop: 22,
-      flexDirection:
-        "row",
-      gap: 14,
+      marginTop: 18,
+      width: "100%",
+      padding: 12,
+      flexDirection: "row",
+      flexWrap: "wrap",
+      alignItems: "center",
+      gap: 10,
       borderWidth: 1,
-      borderColor:
-        "#d3d3d3",
-      borderRadius: 9,
-      alignItems:
-        "center",
-      zIndex: 2,
+      borderColor: "#D9DEDA",
+      borderRadius: 10,
+      backgroundColor: "#FFFFFF",
+      zIndex: 20,
+      overflow: "visible",
     },
 
     searchBox: {
-      flex: 1.15,
-      minWidth: 180,
-      height: 54,
+      height: 52,
+      flexGrow: 1.35,
+      flexShrink: 1,
+      flexBasis: 250,
+      minWidth: 220,
       borderRadius: 8,
-      backgroundColor:
-        "#f4f4f4",
+      backgroundColor: "#F7F8F7",
       borderWidth: 1,
-      borderColor:
-        "#dddddd",
-      paddingHorizontal: 14,
-      flexDirection:
-        "row",
-      alignItems:
-        "center",
+      borderColor: "#D9DEDA",
+      paddingHorizontal: 13,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
     },
 
     searchInput: {
       flex: 1,
-      color: "#222",
-      outlineStyle:
-        "none",
+      minWidth: 0,
+      fontSize: 12,
+      color: "#252525",
+      fontFamily: MONTSERRAT_FONT,
+      outlineStyle: "none",
     } as never,
 
     filterBox: {
-      flex: 1,
-      minWidth: 150,
-      height: 54,
+      width: "100%",
+      height: 52,
       borderRadius: 8,
-      backgroundColor:
-        "#f4f4f4",
+      backgroundColor: "#F7F8F7",
       borderWidth: 1,
-      borderColor:
-        "#dddddd",
+      borderColor: "#D9DEDA",
       paddingHorizontal: 12,
       paddingVertical: 6,
-      justifyContent:
-        "center",
+      justifyContent: "center",
       cursor: "pointer",
     } as any,
 
     filterBoxOpen: {
-      borderColor:
-        "#34733B",
-      backgroundColor:
-        "#F8FBF7",
+      borderColor: "#34733B",
+      backgroundColor: "#F7FBF5",
     },
 
     filterValueOpen: {
-      color:
-        "#34733B",
+      color: "#34733B",
     },
 
     filterLabel: {
-      fontFamily:
-        MONTSERRAT_FONT,
-      color: "#555",
-      marginBottom: 1,
-      fontSize: 14,
+      fontFamily: MONTSERRAT_FONT,
+      color: "#686F68",
+      marginBottom: 2,
+      fontSize: 10,
+      lineHeight: 12,
     },
 
     filterValueRow: {
-      flexDirection:
-        "row",
-      alignItems:
-        "center",
-      justifyContent:
-        "space-between",
-      minHeight: 18,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      minHeight: 20,
+      gap: 8,
     },
 
     filterValue: {
-      fontFamily:
-        MONTSERRAT_FONT,
+      flex: 1,
+      minWidth: 0,
+      fontSize: 12,
+      lineHeight: 16,
+      fontFamily: MONTSERRAT_FONT,
       color: "#252525",
-      flexShrink: 1,
     },
 
-    resetButton: {
-      height: 38,
-      paddingHorizontal: 13,
+    dateRangeBox: {
+      height: 52,
+      flexGrow: 0,
+      flexShrink: 1,
+      flexBasis: 300,
+      minWidth: 286,
+      maxWidth: 320,
       borderRadius: 8,
+      backgroundColor: "#F7F8F7",
       borderWidth: 1,
-      borderColor:
-        "#86be8d",
-      flexDirection:
-        "row",
-      alignItems:
-        "center",
+      borderColor: "#D9DEDA",
+      paddingHorizontal: 10,
+      paddingTop: 4,
+      paddingBottom: 5,
+      justifyContent: "center",
+      overflow: "hidden",
+    },
+
+    dateRangeLabel: {
+      fontSize: 10,
+      lineHeight: 12,
+      color: "#686F68",
+      fontFamily: MONTSERRAT_FONT,
+      marginBottom: 2,
+    },
+
+    dateRangeInputRow: {
+      height: 27,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-start",
       gap: 5,
     },
 
+    dateRangeSingleBox: {
+      width: 128,
+      height: 27,
+      borderWidth: 1,
+      borderColor: "#CDD3CD",
+      borderRadius: 6,
+      backgroundColor: "#FFFFFF",
+      paddingHorizontal: 7,
+      justifyContent: "center",
+      overflow: "hidden",
+    },
+
+    dateRangeSeparator: {
+      width: 10,
+      textAlign: "center",
+      fontSize: 11,
+      lineHeight: 14,
+      color: "#656B65",
+      fontFamily: MONTSERRAT_FONT,
+    },
+
+    dateRangeNativeInput: {
+      width: "100%",
+      minWidth: 0,
+      height: 23,
+      padding: 0,
+      margin: 0,
+      borderWidth: 0,
+      fontSize: 10,
+      color: "#252525",
+      fontFamily: MONTSERRAT_FONT,
+    },
+
+    resetButton: {
+      width: 94,
+      height: 52,
+      flexShrink: 0,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: "#D9DEDA",
+      backgroundColor: "#F7F8F7",
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 6,
+    },
+
     resetText: {
+      fontSize: 12,
       color: "#34733B",
-      fontFamily:
-        MONTSERRAT_FONT,
+      fontFamily: MONTSERRAT_FONT,
     },
 
     // =====================================================
@@ -5688,12 +5680,13 @@ const styles =
     },
 
     table: {
-      minWidth: 980,
+      width: "100%",
+      minWidth: 0,
     },
 
     tableFullWidth: {
-      minWidth: "100%",
       width: "100%",
+      minWidth: 0,
     },
 
     tableHeader: {
@@ -5705,14 +5698,16 @@ const styles =
       borderBottomWidth: 1,
       borderBottomColor:
         "#d7d7d7",
-      paddingHorizontal: 12,
+      paddingHorizontal: 8,
     },
 
     th: {
-      fontSize: 14,
+      fontSize: 13,
+      lineHeight: 16,
       color: "#202020",
       fontFamily:
         MONTSERRAT_FONT,
+      flexShrink: 1,
     },
 
     centerHeaderText: {
@@ -5733,49 +5728,49 @@ const styles =
       borderBottomWidth: 1,
       borderBottomColor:
         "#dddddd",
-      paddingHorizontal: 12,
+      paddingHorizontal: 8,
     },
 
     idColumn: {
-      flex: 0.7,
-      minWidth: 90,
-      paddingHorizontal: 8,
+      flex: 0.55,
+      minWidth: 0,
+      paddingHorizontal: 6,
     },
 
     detailsColumn: {
-      flex: 1.75,
-      minWidth: 240,
-      paddingHorizontal: 8,
+      flex: 1.65,
+      minWidth: 0,
+      paddingHorizontal: 6,
     },
 
     submittedColumn: {
-      flex: 1.25,
-      minWidth: 150,
-      paddingHorizontal: 8,
+      flex: 1.15,
+      minWidth: 0,
+      paddingHorizontal: 6,
     },
 
     categoryColumn: {
-      flex: 1.05,
-      minWidth: 135,
-      paddingHorizontal: 8,
+      flex: 1.0,
+      minWidth: 0,
+      paddingHorizontal: 6,
     },
 
     dateColumn: {
-      flex: 1.2,
-      minWidth: 155,
-      paddingHorizontal: 8,
+      flex: 1.15,
+      minWidth: 0,
+      paddingHorizontal: 6,
     },
 
     locationColumn: {
-      flex: 1.55,
-      minWidth: 230,
-      paddingHorizontal: 8,
+      flex: 1.45,
+      minWidth: 0,
+      paddingHorizontal: 6,
     },
 
     statusColumn: {
       flex: 0.9,
-      minWidth: 110,
-      paddingHorizontal: 6,
+      minWidth: 0,
+      paddingHorizontal: 5,
       alignItems:
         "center",
       justifyContent:
@@ -5783,9 +5778,9 @@ const styles =
     },
 
     participantsColumn: {
-      flex: 0.9,
-      minWidth: 115,
-      paddingHorizontal: 8,
+      flex: 0.85,
+      minWidth: 0,
+      paddingHorizontal: 5,
       alignItems:
         "center",
       justifyContent:
@@ -5793,9 +5788,10 @@ const styles =
     },
 
     actionColumn: {
-      flex: 0.95,
-      minWidth: 125,
-      paddingHorizontal: 8,
+      flex: 0.9,
+      minWidth: 0,
+      paddingLeft: 5,
+      paddingRight: 8,
       alignItems:
         "center",
       justifyContent:
@@ -5803,10 +5799,12 @@ const styles =
     },
 
     cellText: {
-      fontSize: 14,
+      fontSize: 13,
+      lineHeight: 17,
       fontFamily:
         MONTSERRAT_FONT,
       color: "#242424",
+      flexShrink: 1,
     },
 
     detailsCell: {
@@ -5911,17 +5909,25 @@ const styles =
     },
 
     viewButton: {
+      width: "100%",
+      maxWidth: 112,
+      minWidth: 0,
+      minHeight: 32,
       borderWidth: 1,
       borderColor:
         "#4b9b52",
       borderRadius: 6,
       paddingVertical: 5,
-      paddingHorizontal: 7,
+      paddingHorizontal: 5,
       flexDirection:
         "row",
       alignItems:
         "center",
+      justifyContent:
+        "center",
       gap: 4,
+      overflow: "hidden",
+      flexShrink: 1,
     },
 
     viewButtonText: {
@@ -6917,13 +6923,14 @@ rejectConfirmText: {
     // =====================================================
 
     dropdownContainer: {
-      flex: 1,
-      minWidth: 150,
-      position:
-        "relative",
+      height: 52,
+      flexGrow: 0.8,
+      flexShrink: 1,
+      flexBasis: 165,
+      minWidth: 155,
+      position: "relative",
       zIndex: 100,
-      overflow:
-        "visible",
+      overflow: "visible",
     },
 
     dropdownMenu: {
