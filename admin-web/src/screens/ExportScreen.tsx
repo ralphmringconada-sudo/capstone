@@ -821,7 +821,12 @@ export default function ExportReports() {
                 </Pressable>
 
                 {showSaveDropdown && (
-                  <View style={styles.dropdownMenu}>
+                  <View
+                    style={[
+                      styles.dropdownMenu,
+                      styles.saveDropdownMenu,
+                    ]}
+                  >
                     {locations.map((item) => (
                       <Pressable
                         key={item}
@@ -1431,6 +1436,10 @@ const styles = StyleSheet.create({
     backgroundColor: "#ffffff",
   },
 
+  saveDropdownMenu: {
+    top: 32,
+  },
+
   saveLocationContent: {
     flexDirection: "row",
     alignItems: "center",
@@ -1493,8 +1502,8 @@ const styles = StyleSheet.create({
   },
 
   checkboxRowDropdownOpen: {
-  marginTop: 105,
-},
+    marginTop: 118,
+  },
 
   checkbox: {
     width: 12,

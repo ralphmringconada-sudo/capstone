@@ -1,14 +1,16 @@
-import { createElement, useEffect, useMemo, useRef, useState } from "react";
+import { createElement, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import {
   Alert,
+  Animated,
+  Easing,
   Image,
   Modal,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
+  Text as RNText,
+  TextInput as RNTextInput,
   TouchableOpacity,
   useWindowDimensions,
   View,
@@ -33,10 +35,12 @@ import {
   Upload,
   UserRound,
   Users,
+  TriangleAlert,
   X,
 } from "lucide-react-native";
 
 import AdminLayout from "@/components/AdminLayout";
+import DateRangeFilter from "@/components/DateRangeFilter";
 import InteractiveLocationMap from "@/components/InteractiveLocationMap";
 
 import { useAdminAuth } from "@/context/AdminAuthContext";
@@ -58,6 +62,50 @@ import type {
 
 import { isWithinDateRange } from "@/utils/dateRange";
 import { formatDateTime } from "@/utils/format";
+
+const MONTSERRAT_FONT = "Montserrat_700Bold";
+
+type ScreenTextProps = ComponentProps<typeof RNText>;
+type ScreenTextInputProps = ComponentProps<typeof RNTextInput>;
+
+function Text({ style, ...props }: ScreenTextProps) {
+  return (
+    <RNText
+      {...props}
+      style={[{ fontFamily: MONTSERRAT_FONT }, style]}
+    />
+  );
+}
+
+function TextInput({ style, ...props }: ScreenTextInputProps) {
+  return (
+    <RNTextInput
+      {...props}
+      style={[{ fontFamily: MONTSERRAT_FONT }, style]}
+    />
+  );
+}
+
+type EventFormField =
+  | "title"
+  | "description"
+  | "date"
+  | "time"
+  | "endTime"
+  | "location"
+  | "capacity";
+
+type EventFormErrors = Partial<
+  Record<EventFormField, string>
+>;
+
+type EventFormAlertState = {
+  visible: boolean;
+  title: string;
+  message: string;
+  variant: "error" | "warning" | "success";
+};
+
 
 // =========================================================
 // TYPES
@@ -198,6 +246,61 @@ function getEventImages(event: {
   return [];
 }
 
+function resolveAutomaticEventStatus(
+  event: AdminEvent,
+  now = new Date()
+): AdminEvent {
+  if (
+    event.status === "Pending" ||
+    event.status === "Rejected" ||
+    event.status === "Completed"
+  ) {
+    return event;
+  }
+
+  const nowMs = now.getTime();
+
+  const startMs = event.startAt
+    ? new Date(event.startAt).getTime()
+    : Number.NaN;
+
+  const endMs = event.endAt
+    ? new Date(event.endAt).getTime()
+    : Number.NaN;
+
+  if (
+    Number.isFinite(endMs) &&
+    nowMs >= endMs
+  ) {
+    return {
+      ...event,
+      status: "Completed",
+    };
+  }
+
+  if (
+    Number.isFinite(startMs) &&
+    nowMs >= startMs
+  ) {
+    return {
+      ...event,
+      status: "Ongoing",
+    };
+  }
+
+  if (
+    event.status === "Approved" ||
+    event.status === "Upcoming"
+  ) {
+    return {
+      ...event,
+      status: "Upcoming",
+    };
+  }
+
+  return event;
+}
+
 function EventImageLightbox({
   uri,
   onClose,
@@ -252,7 +355,7 @@ const CATEGORY_OPTIONS = [
 const STATUS_OPTIONS = [
   "All Statuses",
   "Pending",
-  "Approved",
+  "Upcoming",
   "Ongoing",
   "Completed",
   "Rejected",
@@ -272,6 +375,79 @@ const REJECTION_REASONS = [
 // =========================================================
 
 export default function EventsScreen() {
+
+  const [eventImageFailed, setEventImageFailed] = useState(false);
+
+  const [
+    eventFormAlert,
+    setEventFormAlert,
+  ] = useState<EventFormAlertState>({
+    visible: false,
+    title: "",
+    message: "",
+    variant: "warning",
+  });
+
+  const formAlertAnimation = useRef(
+    new Animated.Value(0)
+  ).current;
+
+  useEffect(() => {
+    if (
+      eventFormAlert.visible &&
+      eventFormAlert.variant !== "success"
+    ) {
+      formAlertAnimation.setValue(0);
+
+      Animated.timing(
+        formAlertAnimation,
+        {
+          toValue: 1,
+          duration: 220,
+          easing: Easing.out(
+            Easing.cubic
+          ),
+          useNativeDriver: true,
+        }
+      ).start();
+    }
+  }, [
+    eventFormAlert.visible,
+    eventFormAlert.variant,
+    formAlertAnimation,
+  ]);
+
+  const showEventFormAlert = (
+    title: string,
+    message: string,
+    variant: EventFormAlertState["variant"] = "warning"
+  ) => {
+    setEventFormAlert({
+      visible: true,
+      title,
+      message,
+      variant,
+    });
+  };
+
+  const closeEventFormAlert = () => {
+    setEventFormAlert(
+      (previous) => ({
+        ...previous,
+        visible: false,
+      })
+    );
+  };
+
+  const closeAddEventModal = () => {
+    setEditingEventId(null);
+    setEventFormErrors({});
+    setEventFormAlert((previous) => ({
+      ...previous,
+      visible: false,
+    }));
+    setAddModalOpen(false);
+  };
 
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
 
@@ -294,22 +470,6 @@ export default function EventsScreen() {
       height / 1080
     )
   );
-
-  // Measure the ACTUAL content area inside AdminLayout instead of using
-  // the full browser width. This keeps the page responsive even when
-  // the sidebar takes up part of the screen.
-  const [contentWidth, setContentWidth] = useState(0);
-
-  const estimatedContentWidth = Math.max(width - 300, 0);
-  const usableWidth = contentWidth || estimatedContentWidth;
-
-  const isLaptop = usableWidth < 1250;
-  const isCompact = usableWidth < 1080;
-  const isNarrow = usableWidth < 900;
-  const denseTable = usableWidth < 1180;
-  const hideIdColumn = usableWidth < 1030;
-
-  const pageHorizontalPadding = isCompact ? 10 : isLaptop ? 14 : 20;
 
   const { admin } = useAdminAuth();
   const { eventId: eventIdParam } = useLocalSearchParams<{ eventId?: string }>();
@@ -424,6 +584,31 @@ export default function EventsScreen() {
   ] = useState("");
 
   const [
+    eventFormErrors,
+    setEventFormErrors,
+  ] = useState<EventFormErrors>({});
+
+  const clearEventFormError = (
+    field: EventFormField
+  ) => {
+    setEventFormErrors(
+      (previous) => {
+        if (!previous[field]) {
+          return previous;
+        }
+
+        const next = {
+          ...previous,
+        };
+
+        delete next[field];
+
+        return next;
+      }
+    );
+  };
+
+  const [
     newImageUri,
     setNewImageUri,
   ] = useState<string | null>(null);
@@ -473,8 +658,19 @@ export default function EventsScreen() {
 
   const reloadEvents = async () => {
     try {
+      const loadedEvents =
+        await fetchEvents();
+
+      const now = new Date();
+
       setEvents(
-        await fetchEvents()
+        loadedEvents.map(
+          (event) =>
+            resolveAutomaticEventStatus(
+              event,
+              now
+            )
+        )
       );
     } catch (error) {
       Alert.alert(
@@ -488,7 +684,57 @@ export default function EventsScreen() {
 
   useEffect(() => {
     void reloadEvents();
+
+    const statusTimer = setInterval(() => {
+      const now = new Date();
+
+      setEvents(
+        (currentEvents) =>
+          currentEvents.map(
+            (event) =>
+              resolveAutomaticEventStatus(
+                event,
+                now
+              )
+          )
+      );
+    }, 10_000);
+
+    const refreshTimer = setInterval(() => {
+      void reloadEvents();
+    }, 30_000);
+
+    return () => {
+      clearInterval(statusTimer);
+      clearInterval(refreshTimer);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!selectedEvent) {
+      return;
+    }
+
+    const latestEvent =
+      events.find(
+        (event) =>
+          event.id ===
+          selectedEvent.id
+      );
+
+    if (
+      latestEvent &&
+      latestEvent.status !==
+        selectedEvent.status
+    ) {
+      setSelectedEvent(
+        latestEvent
+      );
+    }
+  }, [
+    events,
+    selectedEvent,
+  ]);
 
 
   // =======================================================
@@ -600,54 +846,6 @@ export default function EventsScreen() {
       toDate,
     ]);
 
-  const filteredStats = useMemo(() => {
-    const query = search.trim().toLowerCase();
-
-    // Search and date are shared by the Event Type and Status cards.
-    const baseEvents = events.filter((event) => {
-      const matchesSearch =
-        !query ||
-        event.title.toLowerCase().includes(query) ||
-        event.description.toLowerCase().includes(query) ||
-        event.location.toLowerCase().includes(query) ||
-        event.id.toLowerCase().includes(query);
-
-      const eventDay = new Date(event.date);
-      const dateValue = Number.isNaN(eventDay.getTime())
-        ? event.createdAt
-        : eventDay;
-
-      return (
-        matchesSearch &&
-        isWithinDateRange(dateValue, fromDate, toDate)
-      );
-    });
-
-    const categoryCount =
-      category === "All Types"
-        ? baseEvents.length
-        : baseEvents.filter((event) => event.category === category).length;
-
-    const statusCount =
-      status === "All Statuses"
-        ? baseEvents.length
-        : baseEvents.filter((event) => event.status === status).length;
-
-    return {
-      total: filteredEvents.length,
-      categoryCount,
-      statusCount,
-    };
-  }, [
-    events,
-    filteredEvents,
-    search,
-    category,
-    status,
-    fromDate,
-    toDate,
-  ]);
-
   const totalPages =
     Math.max(
       1,
@@ -672,6 +870,63 @@ export default function EventsScreen() {
         pageSize
     );
 
+
+    const filteredStats = useMemo(() => {
+  const query = search.trim().toLowerCase();
+
+  // Search + date are the shared/base filters.
+  const baseEvents = events.filter((event) => {
+    const matchesSearch =
+      !query ||
+      event.title.toLowerCase().includes(query) ||
+      event.description.toLowerCase().includes(query) ||
+      event.location.toLowerCase().includes(query) ||
+      event.id.toLowerCase().includes(query);
+
+    const eventDay = new Date(event.date);
+
+    const dateValue = Number.isNaN(eventDay.getTime())
+      ? event.createdAt
+      : eventDay;
+
+    const matchesDate = isWithinDateRange(
+      dateValue,
+      fromDate,
+      toDate
+    );
+
+    return matchesSearch && matchesDate;
+  });
+
+  const categoryCount =
+    category === "All Types"
+      ? baseEvents.length
+      : baseEvents.filter(
+          (event) => event.category === category
+        ).length;
+
+  const statusCount =
+    status === "All Statuses"
+      ? baseEvents.length
+      : baseEvents.filter(
+          (event) => event.status === status
+        ).length;
+
+  return {
+    total: filteredEvents.length,
+    categoryCount,
+    statusCount,
+  };
+}, [
+  events,
+  filteredEvents,
+  search,
+  category,
+  status,
+  fromDate,
+  toDate,
+]);
+
   // =======================================================
   // TAB
   // =======================================================
@@ -682,16 +937,15 @@ export default function EventsScreen() {
     setActiveTab(tab);
 
     setStatus(
-      tab === "Pending Approval"
+      tab ===
+        "Pending Approval"
         ? "Pending"
-        : tab === "Rejected"
+        : tab ===
+            "Rejected"
           ? "Rejected"
           : "All Statuses"
     );
 
-    setShowCategoryDropdown(false);
-    setShowStatusDropdown(false);
-    setSelectionMenu(null);
     setPage(1);
   };
 
@@ -702,20 +956,12 @@ export default function EventsScreen() {
   const resetFilters = () => {
     setSearch("");
     setCategory("All Types");
-    setStatus(
-      activeTab === "Pending Approval"
-        ? "Pending"
-        : activeTab === "Rejected"
-          ? "Rejected"
-          : "All Statuses"
-    );
+    setStatus("All Statuses");
     setSortOrder(
       "Newest First"
     );
     setFromDate("");
     setToDate("");
-    setShowCategoryDropdown(false);
-    setShowStatusDropdown(false);
     setPage(1);
   };
 
@@ -827,21 +1073,66 @@ export default function EventsScreen() {
       creatingRef.current =
         true;
 
-      if (
-        !newTitle.trim() ||
-        !newDescription.trim() ||
-        !newDate.trim() ||
-        !newTime.trim() ||
-        !newEndTime.trim() ||
-        !newLocation.trim() ||
-        !newCapacity.trim()
+      const validationErrors: EventFormErrors = {};
+
+      if (!newTitle.trim()) {
+        validationErrors.title =
+          "Event title is required.";
+      }
+
+      if (!newDescription.trim()) {
+        validationErrors.description =
+          "Event description is required.";
+      }
+
+      if (!newDate.trim()) {
+        validationErrors.date =
+          "Event date is required.";
+      }
+
+      if (!newTime.trim()) {
+        validationErrors.time =
+          "Start time is required.";
+      }
+
+      if (!newEndTime.trim()) {
+        validationErrors.endTime =
+          "End time is required.";
+      }
+
+      if (!newLocation.trim()) {
+        validationErrors.location =
+          "Event location is required.";
+      }
+
+      const capacity =
+        Number(newCapacity);
+
+      if (!newCapacity.trim()) {
+        validationErrors.capacity =
+          "Maximum participants is required.";
+      } else if (
+        !Number.isInteger(capacity) ||
+        capacity < 1
       ) {
+        validationErrors.capacity =
+          "Enter a positive whole number.";
+      }
+
+      if (
+        Object.keys(validationErrors).length > 0
+      ) {
+        setEventFormErrors(
+          validationErrors
+        );
+
         creatingRef.current =
           false;
 
-        Alert.alert(
-          "Incomplete event",
-          "Complete all required event fields."
+        showEventFormAlert(
+          "Incomplete Event",
+          "Please complete the required fields highlighted in red before creating the event.",
+          "warning"
         );
 
         return;
@@ -860,9 +1151,10 @@ export default function EventsScreen() {
       if (!startAt || !endAt) {
         creatingRef.current = false;
 
-        Alert.alert(
-          "Invalid event time",
-          "Select a valid event date, start time, and end time."
+        showEventFormAlert(
+          "Invalid Event Time",
+          "Please select a valid event date, start time, and end time.",
+          "warning"
         );
 
         return;
@@ -872,43 +1164,31 @@ export default function EventsScreen() {
         new Date(endAt).getTime() <=
         new Date(startAt).getTime()
       ) {
+        setEventFormErrors({
+          endTime: "End time must be later than start time.",
+        });
+
         creatingRef.current = false;
 
-        Alert.alert(
-          "Invalid end time",
-          "End Time must be later than Start Time."
+        showEventFormAlert(
+          "Invalid End Time",
+          "The event end time must be later than the start time.",
+          "warning"
         );
 
         return;
       }
 
-      const capacity =
-        Number(newCapacity);
-
-      if (
-        !Number.isInteger(
-          capacity
-        ) ||
-        capacity < 1
-      ) {
-        creatingRef.current =
-          false;
-
-        Alert.alert(
-          "Invalid participants",
-          "Maximum participants must be a positive whole number."
-        );
-
-        return;
-      }
+      setEventFormErrors({});
 
       if (!admin) {
         creatingRef.current =
           false;
 
-        Alert.alert(
-          "Not authorized",
-          "Sign in as an administrator to create events."
+        showEventFormAlert(
+          "Not Authorized",
+          "Please sign in as an administrator before creating an event.",
+          "error"
         );
 
         return;
@@ -1031,6 +1311,7 @@ export default function EventsScreen() {
         setNewEndTime("");
         setNewLocation("");
         setNewCapacity("");
+        setEventFormErrors({});
         setNewImageUri(null);
 
         setNewCoordinates(
@@ -1045,16 +1326,22 @@ export default function EventsScreen() {
           "All Events"
         );
 
-        Alert.alert(
-          "Event created",
-          "Saved successfully."
+        showEventFormAlert(
+          editingEventId
+            ? "Event Updated"
+            : "Event Created",
+          editingEventId
+            ? "The event changes were saved successfully."
+            : "The new event was created successfully.",
+          "success"
         );
       } catch (error) {
-        Alert.alert(
-          "Event not saved",
+        showEventFormAlert(
+          "Event Not Saved",
           error instanceof Error
             ? error.message
-            : "Failed to create event."
+            : "Failed to create the event. Please try again.",
+          "error"
         );
 
         creatingRef.current =
@@ -1077,41 +1364,28 @@ export default function EventsScreen() {
   // OPEN EVENT
   // =======================================================
 
-  const openEventDetails =
-    async (
-      event: AdminEvent
-    ) => {
-      setSelectedEvent(
-        event
-      );
+  const openEventDetails = async (event: AdminEvent) => {
+  setSelectedEvent(event);
+  setEventImageFailed(false);
 
-      setEventParticipants(
-        []
-      );
+  setEventParticipants([]);
+  setLoadingParticipants(true);
 
-      setLoadingParticipants(
-        true
-      );
-
-      try {
-        setEventParticipants(
-          await fetchEventParticipants(
-            event.id
-          )
-        );
-      } catch (error) {
-        Alert.alert(
-          "Participants unavailable",
-          error instanceof Error
-            ? error.message
-            : "Failed to load participants."
-        );
-      } finally {
-        setLoadingParticipants(
-          false
-        );
-      }
-    };
+  try {
+    setEventParticipants(
+      await fetchEventParticipants(event.id)
+    );
+  } catch (error) {
+    Alert.alert(
+      "Participants unavailable",
+      error instanceof Error
+        ? error.message
+        : "Failed to load participants."
+    );
+  } finally {
+    setLoadingParticipants(false);
+  }
+};
 
   // Open an event when arriving from a notification deep link (?eventId=...).
   useEffect(() => {
@@ -1213,13 +1487,90 @@ const confirmRejectEvent = async () => {
   setRejectionRemarks("");
 };
 
-
   // =======================================================
   // RENDER
   // =======================================================
 
   return (
     <AdminLayout activePage="Events">
+      {/* ================================================= */}
+      {/* EVENT FORM ALERT */}
+      {/* ================================================= */}
+
+      <Modal
+        visible={
+          eventFormAlert.visible &&
+          eventFormAlert.variant === "success"
+        }
+        transparent
+        animationType="fade"
+        onRequestClose={closeEventFormAlert}
+      >
+        <Pressable
+          style={styles.formAlertOverlay}
+          onPress={closeEventFormAlert}
+        >
+          <Pressable
+            style={styles.formAlertCard}
+            onPress={() => {
+              // Keep clicks inside the alert from closing it.
+            }}
+          >
+            <View
+              style={[
+                styles.formAlertIconWrap,
+                eventFormAlert.variant === "success"
+                  ? styles.formAlertIconSuccess
+                  : eventFormAlert.variant === "error"
+                    ? styles.formAlertIconError
+                    : styles.formAlertIconWarning,
+              ]}
+            >
+              {eventFormAlert.variant === "success" ? (
+                <Check
+                  size={28}
+                  color="#FFFFFF"
+                  strokeWidth={3}
+                />
+              ) : (
+                <TriangleAlert
+                  size={28}
+                  color="#FFFFFF"
+                  strokeWidth={2.7}
+                />
+              )}
+            </View>
+
+            <Text style={styles.formAlertTitle}>
+              {eventFormAlert.title}
+            </Text>
+
+            <Text style={styles.formAlertMessage}>
+              {eventFormAlert.message}
+            </Text>
+
+            <TouchableOpacity
+              style={[
+                styles.formAlertButton,
+                eventFormAlert.variant === "success"
+                  ? styles.formAlertButtonSuccess
+                  : eventFormAlert.variant === "error"
+                    ? styles.formAlertButtonError
+                    : styles.formAlertButtonWarning,
+              ]}
+              onPress={closeEventFormAlert}
+              activeOpacity={0.85}
+            >
+              <Text style={styles.formAlertButtonText}>
+                {eventFormAlert.variant === "success"
+                  ? "Done"
+                  : "Got it"}
+              </Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
       {/* ================================================= */}
       {/* PENDING EVENT */}
       {/* ================================================= */}
@@ -1248,11 +1599,8 @@ const confirmRejectEvent = async () => {
 
         <ScrollView
           style={styles.page}
-          onLayout={(event) =>
-            setContentWidth(event.nativeEvent.layout.width)
-          }
           contentContainerStyle={{
-            paddingHorizontal: pageHorizontalPadding,
+            paddingHorizontal: 20,
             paddingTop:
               height * 0.018,
             paddingBottom: 30,
@@ -1268,10 +1616,9 @@ const confirmRejectEvent = async () => {
           {/* =============================================== */}
 
           <View
-            style={[
-              styles.headingRow,
-              isNarrow && styles.headingRowNarrow,
-            ]}
+            style={
+              styles.headingRow
+            }
           >
             <View>
               <Text
@@ -1319,6 +1666,11 @@ const confirmRejectEvent = async () => {
                 }
                 onPress={() => {
                   setEditingEventId(null);
+                  setEventFormErrors({});
+                  setEventFormAlert((previous) => ({
+                    ...previous,
+                    visible: false,
+                  }));
                   setAddModalOpen(true);
                 }}
               >
@@ -1396,7 +1748,7 @@ const confirmRejectEvent = async () => {
                     styles.tabText,
                     {
                       fontSize:
-                        18 * s,
+                        14 * s,
                     },
                   ]}
                 >
@@ -1411,63 +1763,69 @@ const confirmRejectEvent = async () => {
           {/* =============================================== */}
 
           {activeTab === "All Events" && (
-            <View
-              style={[
-                styles.cards,
-                {
-                  gap: isCompact ? 12 : 18,
-                },
-              ]}
-            >
-              <SummaryCard
-                title="Total Events"
-                value={filteredStats.total}
-                color="#ffffff"
-                icon={CalendarCheck}
-                iconColor="#0aa65b"
-                scale={s}
-              />
+  <View
+    style={[
+      styles.cards,
+      {
+        gap: 28 * s,
+      },
+    ]}
+  >
+    <SummaryCard
+      title="Total Events"
+      value={filteredStats.total}
+      color="#ffffff"
+      icon={CalendarCheck}
+      iconColor="#0aa65b"
+      scale={s}
+    />
 
-              <SummaryCard
-                title={
-                  category === "All Types"
-                    ? "All Event Types"
-                    : category
-                }
-                value={filteredStats.categoryCount}
-                color="#fff1c9"
-                icon={CalendarDays}
-                iconColor="#D99A00"
-                scale={s}
-              />
+    <SummaryCard
+      title={
+        category === "All Types"
+          ? "All Event Types"
+          : category
+      }
+      value={filteredStats.categoryCount}
+      color="#fff1c9"
+      icon={CalendarDays}
+      iconColor="#D99A00"
+      scale={s}
+    />
 
-              <SummaryCard
-                title={
-                  status === "All Statuses"
-                    ? "All Statuses"
-                    : status
-                }
-                value={filteredStats.statusCount}
-                color="#cfe9fb"
-                icon={Clock3}
-                iconColor="#168df0"
-                scale={s}
-              />
-            </View>
-          )}
+    <SummaryCard
+      title={
+        status === "All Statuses"
+          ? "All Statuses"
+          : status
+      }
+      value={filteredStats.statusCount}
+      color="#cfe9fb"
+      icon={Clock3}
+      iconColor="#168df0"
+      scale={s}
+    />
+  </View>
+)}
 
           {/* =============================================== */}
           {/* FILTER PANEL */}
           {/* =============================================== */}
 
-          <View style={styles.filterPanel}>
+          <View
+            style={[
+              styles.filterPanel,
+              {
+                padding: 14 * s,
+              },
+            ]}
+          >
             {/* SEARCH */}
 
             <View
-              style={[
-                styles.searchBox,
-                isCompact && styles.searchBoxCompact,
-              ]}
+              style={
+                styles.searchBox
+              }
             >
               <TextInput
                 value={search}
@@ -1482,11 +1840,17 @@ const confirmRejectEvent = async () => {
                 }}
                 placeholder="Search events..."
                 placeholderTextColor="#777"
-                style={styles.searchInput}
+                style={[
+                  styles.searchInput,
+                  {
+                    fontSize:
+                      15 * s,
+                  },
+                ]}
               />
 
               <Search
-                size={17}
+                size={19 * s}
                 color="#555"
               />
             </View>
@@ -1494,10 +1858,9 @@ const confirmRejectEvent = async () => {
             {/* CATEGORY */}
 
             <View
-              style={[
-                styles.dropdownContainer,
-                isCompact && styles.dropdownContainerCompact,
-              ]}
+              style={
+                styles.dropdownContainer
+              }
             >
               <TouchableOpacity
                 activeOpacity={0.82}
@@ -1632,25 +1995,18 @@ const confirmRejectEvent = async () => {
             {/* STATUS */}
 
             <View
-              style={[
-                styles.dropdownContainer,
-                isCompact && styles.dropdownContainerCompact,
-              ]}
+              style={
+                styles.dropdownContainer
+              }
             >
               <TouchableOpacity
                 activeOpacity={0.82}
                 style={[
                   styles.filterBox,
-                  activeTab === "All Events" &&
-                    showStatusDropdown &&
+                  showStatusDropdown &&
                     styles.filterBoxOpen,
                 ]}
-                disabled={activeTab !== "All Events"}
                 onPress={() => {
-                  if (activeTab !== "All Events") {
-                    return;
-                  }
-
                   setShowStatusDropdown(
                     !showStatusDropdown
                   );
@@ -1676,22 +2032,16 @@ const confirmRejectEvent = async () => {
                   <Text
                     style={[
                       styles.filterValue,
-                      activeTab === "All Events" &&
-                        showStatusDropdown &&
+                      showStatusDropdown &&
                         styles.filterValueOpen,
                     ]}
                   >
-                    {activeTab === "Pending Approval"
-                      ? "Pending"
-                      : activeTab === "Rejected"
-                        ? "Rejected"
-                        : status}
+                    {status}
                   </Text>
 
                   <ChevronDown
                     size={16}
                     color={
-                      activeTab === "All Events" &&
                       showStatusDropdown
                         ? "#34733B"
                         : "#333333"
@@ -1700,7 +2050,6 @@ const confirmRejectEvent = async () => {
                       transform: [
                         {
                           rotate:
-                            activeTab === "All Events" &&
                             showStatusDropdown
                               ? "180deg"
                               : "0deg",
@@ -1711,8 +2060,7 @@ const confirmRejectEvent = async () => {
                 </View>
               </TouchableOpacity>
 
-              {activeTab === "All Events" &&
-                showStatusDropdown && (
+              {showStatusDropdown && (
                 <View
                   style={
                     styles.dropdownMenu
@@ -1781,20 +2129,86 @@ const confirmRejectEvent = async () => {
               )}
             </View>
 
-            {/* DATE RANGE - same on every tab */}
+            {/* DATE / SORT */}
 
-            <DateRangeBox
-              fromDate={fromDate}
-              toDate={toDate}
-              onChangeFrom={(value) => {
-                setFromDate(value);
-                setPage(1);
-              }}
-              onChangeTo={(value) => {
-                setToDate(value);
-                setPage(1);
-              }}
-            />
+            {activeTab ===
+            "All Events" ? (
+              <DateRangeFilter
+                label="Date Range"
+                fromDate={
+                  fromDate
+                }
+                toDate={toDate}
+                onChangeFrom={(
+                  value
+                ) => {
+                  setFromDate(
+                    value
+                  );
+
+                  setPage(1);
+                }}
+                onChangeTo={(
+                  value
+                ) => {
+                  setToDate(
+                    value
+                  );
+
+                  setPage(1);
+                }}
+                style={{
+                  flex: 1.5,
+                  minWidth: 220,
+                }}
+              />
+            ) : (
+              <TouchableOpacity
+                style={
+                  styles.filterBox
+                }
+                onPress={() =>
+                  setSelectionMenu(
+                    "sort"
+                  )
+                }
+              >
+                <Text
+                  style={[
+                    styles.filterLabel,
+                    {
+                      fontSize:
+                        11 * s,
+                    },
+                  ]}
+                >
+                  Sort By
+                </Text>
+
+                <View
+                  style={
+                    styles.filterValueRow
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.filterValue,
+                      {
+                        fontSize:
+                          14 * s,
+                      },
+                    ]}
+                  >
+                    {sortOrder}
+                  </Text>
+
+                  <ChevronDown
+                    size={12 * s}
+                    color="#333"
+                  />
+                </View>
+              </TouchableOpacity>
+            )}
 
             {/* RESET */}
 
@@ -1807,11 +2221,19 @@ const confirmRejectEvent = async () => {
               }
             >
               <Filter
-                size={16}
+                size={15 * s}
                 color="#43884c"
               />
 
-              <Text style={styles.resetText}>
+              <Text
+                style={[
+                  styles.resetText,
+                  {
+                    fontSize:
+                      12 * s,
+                  },
+                ]}
+              >
                 Reset
               </Text>
             </TouchableOpacity>
@@ -1826,18 +2248,31 @@ const confirmRejectEvent = async () => {
               styles.tablePanel
             }
           >
-            <View style={styles.table}>
+            <ScrollView
+              horizontal={
+                width < 1100
+              }
+              showsHorizontalScrollIndicator={
+                width < 1100
+              }
+            >
+              <View
+                style={[
+                  styles.table,
+                  width >= 1100
+                    ? styles.tableFullWidth
+                    : null,
+                ]}
+              >
                 {/* TABLE HEADER */}
 
                 <View
-                  style={[
-                    styles.tableHeader,
-                    denseTable && styles.tableHeaderCompact,
-                  ]}
+                  style={
+                    styles.tableHeader
+                  }
                 >
                   {activeTab ===
-                    "All Events" &&
-                    !hideIdColumn && (
+                    "All Events" && (
                     <Text
                       style={[
                         styles.th,
@@ -1902,33 +2337,32 @@ const confirmRejectEvent = async () => {
                       style={[
                         styles.th,
                         styles.statusColumn,
+                        styles.centerHeaderText,
                       ]}
                     >
                       Status
                     </Text>
                   )}
 
-                  <View
+                  <Text
                     style={[
+                      styles.th,
                       styles.participantsColumn,
-                      styles.headerCenteredColumn,
+                      styles.centerHeaderText,
                     ]}
                   >
-                    <Text style={styles.th}>
-                      Participants
-                    </Text>
-                  </View>
+                    Participants
+                  </Text>
 
-                  <View
+                  <Text
                     style={[
+                      styles.th,
                       styles.actionColumn,
-                      styles.headerCenteredColumn,
+                      styles.centerHeaderText,
                     ]}
                   >
-                    <Text style={styles.th}>
-                      Action
-                    </Text>
-                  </View>
+                    Action
+                  </Text>
                 </View>
 
                 {/* TABLE BODY */}
@@ -1937,15 +2371,15 @@ const confirmRejectEvent = async () => {
                   visibleEvents.map(
                     (event) => (
                       <View
-                        key={event.id}
-                        style={[
-                          styles.tableRow,
-                          denseTable && styles.tableRowCompact,
-                        ]}
+                        key={
+                          event.id
+                        }
+                        style={
+                          styles.tableRow
+                        }
                       >
                         {activeTab ===
-                          "All Events" &&
-                          !hideIdColumn && (
+                          "All Events" && (
                           <Text
                             style={[
                               styles.cellText,
@@ -2169,6 +2603,7 @@ const confirmRejectEvent = async () => {
                             <View
                               style={[
                                 styles.badge,
+                                styles.statusBadge,
                                 {
                                   backgroundColor:
                                     statusColor(
@@ -2178,9 +2613,15 @@ const confirmRejectEvent = async () => {
                               ]}
                             >
                               <Text
-                                style={
-                                  styles.badgeText
-                                }
+                                style={[
+                                  styles.badgeText,
+                                  {
+                                    color:
+                                      statusTextColor(
+                                        event.status
+                                      ),
+                                  },
+                                ]}
                               >
                                 {
                                   event.status
@@ -2197,11 +2638,27 @@ const confirmRejectEvent = async () => {
                             styles.participantsColumn
                           }
                         >
-                          <Text style={styles.participantValue}>
-                            {event.participants} / {event.capacity}
+                          <Text
+                            style={[
+                              styles.smallText,
+                              styles.centerCellText,
+                            ]}
+                          >
+                            {
+                              event.participants
+                            }{" "}
+                            /{" "}
+                            {
+                              event.capacity
+                            }
                           </Text>
 
-                          <Text style={styles.participantSubtext}>
+                          <Text
+                            style={[
+                              styles.smallText,
+                              styles.centerCellText,
+                            ]}
+                          >
                             Expected
                           </Text>
                         </View>
@@ -2235,10 +2692,10 @@ const confirmRejectEvent = async () => {
                                 styles.viewButtonText
                               }
                             >
-                              {isNarrow ? "View" : "View Event"}
+                              View Event
                             </Text>
                           </TouchableOpacity>
-
+                        
                         </View>
                       </View>
                     )
@@ -2260,7 +2717,8 @@ const confirmRejectEvent = async () => {
                     </Text>
                   </View>
                 )}
-            </View>
+              </View>
+            </ScrollView>
 
             {/* PAGINATION */}
 
@@ -2691,9 +3149,7 @@ const confirmRejectEvent = async () => {
         visible={addModalOpen}
         transparent
         animationType="fade"
-        onRequestClose={() =>
-          setAddModalOpen(false)
-        }
+        onRequestClose={closeAddEventModal}
       >
         <View
           style={
@@ -2705,6 +3161,91 @@ const confirmRejectEvent = async () => {
               styles.formModal
             }
           >
+            {eventFormAlert.visible &&
+            eventFormAlert.variant !== "success" ? (
+              <View style={styles.inlineFormAlertOverlay}>
+                <Animated.View
+                  pointerEvents="none"
+                  style={[
+                    styles.inlineFormAlertBackdrop,
+                    {
+                      opacity: formAlertAnimation,
+                    },
+                  ]}
+                />
+
+                <Pressable
+                  style={StyleSheet.absoluteFill}
+                  onPress={closeEventFormAlert}
+                />
+
+                <Animated.View
+                  style={[
+                    styles.inlineFormAlertCenter,
+                    {
+                      opacity: formAlertAnimation,
+                      transform: [
+                        {
+                          translateY:
+                            formAlertAnimation.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [10, 0],
+                            }),
+                        },
+                        {
+                          scale:
+                            formAlertAnimation.interpolate({
+                              inputRange: [0, 1],
+                              outputRange: [0.96, 1],
+                            }),
+                        },
+                      ],
+                    },
+                  ]}
+                >
+                  <View style={styles.formAlertCard}>
+                    <View
+                      style={[
+                        styles.formAlertIconWrap,
+                        eventFormAlert.variant === "error"
+                          ? styles.formAlertIconError
+                          : styles.formAlertIconWarning,
+                      ]}
+                    >
+                      <TriangleAlert
+                        size={28}
+                        color="#FFFFFF"
+                        strokeWidth={2.7}
+                      />
+                    </View>
+
+                    <Text style={styles.formAlertTitle}>
+                      {eventFormAlert.title}
+                    </Text>
+
+                    <Text style={styles.formAlertMessage}>
+                      {eventFormAlert.message}
+                    </Text>
+
+                    <TouchableOpacity
+                      style={[
+                        styles.formAlertButton,
+                        eventFormAlert.variant === "error"
+                          ? styles.formAlertButtonError
+                          : styles.formAlertButtonWarning,
+                      ]}
+                      onPress={closeEventFormAlert}
+                      activeOpacity={0.85}
+                    >
+                      <Text style={styles.formAlertButtonText}>
+                        Got it
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </Animated.View>
+              </View>
+            ) : null}
+
             <View
               style={
                 styles.modalHeader
@@ -2734,10 +3275,7 @@ const confirmRejectEvent = async () => {
                 style={
                   styles.closeButton
                 }
-                onPress={() => {
-                  setEditingEventId(null);
-                  setAddModalOpen(false);
-                }}
+                onPress={closeAddEventModal}
               >
                 <X
                   size={20}
@@ -2745,6 +3283,18 @@ const confirmRejectEvent = async () => {
                 />
               </Pressable>
             </View>
+
+            {Object.keys(eventFormErrors).length > 0 ? (
+              <View style={styles.formErrorBanner}>
+                <Text style={styles.formErrorBannerTitle}>
+                  Please complete the required fields.
+                </Text>
+
+                <Text style={styles.formErrorBannerText}>
+                  Check the fields highlighted in red before creating the event.
+                </Text>
+              </View>
+            ) : null}
 
             <View
               style={
@@ -2759,14 +3309,16 @@ const confirmRejectEvent = async () => {
                 }
               >
                 <FormField
-                  label="Event Title"
+                  label="Event Title *"
                   value={
                     newTitle
                   }
-                  onChangeText={
-                    setNewTitle
-                  }
+                  onChangeText={(value) => {
+                    setNewTitle(value);
+                    clearEventFormError("title");
+                  }}
                   placeholder="Enter event title"
+                  error={eventFormErrors.title}
                 />
 
                 <Text
@@ -2822,15 +3374,17 @@ const confirmRejectEvent = async () => {
                 </View>
 
                 <FormField
-                  label="Description"
+                  label="Description *"
                   value={
                     newDescription
                   }
-                  onChangeText={
-                    setNewDescription
-                  }
+                  onChangeText={(value) => {
+                    setNewDescription(value);
+                    clearEventFormError("description");
+                  }}
                   placeholder="Enter event description"
                   multiline
+                  error={eventFormErrors.description}
                 />
 
                 <View
@@ -2844,13 +3398,15 @@ const confirmRejectEvent = async () => {
                     }
                   >
                     <DatePickerField
-                      label="Date"
+                      label="Date *"
                       value={
                         newDate
                       }
-                      onChange={
-                        setNewDate
-                      }
+                      onChange={(value) => {
+                        setNewDate(value);
+                        clearEventFormError("date");
+                      }}
+                      error={eventFormErrors.date}
                     />
                   </View>
 
@@ -2860,13 +3416,15 @@ const confirmRejectEvent = async () => {
                     }
                   >
                     <TimePickerField
-                      label="Start Time"
+                      label="Start Time *"
                       value={
                         newTime
                       }
-                      onChange={
-                        setNewTime
-                      }
+                      onChange={(value) => {
+                        setNewTime(value);
+                        clearEventFormError("time");
+                      }}
+                      error={eventFormErrors.time}
                     />
                   </View>
 
@@ -2876,26 +3434,30 @@ const confirmRejectEvent = async () => {
                     }
                   >
                     <TimePickerField
-                      label="End Time"
+                      label="End Time *"
                       value={
                         newEndTime
                       }
-                      onChange={
-                        setNewEndTime
-                      }
+                      onChange={(value) => {
+                        setNewEndTime(value);
+                        clearEventFormError("endTime");
+                      }}
+                      error={eventFormErrors.endTime}
                     />
                   </View>
                 </View>
 
                 <FormField
-                  label="Maximum Participants"
+                  label="Maximum Participants *"
                   value={
                     newCapacity
                   }
-                  onChangeText={
-                    setNewCapacity
-                  }
+                  onChangeText={(value) => {
+                    setNewCapacity(value);
+                    clearEventFormError("capacity");
+                  }}
                   placeholder="Enter maximum participants"
+                  error={eventFormErrors.capacity}
                 />
               </View>
 
@@ -2937,14 +3499,16 @@ const confirmRejectEvent = async () => {
                 </Text>
 
                 <FormField
-                  label="Location"
+                  label="Location *"
                   value={
                     newLocation
                   }
-                  onChangeText={
-                    setNewLocation
-                  }
+                  onChangeText={(value) => {
+                    setNewLocation(value);
+                    clearEventFormError("location");
+                  }}
                   placeholder="e.g., Barangay Hall, North Poblacion"
+                  error={eventFormErrors.location}
                 />
 
                 <Text
@@ -3017,12 +3581,11 @@ const confirmRejectEvent = async () => {
                     opacity: 0.6,
                   },
                 ]}
-                onPress={() =>
-                  !isCreating &&
-                  setAddModalOpen(
-                    false
-                  )
-                }
+                onPress={() => {
+                  if (!isCreating) {
+                    closeAddEventModal();
+                  }
+                }}
                 disabled={
                   isCreating
                 }
@@ -3080,346 +3643,393 @@ const confirmRejectEvent = async () => {
       </Modal>
 
       {/* ================================================= */}
-      {/* APPROVED / ONGOING / COMPLETED EVENT VIEW MODAL */}
-      {/* ================================================= */}
+{/* EVENT DETAILS MODAL */}
+{/* ================================================= */}
 
-      <Modal
-        visible={
-          selectedEvent !== null &&
-          selectedEvent.status !== "Pending"
-        }
-        transparent
-        animationType="fade"
-        onRequestClose={closeEventDetails}
-      >
-        <View style={styles.modalOverlay}>
-          {selectedEvent ? (
-            <View
-              style={[
-                styles.eventViewModal,
-                isNarrow && styles.eventViewModalNarrow,
-              ]}
-            >
-              {/* HEADER */}
-              <View style={styles.eventViewHeader}>
-                <View style={styles.eventViewHeaderLeft}>
-                  <Text style={styles.eventViewTitle}>
-                    {selectedEvent.title}
-                  </Text>
+<Modal
+  visible={
+    selectedEvent !== null &&
+    selectedEvent.status !== "Pending"
+  }
+  transparent
+  animationType="fade"
+  onRequestClose={closeEventDetails}
+>
+  <View style={styles.modalOverlay}>
+    {selectedEvent ? (
+      <View style={styles.eventDetailsModal}>
+        {/* HEADER */}
+        <View style={styles.eventDetailsHeader}>
+          <View style={styles.eventDetailsHeaderLeft}>
+            <Text style={styles.eventDetailsTitle}>
+              {selectedEvent.title}
+            </Text>
 
-                  <Text style={styles.eventViewId}>
-                    Event ID: #{selectedEvent.id.slice(0, 10).toUpperCase()}
-                  </Text>
+            <Text style={styles.eventDetailsId}>
+              Event ID: #{selectedEvent.id.slice(0, 10).toUpperCase()}
+            </Text>
 
-                  <View style={styles.eventViewBadges}>
-                    <View
-                      style={[
-                        styles.eventViewBadge,
-                        {
-                          backgroundColor: categoryColor(
-                            selectedEvent.category
-                          ),
-                        },
-                      ]}
-                    >
-                      <Text style={styles.eventViewBadgeText}>
-                        {selectedEvent.category}
-                      </Text>
-                    </View>
-
-                    <View
-                      style={[
-                        styles.eventViewBadge,
-                        {
-                          backgroundColor: statusColor(
-                            selectedEvent.status
-                          ),
-                        },
-                      ]}
-                    >
-                      <Text style={styles.eventViewBadgeText}>
-                        {selectedEvent.status}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-
-                <Pressable
-                  style={styles.eventViewCloseIcon}
-                  onPress={closeEventDetails}
-                >
-                  <X size={21} color="#2A2A2A" />
-                </Pressable>
-              </View>
-
-              {/* CONTENT */}
-              <ScrollView
-                style={styles.eventViewScroll}
-                contentContainerStyle={styles.eventViewContent}
-                showsVerticalScrollIndicator={false}
-              >
-                <View
-                  style={[
-                    styles.eventViewGrid,
-                    isNarrow && styles.eventViewGridNarrow,
-                  ]}
-                >
-                  {/* LEFT COLUMN */}
-                  <View style={styles.eventViewMainColumn}>
-                    <View style={styles.eventViewImageCard}>
-                      {getEventImages(selectedEvent)[0] ? (
-                        <Pressable
-                          style={styles.eventViewImagePressable}
-                          onPress={() =>
-                            setPreviewImageUrl(
-                              getEventImages(selectedEvent)[0]
-                            )
-                          }
-                        >
-                          <Image
-                            source={{
-                              uri: getEventImages(selectedEvent)[0],
-                            }}
-                            style={styles.eventViewImage}
-                            resizeMode="cover"
-                          />
-                        </Pressable>
-                      ) : (
-                        <View style={styles.eventViewImagePlaceholder}>
-                          <CalendarDays
-                            size={44}
-                            color="#7B897B"
-                          />
-                          <Text style={styles.eventViewPlaceholderText}>
-                            No event image available
-                          </Text>
-                        </View>
-                      )}
-                    </View>
-
-                    <View style={styles.eventViewCard}>
-                      <Text style={styles.eventViewSectionTitle}>
-                        About the Event
-                      </Text>
-
-                      <Text style={styles.eventViewDescription}>
-                        {selectedEvent.description}
-                      </Text>
-                    </View>
-
-                    <View style={styles.eventViewCard}>
-                      <Text style={styles.eventViewSectionTitle}>
-                        Event Information
-                      </Text>
-
-                      <View style={styles.eventViewInfoGrid}>
-                        <View style={styles.eventViewInfoItem}>
-                          <View style={styles.eventViewInfoIcon}>
-                            <CalendarDays size={19} color="#34733B" />
-                          </View>
-                          <View style={styles.eventViewInfoTextWrap}>
-                            <Text style={styles.eventViewInfoLabel}>
-                              Date
-                            </Text>
-                            <Text style={styles.eventViewInfoValue}>
-                              {selectedEvent.date}
-                            </Text>
-                          </View>
-                        </View>
-
-                        <View style={styles.eventViewInfoItem}>
-                          <View style={styles.eventViewInfoIcon}>
-                            <Clock3 size={19} color="#34733B" />
-                          </View>
-                          <View style={styles.eventViewInfoTextWrap}>
-                            <Text style={styles.eventViewInfoLabel}>
-                              Time
-                            </Text>
-                            <Text style={styles.eventViewInfoValue}>
-                              {selectedEvent.endTime
-                                ? `${selectedEvent.time} - ${selectedEvent.endTime}`
-                                : selectedEvent.time}
-                            </Text>
-                          </View>
-                        </View>
-
-                        <View style={styles.eventViewInfoItem}>
-                          <View style={styles.eventViewInfoIcon}>
-                            <Users size={19} color="#34733B" />
-                          </View>
-                          <View style={styles.eventViewInfoTextWrap}>
-                            <Text style={styles.eventViewInfoLabel}>
-                              Participants
-                            </Text>
-                            <Text style={styles.eventViewInfoValue}>
-                              {selectedEvent.participants} / {selectedEvent.capacity}
-                            </Text>
-                          </View>
-                        </View>
-
-                        <View style={styles.eventViewInfoItem}>
-                          <View style={styles.eventViewInfoIcon}>
-                            <UserRound size={19} color="#34733B" />
-                          </View>
-                          <View style={styles.eventViewInfoTextWrap}>
-                            <Text style={styles.eventViewInfoLabel}>
-                              Submitted By
-                            </Text>
-                            <Text style={styles.eventViewInfoValue}>
-                              {selectedEvent.submittedBy}
-                            </Text>
-                            <Text style={styles.eventViewInfoSubValue}>
-                              {selectedEvent.submittedArea}
-                            </Text>
-                          </View>
-                        </View>
-                      </View>
-
-                      <View style={styles.eventViewLocationInfo}>
-                        <View style={styles.eventViewInfoIcon}>
-                          <MapPin size={19} color="#34733B" />
-                        </View>
-
-                        <View style={styles.eventViewInfoTextWrap}>
-                          <Text style={styles.eventViewInfoLabel}>
-                            Location
-                          </Text>
-                          <Text style={styles.eventViewInfoValue}>
-                            {selectedEvent.location}
-                          </Text>
-                        </View>
-                      </View>
-                    </View>
-                  </View>
-
-                  {/* RIGHT COLUMN */}
-                  <View style={styles.eventViewSideColumn}>
-                    <View style={styles.eventViewCard}>
-                      <Text style={styles.eventViewSectionTitle}>
-                        Event Location
-                      </Text>
-
-                      <View style={styles.eventViewMapWrap}>
-                        <InteractiveLocationMap
-                          coordinates={selectedEvent.coordinates}
-                          height={240}
-                        />
-                      </View>
-
-                      {selectedEvent.coordinates ? (
-                        <Text style={styles.eventViewGps}>
-                          GPS:{" "}
-                          {selectedEvent.coordinates.latitude.toFixed(6)},{" "}
-                          {selectedEvent.coordinates.longitude.toFixed(6)}
-                        </Text>
-                      ) : null}
-                    </View>
-
-                    <View style={styles.eventViewCard}>
-                      <View style={styles.eventViewParticipantsHeader}>
-                        <View style={styles.eventViewParticipantsTitleWrap}>
-                          <Text style={styles.eventViewSectionTitle}>
-                            Participant List
-                          </Text>
-                          <Text style={styles.eventViewParticipantCountText}>
-                            {eventParticipants.length} registered participant
-                            {eventParticipants.length === 1 ? "" : "s"}
-                          </Text>
-                        </View>
-
-                        <View style={styles.eventViewCapacityBadge}>
-                          <Users size={14} color="#34733B" />
-                          <Text style={styles.eventViewCapacityText}>
-                            {selectedEvent.participants}/{selectedEvent.capacity}
-                          </Text>
-                        </View>
-                      </View>
-
-                      {loadingParticipants ? (
-                        <View style={styles.eventViewEmptyParticipants}>
-                          <Text style={styles.eventViewEmptyText}>
-                            Loading participants...
-                          </Text>
-                        </View>
-                      ) : eventParticipants.length === 0 ? (
-                        <View style={styles.eventViewEmptyParticipants}>
-                          <Users size={34} color="#AAB4AA" />
-                          <Text style={styles.eventViewEmptyTitle}>
-                            No participants yet
-                          </Text>
-                          <Text style={styles.eventViewEmptyText}>
-                            Users who join this event will appear here.
-                          </Text>
-                        </View>
-                      ) : (
-                        <View style={styles.eventViewParticipantList}>
-                          {eventParticipants.map((participant) => {
-                            const joined = participant.joinedAt
-                              ? formatDateTime(participant.joinedAt)
-                              : null;
-
-                            return (
-                              <View
-                                key={participant.uid}
-                                style={styles.eventViewParticipantRow}
-                              >
-                                <View style={styles.eventViewAvatar}>
-                                  <UserRound size={17} color="#FFFFFF" />
-                                </View>
-
-                                <View style={styles.eventViewParticipantCopy}>
-                                  <Text style={styles.eventViewParticipantName}>
-                                    {participant.name}
-                                  </Text>
-                                  <Text style={styles.eventViewParticipantEmail}>
-                                    {participant.email}
-                                  </Text>
-                                </View>
-
-                                {joined ? (
-                                  <View style={styles.eventViewJoinedWrap}>
-                                    <Text style={styles.eventViewJoinedLabel}>
-                                      Joined
-                                    </Text>
-                                    <Text style={styles.eventViewJoinedDate}>
-                                      {joined.date}
-                                    </Text>
-                                  </View>
-                                ) : null}
-                              </View>
-                            );
-                          })}
-                        </View>
-                      )}
-                    </View>
-                  </View>
-                </View>
-              </ScrollView>
-
-              {/* FOOTER */}
+            <View style={styles.eventDetailsBadges}>
               <View
                 style={[
-                  styles.eventViewFooter,
-                  isNarrow && styles.eventViewFooterNarrow,
+                  styles.eventDetailsBadge,
+                  {
+                    backgroundColor: categoryColor(
+                      selectedEvent.category
+                    ),
+                  },
                 ]}
               >
-                <TouchableOpacity
-                  style={styles.eventViewCloseButton}
-                  onPress={closeEventDetails}
-                  disabled={isModerating}
-                >
-                  <Text style={styles.eventViewCloseButtonText}>
-                    Close
-                  </Text>
-                </TouchableOpacity>
+                <Text style={styles.eventDetailsBadgeText}>
+                  {selectedEvent.category}
+                </Text>
+              </View>
 
-                
+              <View
+                style={[
+                  styles.eventDetailsBadge,
+                  {
+                    backgroundColor: statusColor(
+                      selectedEvent.status
+                    ),
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.eventDetailsBadgeText,
+                    {
+                      color:
+                        statusTextColor(
+                          selectedEvent.status
+                        ),
+                    },
+                  ]}
+                >
+                  {selectedEvent.status}
+                </Text>
               </View>
             </View>
-          ) : null}
-        </View>
-      </Modal>
+          </View>
 
+          <Pressable
+            style={styles.eventDetailsClose}
+            onPress={closeEventDetails}
+          >
+            <X size={22} color="#333333" />
+          </Pressable>
+        </View>
+
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={styles.eventDetailsScrollContent}
+        >
+          <View style={styles.eventDetailsColumns}>
+            {/* ================= LEFT ================= */}
+            <View style={styles.eventDetailsLeft}>
+              {/* IMAGE */}
+              <View style={styles.eventHeroCard}>
+                {getEventImages(selectedEvent)[0] && !eventImageFailed ? (
+                  <Pressable
+                    style={styles.eventHeroPressable}
+                    onPress={() =>
+                      setPreviewImageUrl(
+                        getEventImages(selectedEvent)[0]
+                      )
+                    }
+                  >
+                    <Image
+                      source={{
+                        uri: getEventImages(selectedEvent)[0],
+                      }}
+                      style={styles.eventDetailsHeroImage}
+                      resizeMode="cover"
+                      onError={() => setEventImageFailed(true)}
+                    />
+                  </Pressable>
+                ) : (
+                  <View style={styles.eventDetailsImagePlaceholder}>
+                    <CalendarDays
+                      size={48}
+                      color="#7d8c7c"
+                    />
+
+                    <Text style={styles.eventDetailsPlaceholderText}>
+                      No event image available
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {/* ABOUT */}
+              <View style={styles.eventDetailsCard}>
+                <Text style={styles.eventDetailsSectionTitle}>
+                  About the Event
+                </Text>
+
+                <Text style={styles.eventDetailsDescription}>
+                  {selectedEvent.description}
+                </Text>
+              </View>
+
+              {/* INFORMATION */}
+              <View style={styles.eventDetailsCard}>
+                <Text style={styles.eventDetailsSectionTitle}>
+                  Event Information
+                </Text>
+
+                <View style={styles.eventInfoGrid}>
+                  <View style={styles.eventInfoItem}>
+                    <View style={styles.eventInfoIcon}>
+                      <CalendarDays
+                        size={20}
+                        color="#34733B"
+                      />
+                    </View>
+
+                    <View style={styles.eventInfoCopy}>
+                      <Text style={styles.eventInfoLabel}>
+                        Date
+                      </Text>
+
+                      <Text style={styles.eventInfoValue}>
+                        {selectedEvent.date}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.eventInfoItem}>
+                    <View style={styles.eventInfoIcon}>
+                      <Clock3
+                        size={20}
+                        color="#34733B"
+                      />
+                    </View>
+
+                    <View style={styles.eventInfoCopy}>
+                      <Text style={styles.eventInfoLabel}>
+                        Time
+                      </Text>
+
+                      <Text style={styles.eventInfoValue}>
+                        {selectedEvent.endTime
+                          ? `${selectedEvent.time} - ${selectedEvent.endTime}`
+                          : selectedEvent.time}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.eventInfoItem}>
+                    <View style={styles.eventInfoIcon}>
+                      <Users
+                        size={20}
+                        color="#34733B"
+                      />
+                    </View>
+
+                    <View style={styles.eventInfoCopy}>
+                      <Text style={styles.eventInfoLabel}>
+                        Participants
+                      </Text>
+
+                      <Text style={styles.eventInfoValue}>
+                        {selectedEvent.participants} /{" "}
+                        {selectedEvent.capacity}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.eventInfoItem}>
+                    <View style={styles.eventInfoIcon}>
+                      <UserRound
+                        size={20}
+                        color="#34733B"
+                      />
+                    </View>
+
+                    <View style={styles.eventInfoCopy}>
+                      <Text style={styles.eventInfoLabel}>
+                        Submitted By
+                      </Text>
+
+                      <Text style={styles.eventInfoValue}>
+                        {selectedEvent.submittedBy}
+                      </Text>
+
+                      <Text style={styles.eventInfoSubValue}>
+                        {selectedEvent.submittedArea}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.eventLocationRow}>
+                  <View style={styles.eventInfoIcon}>
+                    <MapPin
+                      size={20}
+                      color="#34733B"
+                    />
+                  </View>
+
+                  <View style={styles.eventInfoCopy}>
+                    <Text style={styles.eventInfoLabel}>
+                      Location
+                    </Text>
+
+                    <Text style={styles.eventInfoValue}>
+                      {selectedEvent.location}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            </View>
+
+            {/* ================= RIGHT ================= */}
+            <View style={styles.eventDetailsRight}>
+              {/* MAP */}
+              <View style={styles.eventDetailsCard}>
+                <Text style={styles.eventDetailsSectionTitle}>
+                  Event Location
+                </Text>
+
+                <View style={styles.eventDetailsMap}>
+                  <InteractiveLocationMap
+                    coordinates={selectedEvent.coordinates}
+                    height={250}
+                  />
+                </View>
+
+                {selectedEvent.coordinates ? (
+                  <Text style={styles.eventCoordinates}>
+                    GPS:{" "}
+                    {selectedEvent.coordinates.latitude.toFixed(6)},{" "}
+                    {selectedEvent.coordinates.longitude.toFixed(6)}
+                  </Text>
+                ) : null}
+              </View>
+
+              {/* PARTICIPANTS */}
+              <View style={styles.eventDetailsCard}>
+                <View style={styles.participantHeader}>
+                  <View>
+                    <Text style={styles.eventDetailsSectionTitle}>
+                      Participant List
+                    </Text>
+
+                    <Text style={styles.participantCount}>
+                      {eventParticipants.length} registered participant
+                      {eventParticipants.length === 1 ? "" : "s"}
+                    </Text>
+                  </View>
+
+                  <View style={styles.participantCapacityBadge}>
+                    <Users
+                      size={15}
+                      color="#34733B"
+                    />
+
+                    <Text style={styles.participantCapacityText}>
+                      {selectedEvent.participants}/
+                      {selectedEvent.capacity}
+                    </Text>
+                  </View>
+                </View>
+
+                {loadingParticipants ? (
+                  <View style={styles.participantEmpty}>
+                    <Text style={styles.participantEmptyText}>
+                      Loading participants...
+                    </Text>
+                  </View>
+                ) : eventParticipants.length === 0 ? (
+                  <View style={styles.participantEmpty}>
+                    <Users
+                      size={34}
+                      color="#AAB4AA"
+                    />
+
+                    <Text style={styles.participantEmptyTitle}>
+                      No participants yet
+                    </Text>
+
+                    <Text style={styles.participantEmptyText}>
+                      Users who join this event will appear here.
+                    </Text>
+                  </View>
+                ) : (
+                  <View style={styles.participantList}>
+                    {eventParticipants.map((participant) => {
+                      const joined = participant.joinedAt
+                        ? formatDateTime(participant.joinedAt)
+                        : null;
+
+                      return (
+                        <View
+                          key={participant.uid}
+                          style={styles.eventParticipantRow}
+                        >
+                          <View style={styles.eventParticipantAvatar}>
+                            <UserRound
+                              size={18}
+                              color="#ffffff"
+                            />
+                          </View>
+
+                          <View style={{ flex: 1 }}>
+                            <Text style={styles.eventParticipantName}>
+                              {participant.name}
+                            </Text>
+
+                            <Text style={styles.eventParticipantEmail}>
+                              {participant.email}
+                            </Text>
+                          </View>
+
+                          {joined ? (
+                            <View style={styles.eventParticipantJoined}>
+                              <Text
+                                style={
+                                  styles.eventParticipantJoinedLabel
+                                }
+                              >
+                                Joined
+                              </Text>
+
+                              <Text
+                                style={
+                                  styles.eventParticipantJoinedDate
+                                }
+                              >
+                                {joined.date}
+                              </Text>
+                            </View>
+                          ) : null}
+                        </View>
+                      );
+                    })}
+                  </View>
+                )}
+              </View>
+            </View>
+          </View>
+        </ScrollView>
+
+        {/* FOOTER */}
+        <View style={styles.eventDetailsFooter}>
+          <TouchableOpacity
+            style={styles.eventDetailsCloseButton}
+            onPress={closeEventDetails}
+            disabled={isModerating}
+          >
+            <Text style={styles.eventDetailsCloseButtonText}>
+              Close
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    ) : null}
+  </View>
+</Modal>
       <EventImageLightbox
         uri={previewImageUrl}
         onClose={() => setPreviewImageUrl(null)}
@@ -4243,6 +4853,7 @@ function FormField({
   onChangeText,
   placeholder,
   multiline = false,
+  error,
 }: {
   label: string;
   value: string;
@@ -4251,6 +4862,7 @@ function FormField({
   ) => void;
   placeholder: string;
   multiline?: boolean;
+  error?: string;
 }) {
   return (
     <View
@@ -4285,85 +4897,16 @@ function FormField({
           styles.input,
           multiline &&
             styles.multilineInput,
+          error &&
+            styles.inputError,
         ]}
       />
-    </View>
-  );
-}
 
-// =========================================================
-// DATE RANGE FILTER
-// =========================================================
-
-function DateRangeBox({
-  fromDate,
-  toDate,
-  onChangeFrom,
-  onChangeTo,
-}: {
-  fromDate: string;
-  toDate: string;
-  onChangeFrom: (value: string) => void;
-  onChangeTo: (value: string) => void;
-}) {
-  return (
-    <View style={styles.dateRangeBox}>
-      <Text style={styles.dateRangeLabel}>
-        Date Range
-      </Text>
-
-      <View style={styles.dateRangeInputRow}>
-        <View style={styles.dateRangeSingleBox}>
-          {Platform.OS === "web"
-            ? createElement("input", {
-                type: "date",
-                value: fromDate,
-                "aria-label": "From date",
-                onChange: (event: {
-                  target: {
-                    value: string;
-                  };
-                }) => onChangeFrom(event.target.value),
-                style: dateRangeWebInputStyle,
-              })
-            : (
-              <TextInput
-                value={fromDate}
-                onChangeText={onChangeFrom}
-                placeholder="From date"
-                placeholderTextColor="#888888"
-                style={styles.dateRangeNativeInput}
-              />
-            )}
-        </View>
-
-        <Text style={styles.dateRangeSeparator}>–</Text>
-
-        <View style={styles.dateRangeSingleBox}>
-          {Platform.OS === "web"
-            ? createElement("input", {
-                type: "date",
-                value: toDate,
-                min: fromDate || undefined,
-                "aria-label": "To date",
-                onChange: (event: {
-                  target: {
-                    value: string;
-                  };
-                }) => onChangeTo(event.target.value),
-                style: dateRangeWebInputStyle,
-              })
-            : (
-              <TextInput
-                value={toDate}
-                onChangeText={onChangeTo}
-                placeholder="To date"
-                placeholderTextColor="#888888"
-                style={styles.dateRangeNativeInput}
-              />
-            )}
-        </View>
-      </View>
+      {error ? (
+        <Text style={styles.fieldErrorText}>
+          {error}
+        </Text>
+      ) : null}
     </View>
   );
 }
@@ -4376,12 +4919,14 @@ function DatePickerField({
   label,
   value,
   onChange,
+  error,
 }: {
   label: string;
   value: string;
   onChange: (
     value: string
   ) => void;
+  error?: string;
 }) {
   const [
     showPicker,
@@ -4433,10 +4978,21 @@ function DatePickerField({
                   .value
               ),
 
-            style:
-              webPickerStyle,
+            style: error
+              ? {
+                  ...webPickerStyle,
+                  border: "1px solid #D93025",
+                  backgroundColor: "#FFF8F7",
+                }
+              : webPickerStyle,
           }
         )}
+
+        {error ? (
+          <Text style={styles.fieldErrorText}>
+            {error}
+          </Text>
+        ) : null}
       </View>
     );
   }
@@ -4454,9 +5010,10 @@ function DatePickerField({
       </Text>
 
       <TouchableOpacity
-        style={
-          styles.pickerButton
-        }
+        style={[
+          styles.pickerButton,
+          error && styles.inputError,
+        ]}
         onPress={() =>
           setShowPicker(
             true
@@ -4480,6 +5037,12 @@ function DatePickerField({
             : "Select date"}
         </Text>
       </TouchableOpacity>
+
+      {error ? (
+        <Text style={styles.fieldErrorText}>
+          {error}
+        </Text>
+      ) : null}
 
       {showPicker ? (
         <DateTimePicker
@@ -4524,12 +5087,14 @@ function TimePickerField({
   label,
   value,
   onChange,
+  error,
 }: {
   label: string;
   value: string;
   onChange: (
     value: string
   ) => void;
+  error?: string;
 }) {
   const [
     showPicker,
@@ -4601,10 +5166,21 @@ function TimePickerField({
                   .value
               ),
 
-            style:
-              webPickerStyle,
+            style: error
+              ? {
+                  ...webPickerStyle,
+                  border: "1px solid #D93025",
+                  backgroundColor: "#FFF8F7",
+                }
+              : webPickerStyle,
           }
         )}
+
+        {error ? (
+          <Text style={styles.fieldErrorText}>
+            {error}
+          </Text>
+        ) : null}
       </View>
     );
   }
@@ -4622,9 +5198,10 @@ function TimePickerField({
       </Text>
 
       <TouchableOpacity
-        style={
-          styles.pickerButton
-        }
+        style={[
+          styles.pickerButton,
+          error && styles.inputError,
+        ]}
         onPress={() =>
           setShowPicker(
             true
@@ -4681,24 +5258,6 @@ function TimePickerField({
 // WEB PICKER STYLE
 // =========================================================
 
-const dateRangeWebInputStyle = {
-  width: "100%",
-  height: 23,
-  minWidth: 0,
-  maxWidth: "100%",
-  border: "none",
-  outline: "none",
-  padding: 0,
-  margin: 0,
-  fontSize: 10,
-  lineHeight: "23px",
-  color: "#252525",
-  backgroundColor: "transparent",
-  boxSizing: "border-box" as const,
-  fontFamily: "Montserrat_700Bold",
-  cursor: "pointer",
-};
-
 const webPickerStyle = {
   height: 44,
   width: "100%",
@@ -4713,8 +5272,7 @@ const webPickerStyle = {
     "#ffffff",
   boxSizing:
     "border-box" as const,
-  fontFamily:
-    "Montserrat_700Bold",
+  fontFamily: MONTSERRAT_FONT,
 };
 
 // =========================================================
@@ -4801,7 +5359,8 @@ function statusColor(
   }
 
   if (
-    status === "Approved"
+    status === "Approved" ||
+    status === "Upcoming"
   ) {
     return "#e7c1ef";
   }
@@ -4821,6 +5380,37 @@ function statusColor(
   return "#f4c5c5";
 }
 
+function statusTextColor(
+  status: EventStatus
+) {
+  if (
+    status === "Pending"
+  ) {
+    return "#A66A00";
+  }
+
+  if (
+    status === "Approved" ||
+    status === "Upcoming"
+  ) {
+    return "#8A2BA6";
+  }
+
+  if (
+    status === "Ongoing"
+  ) {
+    return "#1673B1";
+  }
+
+  if (
+    status === "Completed"
+  ) {
+    return "#237A36";
+  }
+
+  return "#B42318";
+}
+
 // =========================================================
 // STYLES
 // =========================================================
@@ -4838,20 +5428,17 @@ const styles =
     },
 
     headingRow: {
-      flexDirection: "row",
-      justifyContent: "space-between",
-      alignItems: "center",
-      gap: 12,
-    },
-
-    headingRowNarrow: {
-      flexWrap: "wrap",
-      alignItems: "flex-start",
+      flexDirection:
+        "row",
+      justifyContent:
+        "space-between",
+      alignItems:
+        "center",
     },
 
     pageTitle: {
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#145b22",
       lineHeight: 44,
     },
@@ -4859,7 +5446,7 @@ const styles =
     subtitle: {
       color: "#4f8154",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       marginTop: 2,
     },
 
@@ -4879,7 +5466,7 @@ const styles =
     addButtonText: {
       color: "#ffffff",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     // =====================================================
@@ -4919,7 +5506,7 @@ const styles =
 
     tabText: {
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#252525",
     },
 
@@ -4928,15 +5515,14 @@ const styles =
     // =====================================================
 
     cards: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      marginTop: 22,
-      width: "100%",
+      flexDirection:
+        "row",
+      marginTop: 28,
     },
 
     summaryCard: {
       flex: 1,
-      minWidth: 220,
+      minWidth: 180,
       borderWidth: 1,
       borderColor:
         "#d7d7d7",
@@ -4960,14 +5546,14 @@ const styles =
 
     summaryTitle: {
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       textAlign:
         "center",
     },
 
     summaryValue: {
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#111",
       lineHeight: 40,
     },
@@ -4977,184 +5563,115 @@ const styles =
     // =====================================================
 
     filterPanel: {
-      marginTop: 18,
-      width: "100%",
-      padding: 12,
-      flexDirection: "row",
-      flexWrap: "wrap",
-      alignItems: "center",
-      gap: 10,
+      marginTop: 22,
+      flexDirection:
+        "row",
+      gap: 14,
       borderWidth: 1,
-      borderColor: "#D9DEDA",
-      borderRadius: 10,
-      backgroundColor: "#FFFFFF",
-      zIndex: 20,
-      overflow: "visible",
+      borderColor:
+        "#d3d3d3",
+      borderRadius: 9,
+      alignItems:
+        "center",
+      zIndex: 2,
     },
 
     searchBox: {
-      height: 52,
-      flexGrow: 1.35,
-      flexShrink: 1,
-      flexBasis: 250,
-      minWidth: 220,
+      flex: 1.15,
+      minWidth: 180,
+      height: 54,
       borderRadius: 8,
-      backgroundColor: "#F7F8F7",
+      backgroundColor:
+        "#f4f4f4",
       borderWidth: 1,
-      borderColor: "#D9DEDA",
-      paddingHorizontal: 13,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 8,
-    },
-
-    searchBoxCompact: {
-      flexBasis: "100%",
-      minWidth: "100%",
+      borderColor:
+        "#dddddd",
+      paddingHorizontal: 14,
+      flexDirection:
+        "row",
+      alignItems:
+        "center",
     },
 
     searchInput: {
       flex: 1,
-      minWidth: 0,
-      fontSize: 12,
-      color: "#252525",
-      fontFamily: "Montserrat_700Bold",
-      outlineStyle: "none",
+      color: "#222",
+      outlineStyle:
+        "none",
     } as never,
 
     filterBox: {
-      width: "100%",
-      height: 52,
+      flex: 1,
+      minWidth: 150,
+      height: 54,
       borderRadius: 8,
-      backgroundColor: "#F7F8F7",
+      backgroundColor:
+        "#f4f4f4",
       borderWidth: 1,
-      borderColor: "#D9DEDA",
+      borderColor:
+        "#dddddd",
       paddingHorizontal: 12,
       paddingVertical: 6,
-      justifyContent: "center",
+      justifyContent:
+        "center",
       cursor: "pointer",
     } as any,
 
     filterBoxOpen: {
-      borderColor: "#34733B",
-      backgroundColor: "#F7FBF5",
+      borderColor:
+        "#34733B",
+      backgroundColor:
+        "#F8FBF7",
     },
 
     filterValueOpen: {
-      color: "#34733B",
+      color:
+        "#34733B",
     },
 
     filterLabel: {
-      fontFamily: "Montserrat_700Bold",
-      color: "#686F68",
-      marginBottom: 2,
-      fontSize: 10,
-      lineHeight: 12,
+      fontFamily:
+        MONTSERRAT_FONT,
+      color: "#555",
+      marginBottom: 1,
+      fontSize: 14,
     },
 
     filterValueRow: {
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "space-between",
-      minHeight: 20,
-      gap: 8,
+      flexDirection:
+        "row",
+      alignItems:
+        "center",
+      justifyContent:
+        "space-between",
+      minHeight: 18,
     },
 
     filterValue: {
-      flex: 1,
-      minWidth: 0,
-      fontSize: 12,
-      lineHeight: 16,
-      fontFamily: "Montserrat_700Bold",
+      fontFamily:
+        MONTSERRAT_FONT,
       color: "#252525",
-    },
-
-    dateRangeBox: {
-      height: 52,
-      flexGrow: 0,
       flexShrink: 1,
-      flexBasis: 300,
-      minWidth: 286,
-      maxWidth: 320,
-      borderRadius: 8,
-      backgroundColor: "#F7F8F7",
-      borderWidth: 1,
-      borderColor: "#D9DEDA",
-      paddingHorizontal: 10,
-      paddingTop: 4,
-      paddingBottom: 5,
-      justifyContent: "center",
-      overflow: "hidden",
-    },
-
-    dateRangeLabel: {
-      fontSize: 10,
-      lineHeight: 12,
-      color: "#686F68",
-      fontFamily: "Montserrat_700Bold",
-      marginBottom: 2,
-    },
-
-    dateRangeInputRow: {
-      height: 27,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "flex-start",
-      gap: 5,
-    },
-
-    dateRangeSingleBox: {
-      width: 128,
-      height: 27,
-      borderWidth: 1,
-      borderColor: "#CDD3CD",
-      borderRadius: 6,
-      backgroundColor: "#FFFFFF",
-      paddingHorizontal: 7,
-      justifyContent: "center",
-      overflow: "hidden",
-    },
-
-    dateRangeSeparator: {
-      width: 10,
-      textAlign: "center",
-      fontSize: 11,
-      lineHeight: 14,
-      color: "#656B65",
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    dateRangeNativeInput: {
-      width: "100%",
-      minWidth: 0,
-      height: 23,
-      padding: 0,
-      margin: 0,
-      borderWidth: 0,
-      fontSize: 10,
-      color: "#252525",
-      fontFamily: "Montserrat_700Bold",
     },
 
     resetButton: {
-      width: 94,
-      height: 52,
-      flexShrink: 0,
-      paddingHorizontal: 12,
+      height: 38,
+      paddingHorizontal: 13,
       borderRadius: 8,
       borderWidth: 1,
-      borderColor: "#D9DEDA",
-      backgroundColor: "#F7F8F7",
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 6,
+      borderColor:
+        "#86be8d",
+      flexDirection:
+        "row",
+      alignItems:
+        "center",
+      gap: 5,
     },
 
     resetText: {
-      fontSize: 12,
       color: "#34733B",
-      fontFamily: "Montserrat_700Bold",
+      fontFamily:
+        MONTSERRAT_FONT,
     },
 
     // =====================================================
@@ -5171,116 +5688,124 @@ const styles =
     },
 
     table: {
+      minWidth: 980,
+    },
+
+    tableFullWidth: {
+      minWidth: "100%",
       width: "100%",
-      minWidth: 0,
     },
 
     tableHeader: {
       height: 50,
-      flexDirection: "row",
-      alignItems: "center",
+      flexDirection:
+        "row",
+      alignItems:
+        "center",
       borderBottomWidth: 1,
-      borderBottomColor: "#d7d7d7",
-      paddingHorizontal: 8,
-      width: "100%",
-    },
-
-    tableHeaderCompact: {
-      paddingHorizontal: 8,
+      borderBottomColor:
+        "#d7d7d7",
+      paddingHorizontal: 12,
     },
 
     th: {
-      fontSize: 12,
+      fontSize: 14,
       color: "#202020",
-      fontFamily: "Montserrat_700Bold",
-      flexShrink: 1,
+      fontFamily:
+        MONTSERRAT_FONT,
+    },
+
+    centerHeaderText: {
+      textAlign: "center",
+    },
+
+    centerCellText: {
+      textAlign: "center",
+      width: "100%",
     },
 
     tableRow: {
       minHeight: 78,
-      flexDirection: "row",
-      alignItems: "center",
+      flexDirection:
+        "row",
+      alignItems:
+        "center",
       borderBottomWidth: 1,
-      borderBottomColor: "#dddddd",
-      paddingHorizontal: 8,
-      width: "100%",
+      borderBottomColor:
+        "#dddddd",
+      paddingHorizontal: 12,
     },
 
-    tableRowCompact: {
-      minHeight: 72,
-      paddingHorizontal: 8,
-    },
-
-    // Balanced table columns.
-    // Event Details was previously much wider than the other columns,
-    // which created a large empty gap before Event Category.
     idColumn: {
       flex: 0.7,
-      minWidth: 0,
+      minWidth: 90,
       paddingHorizontal: 8,
     },
 
     detailsColumn: {
-      flex: 1.65,
-      minWidth: 0,
+      flex: 1.75,
+      minWidth: 240,
       paddingHorizontal: 8,
     },
 
     submittedColumn: {
-      flex: 1.2,
-      minWidth: 0,
+      flex: 1.25,
+      minWidth: 150,
       paddingHorizontal: 8,
     },
 
     categoryColumn: {
-      flex: 1.15,
-      minWidth: 0,
+      flex: 1.05,
+      minWidth: 135,
       paddingHorizontal: 8,
     },
 
     dateColumn: {
-      flex: 1.15,
-      minWidth: 0,
+      flex: 1.2,
+      minWidth: 155,
       paddingHorizontal: 8,
     },
 
     locationColumn: {
       flex: 1.55,
-      minWidth: 0,
+      minWidth: 230,
       paddingHorizontal: 8,
     },
 
     statusColumn: {
-      flex: 1,
-      minWidth: 0,
-      paddingHorizontal: 8,
+      flex: 0.9,
+      minWidth: 110,
+      paddingHorizontal: 6,
+      alignItems:
+        "center",
+      justifyContent:
+        "center",
     },
 
     participantsColumn: {
-      flex: 1,
-      minWidth: 0,
+      flex: 0.9,
+      minWidth: 115,
       paddingHorizontal: 8,
-      alignItems: "center",
-      justifyContent: "center",
+      alignItems:
+        "center",
+      justifyContent:
+        "center",
     },
 
     actionColumn: {
-      flex: 1.1,
-      minWidth: 0,
+      flex: 0.95,
+      minWidth: 125,
       paddingHorizontal: 8,
-      alignItems: "center",
-      justifyContent: "center",
-    },
-
-    headerCenteredColumn: {
-      alignItems: "center",
-      justifyContent: "center",
+      alignItems:
+        "center",
+      justifyContent:
+        "center",
     },
 
     cellText: {
-      fontSize: 12,
+      fontSize: 14,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#242424",
     },
 
@@ -5336,16 +5861,15 @@ const styles =
     },
 
     eventTitle: {
-      fontSize: 12,
+      fontSize: 14,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#1c1c1c",
     },
 
     eventDescription: {
-      fontSize: 10,
+      fontSize: 12,
       color: "#555",
-      fontFamily: "Montserrat_700Bold",
       lineHeight: 12,
       marginTop: 2,
     },
@@ -5358,64 +5882,53 @@ const styles =
       borderRadius: 5,
     },
 
+    statusBadge: {
+      alignSelf: "center",
+      minWidth: 82,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 10,
+    },
+
     badgeText: {
-      fontSize: 12,
+      fontSize: 14,
       color: "#2e502f",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     dateText: {
-      fontSize: 11,
+      fontSize: 14,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#222",
     },
 
     smallText: {
-      fontSize: 10,
+      fontSize: 12,
       color: "#555",
-      fontFamily: "Montserrat_700Bold",
-      marginTop: 2,
-    },
-
-    participantValue: {
-      fontSize: 10,
-      color: "#333333",
-      fontFamily: "Montserrat_700Bold",
-      textAlign: "center",
-    },
-
-    participantSubtext: {
-      fontSize: 10,
-      color: "#555555",
-      fontFamily: "Montserrat_700Bold",
-      textAlign: "center",
       marginTop: 2,
     },
 
     viewButton: {
-      minWidth: 90,
-      maxWidth: "100%",
       borderWidth: 1,
       borderColor:
         "#4b9b52",
       borderRadius: 6,
       paddingVertical: 5,
-      paddingHorizontal: 6,
+      paddingHorizontal: 7,
       flexDirection:
         "row",
       alignItems:
         "center",
       gap: 4,
-      justifyContent: "center",
     },
 
     viewButtonText: {
-      fontSize: 10,
+      fontSize: 12,
       color: "#34733B",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     emptyRow: {
@@ -5430,7 +5943,7 @@ const styles =
       fontSize: 14,
       color: "#777",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     // =====================================================
@@ -5440,18 +5953,18 @@ const styles =
     pagination: {
       minHeight: 52,
       paddingHorizontal: 16,
-      paddingVertical: 8,
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 10,
-      alignItems: "center",
-      justifyContent: "space-between",
+      flexDirection:
+        "row",
+      alignItems:
+        "center",
+      justifyContent:
+        "space-between",
     },
 
     paginationText: {
       fontSize: 12,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#333",
     },
 
@@ -5485,7 +5998,7 @@ const styles =
       fontSize: 12,
       color: "#333",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     activePageButtonText: {
@@ -5495,6 +6008,130 @@ const styles =
     // =====================================================
     // MODALS
     // =====================================================
+
+    // =====================================================
+    // EVENT FORM ALERT
+    // =====================================================
+
+    formAlertOverlay: {
+      flex: 1,
+      backgroundColor: "rgba(20, 28, 21, 0.42)",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 20,
+    },
+
+    inlineFormAlertOverlay: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      zIndex: 9999,
+      elevation: 9999,
+    },
+
+    inlineFormAlertBackdrop: {
+      position: "absolute",
+      top: 0,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      backgroundColor: "rgba(20, 28, 21, 0.42)",
+    },
+
+    inlineFormAlertCenter: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 20,
+    },
+
+    formAlertCard: {
+      width: "100%",
+      maxWidth: 420,
+      borderRadius: 18,
+      backgroundColor: "#FFFFFF",
+      paddingHorizontal: 26,
+      paddingTop: 28,
+      paddingBottom: 22,
+      alignItems: "center",
+      shadowColor: "#000000",
+      shadowOffset: {
+        width: 0,
+        height: 8,
+      },
+      shadowOpacity: 0.18,
+      shadowRadius: 18,
+      elevation: 18,
+    },
+
+    formAlertIconWrap: {
+      width: 58,
+      height: 58,
+      borderRadius: 29,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 16,
+    },
+
+    formAlertIconWarning: {
+      backgroundColor: "#E29B17",
+    },
+
+    formAlertIconError: {
+      backgroundColor: "#C43D36",
+    },
+
+    formAlertIconSuccess: {
+      backgroundColor: "#2E8B45",
+    },
+
+    formAlertTitle: {
+      fontSize: 19,
+      lineHeight: 24,
+      color: "#173B1E",
+      fontFamily: MONTSERRAT_FONT,
+      textAlign: "center",
+    },
+
+    formAlertMessage: {
+      marginTop: 9,
+      maxWidth: 330,
+      fontSize: 11,
+      lineHeight: 17,
+      color: "#5F675F",
+      fontFamily: MONTSERRAT_FONT,
+      textAlign: "center",
+    },
+
+    formAlertButton: {
+      width: "100%",
+      height: 42,
+      marginTop: 22,
+      borderRadius: 8,
+      alignItems: "center",
+      justifyContent: "center",
+      paddingHorizontal: 16,
+    },
+
+    formAlertButtonWarning: {
+      backgroundColor: "#34733B",
+    },
+
+    formAlertButtonError: {
+      backgroundColor: "#A93131",
+    },
+
+    formAlertButtonSuccess: {
+      backgroundColor: "#34733B",
+    },
+
+    formAlertButtonText: {
+      color: "#FFFFFF",
+      fontSize: 12,
+      fontFamily: MONTSERRAT_FONT,
+    },
 
     // =====================================================
 // REJECT EVENT MODAL
@@ -5537,7 +6174,7 @@ rejectModalTitle: {
 
   color: "#145B22",
 
-  fontFamily: "Montserrat_700Bold",
+  fontFamily: MONTSERRAT_FONT,
 
   marginBottom: 7,
 },
@@ -5548,7 +6185,7 @@ rejectModalDescription: {
 
   color: "#555555",
 
-  fontFamily: "Montserrat_700Bold",
+  fontFamily: MONTSERRAT_FONT,
 
   marginBottom: 18,
 },
@@ -5563,7 +6200,7 @@ rejectLabel: {
 
   color: "#222222",
 
-  fontFamily: "Montserrat_700Bold",
+  fontFamily: MONTSERRAT_FONT,
 
   marginBottom: 6,
 },
@@ -5617,7 +6254,7 @@ rejectDropdownText: {
 
   color: "#222222",
 
-  fontFamily: "Montserrat_700Bold",
+  fontFamily: MONTSERRAT_FONT,
 
   marginRight: 10,
 },
@@ -5684,13 +6321,13 @@ rejectDropdownOptionText: {
 
   color: "#222222",
 
-  fontFamily: "Montserrat_700Bold",
+  fontFamily: MONTSERRAT_FONT,
 },
 
 rejectDropdownOptionTextSelected: {
   color: "#145B22",
 
-  fontFamily: "Montserrat_700Bold",
+  fontFamily: MONTSERRAT_FONT,
 },
 
 // REMARKS
@@ -5712,7 +6349,7 @@ rejectRemarksInput: {
 
   color: "#222222",
 
-  fontFamily: "Montserrat_700Bold",
+  fontFamily: MONTSERRAT_FONT,
 
   outlineStyle: "none",
 } as any,
@@ -5751,7 +6388,7 @@ rejectCancelText: {
 
   fontSize: 11,
 
-  fontFamily: "Montserrat_700Bold",
+  fontFamily: MONTSERRAT_FONT,
 },
 
 rejectConfirmButton: {
@@ -5773,7 +6410,7 @@ rejectConfirmText: {
 
   fontSize: 11,
 
-  fontFamily: "Montserrat_700Bold",
+  fontFamily: MONTSERRAT_FONT,
 },
 
     modalOverlay: {
@@ -5794,6 +6431,8 @@ rejectConfirmText: {
         "#fff",
       borderRadius: 14,
       padding: 24,
+      position: "relative",
+      overflow: "hidden",
     },
 
     detailsModalScroll: {
@@ -5825,7 +6464,7 @@ rejectConfirmText: {
       fontSize: 15,
       color: "#1c1c1c",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     participantRow: {
@@ -5859,13 +6498,12 @@ rejectConfirmText: {
       fontSize: 22,
       color: "#145b22",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     modalSubtitle: {
       fontSize: 12,
       color: "#777",
-      fontFamily: "Montserrat_700Bold",
       marginTop: 3,
     },
 
@@ -5882,435 +6520,6 @@ rejectConfirmText: {
     },
 
     // =====================================================
-    // EVENT VIEW MODAL
-    // =====================================================
-
-    eventViewModal: {
-      width: "94%",
-      maxWidth: 1080,
-      maxHeight: "92%",
-      backgroundColor: "#FFFFFF",
-      borderRadius: 16,
-      overflow: "hidden",
-      shadowColor: "#000000",
-      shadowOpacity: 0.18,
-      shadowRadius: 18,
-      shadowOffset: { width: 0, height: 7 },
-      elevation: 15,
-    },
-
-    eventViewModalNarrow: {
-      width: "96%",
-      maxHeight: "94%",
-    },
-
-    eventViewHeader: {
-      minHeight: 96,
-      paddingHorizontal: 24,
-      paddingVertical: 18,
-      flexDirection: "row",
-      alignItems: "flex-start",
-      justifyContent: "space-between",
-      borderBottomWidth: 1,
-      borderBottomColor: "#E5EAE5",
-      backgroundColor: "#FAFCFA",
-    },
-
-    eventViewHeaderLeft: {
-      flex: 1,
-      paddingRight: 18,
-    },
-
-    eventViewTitle: {
-      fontSize: 24,
-      lineHeight: 30,
-      color: "#145B22",
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewId: {
-      marginTop: 4,
-      fontSize: 10,
-      color: "#727972",
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewBadges: {
-      flexDirection: "row",
-      alignItems: "center",
-      flexWrap: "wrap",
-      gap: 8,
-      marginTop: 10,
-    },
-
-    eventViewBadge: {
-      borderRadius: 18,
-      paddingHorizontal: 11,
-      paddingVertical: 5,
-    },
-
-    eventViewBadgeText: {
-      fontSize: 10,
-      color: "#264D2A",
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewCloseIcon: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
-      borderWidth: 1,
-      borderColor: "#D7DDD7",
-      backgroundColor: "#FFFFFF",
-      alignItems: "center",
-      justifyContent: "center",
-    },
-
-    eventViewScroll: {
-      flex: 1,
-      backgroundColor: "#F7F9F7",
-    },
-
-    eventViewContent: {
-      padding: 20,
-    },
-
-    eventViewGrid: {
-      width: "100%",
-      flexDirection: "row",
-      alignItems: "flex-start",
-      gap: 18,
-    },
-
-    eventViewGridNarrow: {
-      flexDirection: "column",
-    },
-
-    eventViewMainColumn: {
-      flex: 1.25,
-      minWidth: 0,
-      gap: 14,
-    },
-
-    eventViewSideColumn: {
-      flex: 0.85,
-      minWidth: 0,
-      gap: 14,
-    },
-
-    eventViewImageCard: {
-      width: "100%",
-      height: 260,
-      borderRadius: 12,
-      overflow: "hidden",
-      backgroundColor: "#E8ECE8",
-      borderWidth: 1,
-      borderColor: "#DFE4DF",
-    },
-
-    eventViewImagePressable: {
-      width: "100%",
-      height: "100%",
-    },
-
-    eventViewImage: {
-      width: "100%",
-      height: "100%",
-    },
-
-    eventViewImagePlaceholder: {
-      flex: 1,
-      alignItems: "center",
-      justifyContent: "center",
-      paddingHorizontal: 20,
-    },
-
-    eventViewPlaceholderText: {
-      marginTop: 8,
-      fontSize: 11,
-      color: "#747D74",
-      textAlign: "center",
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewCard: {
-      width: "100%",
-      borderWidth: 1,
-      borderColor: "#DFE4DF",
-      borderRadius: 12,
-      backgroundColor: "#FFFFFF",
-      padding: 16,
-    },
-
-    eventViewSectionTitle: {
-      fontSize: 15,
-      lineHeight: 20,
-      color: "#145B22",
-      fontFamily: "Montserrat_700Bold",
-      marginBottom: 11,
-    },
-
-    eventViewDescription: {
-      fontSize: 12,
-      lineHeight: 19,
-      color: "#4E554E",
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewInfoGrid: {
-      flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 10,
-    },
-
-    eventViewInfoItem: {
-      flexGrow: 1,
-      flexBasis: "47%",
-      minWidth: 190,
-      minHeight: 70,
-      borderRadius: 9,
-      backgroundColor: "#F6F9F6",
-      paddingHorizontal: 11,
-      paddingVertical: 10,
-      flexDirection: "row",
-      alignItems: "flex-start",
-    },
-
-    eventViewInfoIcon: {
-      width: 34,
-      height: 34,
-      borderRadius: 17,
-      backgroundColor: "#E8F2E7",
-      alignItems: "center",
-      justifyContent: "center",
-      marginRight: 10,
-    },
-
-    eventViewInfoTextWrap: {
-      flex: 1,
-      minWidth: 0,
-    },
-
-    eventViewInfoLabel: {
-      fontSize: 9,
-      color: "#7A827A",
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewInfoValue: {
-      marginTop: 3,
-      fontSize: 12,
-      lineHeight: 17,
-      color: "#242824",
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewInfoSubValue: {
-      marginTop: 2,
-      fontSize: 9,
-      lineHeight: 13,
-      color: "#767D76",
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewLocationInfo: {
-      marginTop: 10,
-      minHeight: 66,
-      borderRadius: 9,
-      backgroundColor: "#F6F9F6",
-      paddingHorizontal: 11,
-      paddingVertical: 10,
-      flexDirection: "row",
-      alignItems: "flex-start",
-    },
-
-    eventViewMapWrap: {
-      width: "100%",
-      borderRadius: 9,
-      overflow: "hidden",
-    },
-
-    eventViewGps: {
-      marginTop: 8,
-      fontSize: 9,
-      lineHeight: 13,
-      color: "#777E77",
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewParticipantsHeader: {
-      flexDirection: "row",
-      alignItems: "flex-start",
-      justifyContent: "space-between",
-      gap: 10,
-    },
-
-    eventViewParticipantsTitleWrap: {
-      flex: 1,
-      minWidth: 0,
-    },
-
-    eventViewParticipantCountText: {
-      marginTop: -7,
-      marginBottom: 10,
-      fontSize: 9,
-      color: "#777E77",
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewCapacityBadge: {
-      minHeight: 29,
-      flexDirection: "row",
-      alignItems: "center",
-      gap: 5,
-      backgroundColor: "#ECF5EA",
-      borderRadius: 15,
-      paddingHorizontal: 9,
-      paddingVertical: 5,
-    },
-
-    eventViewCapacityText: {
-      color: "#34733B",
-      fontSize: 10,
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewEmptyParticipants: {
-      minHeight: 155,
-      alignItems: "center",
-      justifyContent: "center",
-      paddingHorizontal: 18,
-    },
-
-    eventViewEmptyTitle: {
-      marginTop: 7,
-      fontSize: 11,
-      color: "#343934",
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewEmptyText: {
-      marginTop: 4,
-      fontSize: 9,
-      lineHeight: 14,
-      color: "#838A83",
-      textAlign: "center",
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewParticipantList: {
-      width: "100%",
-    },
-
-    eventViewParticipantRow: {
-      minHeight: 58,
-      flexDirection: "row",
-      alignItems: "center",
-      borderTopWidth: 1,
-      borderTopColor: "#ECEFEC",
-      paddingVertical: 8,
-    },
-
-    eventViewAvatar: {
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: "#34733B",
-      alignItems: "center",
-      justifyContent: "center",
-      marginRight: 10,
-    },
-
-    eventViewParticipantCopy: {
-      flex: 1,
-      minWidth: 0,
-    },
-
-    eventViewParticipantName: {
-      fontSize: 11,
-      color: "#252925",
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewParticipantEmail: {
-      marginTop: 2,
-      fontSize: 9,
-      color: "#777E77",
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewJoinedWrap: {
-      alignItems: "flex-end",
-      marginLeft: 8,
-    },
-
-    eventViewJoinedLabel: {
-      fontSize: 8,
-      color: "#8A908A",
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewJoinedDate: {
-      marginTop: 2,
-      fontSize: 9,
-      color: "#4B504B",
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewFooter: {
-      minHeight: 68,
-      paddingHorizontal: 20,
-      paddingVertical: 12,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "flex-end",
-      gap: 9,
-      borderTopWidth: 1,
-      borderTopColor: "#E5EAE5",
-      backgroundColor: "#FFFFFF",
-    },
-
-    eventViewFooterNarrow: {
-      flexWrap: "wrap",
-    },
-
-    eventViewCloseButton: {
-      minWidth: 92,
-      height: 40,
-      borderWidth: 1,
-      borderColor: "#C8CEC8",
-      borderRadius: 7,
-      backgroundColor: "#FFFFFF",
-      alignItems: "center",
-      justifyContent: "center",
-      paddingHorizontal: 14,
-    },
-
-    eventViewCloseButtonText: {
-      color: "#4A504A",
-      fontSize: 11,
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    eventViewPrimaryButton: {
-      minWidth: 150,
-      height: 40,
-      borderRadius: 7,
-      backgroundColor: "#34733B",
-      paddingHorizontal: 16,
-      flexDirection: "row",
-      alignItems: "center",
-      justifyContent: "center",
-      gap: 6,
-    },
-
-    eventViewPrimaryButtonText: {
-      color: "#FFFFFF",
-      fontSize: 11,
-      fontFamily: "Montserrat_700Bold",
-    },
-
-    // =====================================================
     // FORMS
     // =====================================================
 
@@ -6318,17 +6527,55 @@ rejectConfirmText: {
       marginBottom: 14,
     },
 
+    formErrorBanner: {
+      width: "100%",
+      marginBottom: 16,
+      paddingHorizontal: 13,
+      paddingVertical: 10,
+      borderWidth: 1,
+      borderColor: "#F2B8B5",
+      borderRadius: 8,
+      backgroundColor: "#FFF1F0",
+    },
+
+    formErrorBannerTitle: {
+      fontSize: 12,
+      lineHeight: 17,
+      color: "#B42318",
+      fontFamily: MONTSERRAT_FONT,
+    },
+
+    formErrorBannerText: {
+      marginTop: 2,
+      fontSize: 10,
+      lineHeight: 15,
+      color: "#8A312A",
+      fontFamily: MONTSERRAT_FONT,
+    },
+
+    fieldErrorText: {
+      marginTop: 5,
+      fontSize: 10,
+      lineHeight: 14,
+      color: "#B42318",
+      fontFamily: MONTSERRAT_FONT,
+    },
+
+    inputError: {
+      borderColor: "#D93025",
+      backgroundColor: "#FFF8F7",
+    },
+
     inputLabel: {
       fontSize: 12,
       color: "#333",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       marginBottom: 6,
     },
 
     input: {
       height: 44,
-      fontFamily: "Montserrat_700Bold",
       borderWidth: 1,
       borderColor:
         "#cfcfcf",
@@ -6358,7 +6605,7 @@ rejectConfirmText: {
       fontSize: 14,
       color: "#222",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     multilineInput: {
@@ -6383,7 +6630,7 @@ rejectConfirmText: {
       marginTop: 6,
       marginBottom: 10,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     inlineFields: {
@@ -6452,7 +6699,7 @@ rejectConfirmText: {
       color: "#555",
       fontSize: 9,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     uploadBox: {
@@ -6474,14 +6721,13 @@ rejectConfirmText: {
       fontSize: 12,
       color: "#222",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       marginTop: 5,
     },
 
     uploadHint: {
       fontSize: 9,
       color: "#777",
-      fontFamily: "Montserrat_700Bold",
       marginTop: 2,
     },
 
@@ -6518,7 +6764,7 @@ rejectConfirmText: {
       fontSize: 11,
       color: "#333",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     choiceTextActive: {
@@ -6566,7 +6812,7 @@ rejectConfirmText: {
     cancelText: {
       color: "#555",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     saveButton: {
@@ -6587,7 +6833,7 @@ rejectConfirmText: {
     saveText: {
       color: "#ffffff",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       fontSize: 13,
     },
 
@@ -6604,7 +6850,7 @@ rejectConfirmText: {
       fontSize: 17,
       color: "#145b22",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       marginBottom: 8,
     },
 
@@ -6629,12 +6875,11 @@ rejectConfirmText: {
       fontSize: 13,
       color: "#222",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     detailsDescription: {
       fontSize: 14,
-      fontFamily: "Montserrat_700Bold",
       lineHeight: 20,
       color: "#555",
       marginBottom: 16,
@@ -6656,7 +6901,7 @@ rejectConfirmText: {
       fontSize: 13,
       color: "#555",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     detailValue: {
@@ -6664,7 +6909,7 @@ rejectConfirmText: {
       fontSize: 13,
       color: "#222",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     // =====================================================
@@ -6672,26 +6917,19 @@ rejectConfirmText: {
     // =====================================================
 
     dropdownContainer: {
-      height: 52,
-      flexGrow: 0.8,
-      flexShrink: 1,
-      flexBasis: 165,
-      minWidth: 155,
-      position: "relative",
+      flex: 1,
+      minWidth: 150,
+      position:
+        "relative",
       zIndex: 100,
-      overflow: "visible",
-    },
-
-    dropdownContainerCompact: {
-      flexGrow: 1,
-      flexBasis: 190,
-      minWidth: 170,
+      overflow:
+        "visible",
     },
 
     dropdownMenu: {
       position:
         "absolute",
-      top: 56,
+      top: 58,
       left: 0,
       right: 0,
       backgroundColor:
@@ -6742,7 +6980,7 @@ rejectConfirmText: {
       flex: 1,
       fontSize: 13,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       color: "#222222",
     },
 
@@ -6845,7 +7083,7 @@ rejectConfirmText: {
       color: "#667066",
       marginTop: 5,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     pendingEventHeading: {
@@ -6872,7 +7110,7 @@ rejectConfirmText: {
       color: "#E47920",
       fontSize: 14,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       textAlign:
         "center",
     },
@@ -6882,7 +7120,7 @@ rejectConfirmText: {
       lineHeight: 26,
       color: "#111111",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       marginBottom: 5,
     },
 
@@ -6897,14 +7135,14 @@ rejectConfirmText: {
       color: "#207529",
       fontSize: 14,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     pendingEventId: {
       color: "#222222",
       fontSize: 10,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     // INFORMATION
@@ -6936,7 +7174,7 @@ rejectConfirmText: {
       color: "#666666",
       fontSize: 14,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     pendingInfoValueBox: {
@@ -6948,7 +7186,7 @@ rejectConfirmText: {
       color: "#444444",
       fontSize: 14,
       lineHeight: 18,
-      fontFamily: "Montserrat_700Bold",
+      fontFamily: MONTSERRAT_FONT,
       paddingLeft: 25,
     },
 
@@ -6956,7 +7194,7 @@ rejectConfirmText: {
       color: "#555555",
       fontSize: 12,
       lineHeight: 15,
-      fontFamily: "Montserrat_700Bold",
+      fontFamily: MONTSERRAT_FONT,
       paddingLeft: 25,
     },
 
@@ -6978,7 +7216,7 @@ rejectConfirmText: {
       fontSize: 13,
       color: "#111111",
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
       marginBottom: 12,
     },
 
@@ -7014,7 +7252,7 @@ rejectConfirmText: {
       color: "#777777",
       marginTop: 2,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     // ABOUT
@@ -7035,7 +7273,7 @@ rejectConfirmText: {
       fontSize: 11,
       lineHeight: 17,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     // MAP
@@ -7091,7 +7329,7 @@ rejectConfirmText: {
       color: "#111111",
       fontSize: 16,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     pendingSubmitterArea: {
@@ -7099,7 +7337,7 @@ rejectConfirmText: {
       color: "#555555",
       fontSize: 9,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     // ACTIONS
@@ -7132,9 +7370,9 @@ rejectConfirmText: {
 
     pendingRejectButtonText: {
       color: "#DE1919",
-      fontSize: 11,
+      fontSize: 13,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
 
     pendingApproveButton: {
@@ -7151,8 +7389,400 @@ rejectConfirmText: {
 
     pendingApproveButtonText: {
       color: "#ffffff",
-      fontSize: 11,
+      fontSize: 13,
       fontFamily:
-        "Montserrat_700Bold",
+        MONTSERRAT_FONT,
     },
+
+  eventDetailsModal: {
+  width: "94%",
+  maxWidth: 1120,
+  maxHeight: "92%",
+  backgroundColor: "#FFFFFF",
+  borderRadius: 16,
+  overflow: "hidden",
+  shadowColor: "#000000",
+  shadowOpacity: 0.18,
+  shadowRadius: 18,
+  shadowOffset: {
+    width: 0,
+    height: 7,
+  },
+
+  elevation: 15,
+},
+
+eventDetailsHeader: {
+  minHeight: 100,
+  paddingHorizontal: 28,
+  paddingVertical: 20,
+
+  flexDirection: "row",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+
+  borderBottomWidth: 1,
+  borderBottomColor: "#E7E7E7",
+
+  backgroundColor: "#FAFCFA",
+},
+
+eventDetailsHeaderLeft: {
+  flex: 1,
+  paddingRight: 20,
+},
+
+eventDetailsTitle: {
+  fontSize: 26,
+  lineHeight: 32,
+  color: "#145B22",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventDetailsId: {
+  marginTop: 4,
+  fontSize: 11,
+  color: "#777777",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventDetailsBadges: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 8,
+  marginTop: 10,
+},
+
+eventDetailsBadge: {
+  borderRadius: 20,
+  paddingHorizontal: 12,
+  paddingVertical: 5,
+},
+
+eventDetailsBadgeText: {
+  fontSize: 11,
+  color: "#264D2A",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventDetailsClose: {
+  width: 38,
+  height: 38,
+  borderRadius: 19,
+  backgroundColor: "#EEEEEE",
+  alignItems: "center",
+  justifyContent: "center",
+},
+
+eventDetailsScrollContent: {
+  padding: 24,
+},
+
+eventDetailsColumns: {
+  flexDirection: "row",
+  alignItems: "flex-start",
+  gap: 20,
+  flexWrap: "wrap",
+},
+
+eventDetailsLeft: {
+  flex: 1.25,
+  minWidth: 420,
+  gap: 16,
+},
+
+eventDetailsRight: {
+  flex: 0.85,
+  minWidth: 320,
+  gap: 16,
+},
+
+eventHeroCard: {
+  width: "100%",
+  height: 270,
+  borderRadius: 12,
+  overflow: "hidden",
+  backgroundColor: "#E7EBE7",
+},
+
+eventHeroPressable: {
+  width: "100%",
+  height: "100%",
+},
+
+eventDetailsHeroImage: {
+  width: "100%",
+  height: "100%",
+},
+
+eventDetailsImagePlaceholder: {
+  width: "100%",
+  height: "100%",
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: "#EEF2EE",
+},
+
+eventDetailsPlaceholderText: {
+  marginTop: 8,
+  fontSize: 12,
+  color: "#778077",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventDetailsCard: {
+  width: "100%",
+  borderWidth: 1,
+  borderColor: "#DFE3DF",
+  borderRadius: 12,
+  backgroundColor: "#FFFFFF",
+  padding: 18,
+},
+
+eventDetailsSectionTitle: {
+  fontSize: 16,
+  color: "#145B22",
+  fontFamily: MONTSERRAT_FONT,
+  marginBottom: 13,
+},
+
+eventDetailsDescription: {
+  fontSize: 13,
+  lineHeight: 21,
+  color: "#555555",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventInfoGrid: {
+  flexDirection: "row",
+  flexWrap: "wrap",
+  gap: 12,
+},
+
+eventInfoItem: {
+  width: "48%",
+  minHeight: 72,
+  borderRadius: 9,
+  backgroundColor: "#F7F9F7",
+  paddingHorizontal: 12,
+  paddingVertical: 11,
+
+  flexDirection: "row",
+  alignItems: "flex-start",
+},
+
+eventInfoIcon: {
+  width: 34,
+  height: 34,
+  borderRadius: 17,
+  backgroundColor: "#E8F2E7",
+  alignItems: "center",
+  justifyContent: "center",
+  marginRight: 10,
+},
+
+eventInfoCopy: {
+  flex: 1,
+},
+
+eventInfoLabel: {
+  fontSize: 10,
+  color: "#777777",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventInfoValue: {
+  marginTop: 3,
+  fontSize: 13,
+  lineHeight: 18,
+  color: "#222222",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventInfoSubValue: {
+  marginTop: 2,
+  fontSize: 10,
+  color: "#777777",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventLocationRow: {
+  marginTop: 12,
+  minHeight: 68,
+  borderRadius: 9,
+  backgroundColor: "#F7F9F7",
+  paddingHorizontal: 12,
+  paddingVertical: 11,
+  flexDirection: "row",
+  alignItems: "flex-start",
+},
+
+eventDetailsMap: {
+  borderRadius: 9,
+  overflow: "hidden",
+},
+
+eventCoordinates: {
+  marginTop: 8,
+  fontSize: 10,
+  color: "#777777",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+participantHeader: {
+  flexDirection: "row",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+},
+
+participantCount: {
+  marginTop: -8,
+  marginBottom: 12,
+  fontSize: 10,
+  color: "#777777",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+participantCapacityBadge: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 5,
+  backgroundColor: "#EDF5EB",
+  borderRadius: 16,
+  paddingHorizontal: 10,
+  paddingVertical: 6,
+},
+
+participantCapacityText: {
+  color: "#34733B",
+  fontSize: 11,
+  fontFamily: MONTSERRAT_FONT,
+},
+
+participantList: {
+  width: "100%",
+},
+
+eventParticipantRow: {
+  minHeight: 62,
+  flexDirection: "row",
+  alignItems: "center",
+  borderTopWidth: 1,
+  borderTopColor: "#EEEEEE",
+  paddingVertical: 9,
+},
+
+eventParticipantAvatar: {
+  width: 38,
+  height: 38,
+  borderRadius: 19,
+  backgroundColor: "#34733B",
+  alignItems: "center",
+  justifyContent: "center",
+  marginRight: 11,
+},
+
+eventParticipantName: {
+  fontSize: 12,
+  color: "#222222",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventParticipantEmail: {
+  marginTop: 2,
+  fontSize: 10,
+  color: "#777777",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventParticipantJoined: {
+  alignItems: "flex-end",
+  marginLeft: 8,
+},
+
+eventParticipantJoinedLabel: {
+  fontSize: 9,
+  color: "#888888",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventParticipantJoinedDate: {
+  marginTop: 2,
+  fontSize: 10,
+  color: "#444444",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+participantEmpty: {
+  minHeight: 160,
+  alignItems: "center",
+  justifyContent: "center",
+  paddingHorizontal: 20,
+},
+
+participantEmptyTitle: {
+  marginTop: 7,
+  fontSize: 12,
+  color: "#333333",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+participantEmptyText: {
+  marginTop: 4,
+  fontSize: 10,
+  color: "#888888",
+  textAlign: "center",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventDetailsFooter: {
+  minHeight: 70,
+  paddingHorizontal: 24,
+
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "flex-end",
+  gap: 10,
+
+  borderTopWidth: 1,
+  borderTopColor: "#E7E7E7",
+
+  backgroundColor: "#FAFCFA",
+},
+
+eventDetailsCloseButton: {
+  minWidth: 95,
+  height: 40,
+
+  borderWidth: 1,
+  borderColor: "#CACACA",
+  borderRadius: 7,
+
+  alignItems: "center",
+  justifyContent: "center",
+},
+
+eventDetailsCloseButtonText: {
+  color: "#444444",
+  fontSize: 12,
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventStatusButton: {
+  minWidth: 155,
+  height: 40,
+  backgroundColor: "#34733B",
+  borderRadius: 7,
+  paddingHorizontal: 16,
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 6,
+},
+
+eventStatusButtonText: {
+  color: "#FFFFFF",
+  fontSize: 12,
+  fontFamily: MONTSERRAT_FONT,
+},
   });

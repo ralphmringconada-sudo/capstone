@@ -1,3 +1,5 @@
+/** Shared role and document shapes used by the admin dashboard. */
+
 export type AdminRole = 'admin' | 'super_admin';
 
 export type AdminNotificationPrefs = {
