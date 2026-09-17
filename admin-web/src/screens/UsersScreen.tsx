@@ -1,4 +1,4 @@
-import { createElement, useMemo, useRef, useState } from "react";
+import { createElement, useEffect, useMemo, useRef, useState } from "react";
 import {
   Modal,
   Platform,
@@ -25,6 +25,7 @@ import {
   Mail,
   Phone,
 } from "lucide-react-native";
+import { router } from "expo-router";
 import { auth } from "@/config/firebase";
 import AdminLayout from "../components/AdminLayout";
 import DashboardCard from "../components/DashboardCard";
@@ -33,13 +34,14 @@ import { useAdminData } from "@/hooks/useAdminData";
 import {
   createAdminAccount,
   deleteAppUserAccount,
+  fetchEvents,
   sendAdminPasswordResetForAdmin,
   setAccountFlag,
   updateAdminProfileInfo,
   updateAppUserProfile,
 } from "@/services/adminDataService";
 import { formatDateTime, getUserDisplayName } from "@/utils/format";
-import type { ActivityLog } from "@/types/admin";
+import type { ActivityLog, AdminEvent } from "@/types/admin";
 
 function toLocalCalendarDateKey(value: unknown): string {
   if (!value) return "";
@@ -109,6 +111,97 @@ function isUserWithinDateRange(
   return registeredDate >= fromDate && registeredDate <= toDate;
 }
 
+
+function extractJoinedIds(value: unknown): string[] {
+  if (!value) return [];
+
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object") {
+          const row = item as Record<string, unknown>;
+          const possibleId =
+            row.uid ??
+            row.userId ??
+            row.userUid ??
+            row.memberId ??
+            row.attendeeId ??
+            row.participantId ??
+            row.id;
+          return typeof possibleId === "string" ? possibleId : "";
+        }
+        return "";
+      })
+      .filter(Boolean);
+  }
+
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .filter(([, enabled]) => Boolean(enabled))
+      .map(([key]) => key);
+  }
+
+  return [];
+}
+
+function eventContainsUser(event: unknown, uid: string): boolean {
+  if (!event || typeof event !== "object") return false;
+
+  const row = event as Record<string, unknown>;
+  const fields = [
+    row.participants,
+    row.participantIds,
+    row.attendees,
+    row.attendeeIds,
+    row.joinedUsers,
+    row.joinedUserIds,
+    row.members,
+    row.memberIds,
+    row.users,
+    row.userIds,
+    row.registrations,
+  ];
+
+  return fields.some((value) => extractJoinedIds(value).includes(uid));
+}
+
+function getEventDisplayDate(event: unknown): string {
+  if (!event || typeof event !== "object") return "Date not set";
+
+  const row = event as Record<string, unknown>;
+  const raw =
+    row.date ??
+    row.startDate ??
+    row.startAt ??
+    row.createdAt;
+
+  if (!raw) return "Date not set";
+
+  if (
+    typeof raw === "object" &&
+    raw !== null &&
+    "toDate" in raw &&
+    typeof (raw as { toDate?: unknown }).toDate === "function"
+  ) {
+    return formatDateTime(
+      (raw as { toDate: () => Date }).toDate().toISOString(),
+    ).date;
+  }
+
+  if (typeof raw === "string") {
+    // Keep simple YYYY-MM-DD event dates stable instead of timezone-shifting them.
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      const [year, month, day] = raw.split("-");
+      return `${month}/${day}/${year}`;
+    }
+
+    return formatDateTime(raw).date || raw;
+  }
+
+  return String(raw);
+}
+
 /**
  * Purpose: Provides role-aware administration of citizen and administrator accounts.
  * How it works:
@@ -124,7 +217,14 @@ export default function UsersScreen() {
   // Floor scale so modal/table text does not compress on smaller viewports.
   const s = Math.max(0.72, Math.min(width / 1920, height / 1080));
   const { isSuperAdmin, admin } = useAdminAuth();
-  const { users: appUsers, admins, reports, stats, reload, loadAdminActivity } = useAdminData();
+  const {
+    users: appUsers,
+    admins,
+    reports,
+    stats,
+    reload,
+    loadAdminActivity,
+  } = useAdminData();
 
   // Normalize separate Firestore schemas into one display model without altering source records.
   // Standard admins only see citizen accounts; Super Admins see admins + users.
@@ -170,7 +270,9 @@ export default function UsersScreen() {
    */
   const [selectedUser, setSelectedUser] = useState<any>(null);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
+  const [profileTab, setProfileTab] = useState<"reports" | "events">("reports");
   const [adminActivity, setAdminActivity] = useState<ActivityLog[]>([]);
+  const [allEvents, setAllEvents] = useState<AdminEvent[]>([]);
 
   /*
    * Creation and editing forms use independent values, errors, and progress flags so
@@ -202,6 +304,26 @@ export default function UsersScreen() {
   const [editError, setEditError] = useState("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isSendingReset, setIsSendingReset] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    void fetchEvents()
+      .then((eventRows) => {
+        if (isMounted) {
+          setAllEvents(eventRows);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setAllEvents([]);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
   const [roleFilter, setRoleFilter] = useState("All Roles");
   const [statusFilter, setStatusFilter] = useState("All Statuses");
   const normalizedStatusFilter =
@@ -253,6 +375,35 @@ export default function UsersScreen() {
     }
     return admins.find((item) => item.uid === uid)?.contactNumber || "Not set";
   };
+
+
+  const joinedEventsForSelectedUser = useMemo(() => {
+    if (!selectedUser || selectedUser[4] !== "User") {
+      return [];
+    }
+
+    const uid = selectedUser[7];
+    const appUser = appUsers.find((user) => user.uid === uid) as
+      | (Record<string, unknown> & { uid: string })
+      | undefined;
+
+    const userEventIds = new Set<string>([
+      ...extractJoinedIds(appUser?.joinedEvents),
+      ...extractJoinedIds(appUser?.joinedEventIds),
+      ...extractJoinedIds(appUser?.eventIds),
+      ...extractJoinedIds(appUser?.events),
+    ]);
+
+    return allEvents.filter((event: AdminEvent) => {
+      const eventId = String((event as { id?: unknown }).id ?? "");
+      return (
+        (eventId && userEventIds.has(eventId)) ||
+        eventContainsUser(event, uid)
+      );
+    });
+  }, [allEvents, appUsers, selectedUser]);
+
+
 
   // Derive the visible account set from the exact filters shown in the UI.
   // The table, pagination, and summary cards all use this same result.
@@ -505,6 +656,7 @@ export default function UsersScreen() {
 
     setSelectedUser(user);
     setIsProfileOpen(true);
+    setProfileTab("reports");
     setActivityPage(1);
 
     // Clear potentially sensitive history before evaluating access for the new selection.
@@ -527,6 +679,89 @@ export default function UsersScreen() {
   };
 
   /**
+   * Opens the exact record affected by an administrator activity.
+   * Reports go to the report-details screen, events go to the Events page
+   * with its existing eventId deep-link parameter, and user-management
+   * actions open the affected account profile.
+   */
+  const handleViewAffectedRecord = async (item: ActivityLog) => {
+    const recordId = String(item.recordId || "").trim();
+    const moduleName = String(item.module || "").trim().toLowerCase();
+
+    if (!recordId) {
+      Alert.alert(
+        "Record unavailable",
+        "This activity does not contain a record reference.",
+      );
+      return;
+    }
+
+    if (moduleName.includes("report")) {
+      const reportExists = reports.some((report) => report.id === recordId);
+
+      if (!reportExists) {
+        Alert.alert(
+          "Report unavailable",
+          "The report affected by this action may have been deleted.",
+        );
+        return;
+      }
+
+      setIsProfileOpen(false);
+
+      router.navigate({
+        pathname: "/report-details",
+        params: { id: recordId },
+      });
+      return;
+    }
+
+    if (moduleName.includes("event")) {
+      const eventExists = allEvents.some((event: AdminEvent) => event.id === recordId);
+
+      if (!eventExists) {
+        Alert.alert(
+          "Event unavailable",
+          "The event affected by this action may have been deleted.",
+        );
+        return;
+      }
+
+      setIsProfileOpen(false);
+
+      router.navigate({
+        pathname: "/events",
+        params: { eventId: recordId },
+      });
+      return;
+    }
+
+    if (
+      moduleName.includes("user") ||
+      moduleName.includes("admin") ||
+      moduleName.includes("account")
+    ) {
+      const affectedUser = tableUsers.find((user) => user[7] === recordId);
+
+      if (!affectedUser) {
+        Alert.alert(
+          "Account unavailable",
+          "The account affected by this action may have been deleted.",
+        );
+        return;
+      }
+
+      await openUserProfile(affectedUser);
+      return;
+    }
+
+    Alert.alert(
+      "Record unavailable",
+      `There is no destination configured for the "${item.module}" module.`,
+    );
+  };
+
+  /**
    * Purpose: Closes the account profile and removes selection-specific state.
    * How it works:
    * 1. The profile modal is hidden.
@@ -537,6 +772,7 @@ export default function UsersScreen() {
   const closeUserProfile = () => {
     setIsProfileOpen(false);
     setSelectedUser(null);
+    setProfileTab("reports");
     setAdminActivity([]);
     setActivityPage(1);
   };
@@ -1137,9 +1373,6 @@ export default function UsersScreen() {
                       <Text style={[styles.activityTh, styles.activityModuleCol, { fontSize: 14 * s }]}>
                         Module
                       </Text>
-                      <Text style={[styles.activityTh, styles.activityRecordCol, { fontSize: 14 * s }]}>
-                        Affected Record
-                      </Text>
                       <Text style={[styles.activityTh, styles.activityDetailsCol, { fontSize: 14 * s }]}>
                         Details
                       </Text>
@@ -1164,7 +1397,11 @@ export default function UsersScreen() {
                           <Text
                             style={[
                               styles.badge,
-                              item.module === "Events" ? styles.eventBadge : styles.reportBadge,
+                              item.module === "Events"
+                                ? styles.eventBadge
+                                : item.module === "Users"
+                                  ? styles.userActivityBadge
+                                  : styles.reportBadge,
                               {
                                 fontSize: 14 * s,
                                 paddingHorizontal: 8 * s,
@@ -1176,15 +1413,17 @@ export default function UsersScreen() {
                           </Text>
                         </View>
 
-                        <Text style={[styles.activityTd, styles.activityRecordCol, { fontSize: 14 * s }]}>
-                          {item.recordId}
-                        </Text>
-
-                        <Text style={[styles.activityTd, styles.activityDetailsCol, { fontSize: 14 * s }]}>
+                        <Text
+                          numberOfLines={2}
+                          style={[styles.activityTd, styles.activityDetailsCol, { fontSize: 14 * s }]}
+                        >
                           {item.details}
                         </Text>
 
-                        <TouchableOpacity style={styles.activityViewButton}>
+                        <TouchableOpacity
+                          style={styles.activityViewButton}
+                          onPress={() => void handleViewAffectedRecord(item)}
+                        >
                           <Text style={[styles.activityViewText, { fontSize: 14 * s }]}>
                             View
                           </Text>
@@ -1342,58 +1581,174 @@ export default function UsersScreen() {
 
     <View style={styles.modalRight}>
       <View style={styles.modalTabs}>
-        <Text style={[styles.activeTab, { fontSize: 16 * s }]}>
-          Submitted Reports
-        </Text>
-        <Text style={[styles.inactiveTab, { fontSize: 16 * s }]}>
-          Joined Events
-        </Text>
-      </View>
-
-      {reports
-        .filter((report) => report.reportedByUid === selectedUser[7])
-        .slice(0, 5)
-        .map((report) => {
-          const submitted = formatDateTime(report.createdAt);
-          return (
-        <View key={report.id} style={styles.modalReportRow}>
-          <View style={[styles.smallImageBox, { width: 52 * s, height: 52 * s }]} />
-
-          <View style={{ flex: 1 }}>
-            <Text style={[styles.modalReportTitle, { fontSize: 16 * s }]}>
-              {report.title}
-            </Text>
-            <Text style={[styles.username, { fontSize: 16 * s }]}>
-              Recent submitted report
-            </Text>
-          </View>
-
+        <TouchableOpacity
+          activeOpacity={0.75}
+          onPress={() => setProfileTab("reports")}
+        >
           <Text
             style={[
-              styles.badge,
-              statusColor(report.status),
-              {
-                fontSize: 16 * s,
-                paddingHorizontal: 9 * s,
-                paddingVertical: 5 * s,
-              },
+              profileTab === "reports" ? styles.activeTab : styles.inactiveTab,
+              { fontSize: 16 * s },
             ]}
           >
-            {report.status}
+            Submitted Reports
           </Text>
+        </TouchableOpacity>
 
-          <Text style={[styles.modalDate, { fontSize: 16 * s }]}>
-            {submitted.date}
+        <TouchableOpacity
+          activeOpacity={0.75}
+          onPress={() => setProfileTab("events")}
+        >
+          <Text
+            style={[
+              profileTab === "events" ? styles.activeTab : styles.inactiveTab,
+              { fontSize: 16 * s },
+            ]}
+          >
+            Joined Events
           </Text>
-        </View>
-          );
-        })}
+        </TouchableOpacity>
+      </View>
 
-      {!reports.some((report) => report.reportedByUid === selectedUser[7]) ? (
-        <Text style={[styles.username, { fontSize: 14 * s, marginTop: 12 * s }]}>
-          No submitted reports yet.
-        </Text>
-      ) : null}
+      {profileTab === "reports" ? (
+        <>
+          {reports
+            .filter((report) => report.reportedByUid === selectedUser[7])
+            .slice(0, 5)
+            .map((report) => {
+              const submitted = formatDateTime(report.createdAt);
+              return (
+                <View key={report.id} style={styles.modalReportRow}>
+                  <View
+                    style={[
+                      styles.smallImageBox,
+                      { width: 52 * s, height: 52 * s },
+                    ]}
+                  />
+
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[
+                        styles.modalReportTitle,
+                        { fontSize: 16 * s },
+                      ]}
+                    >
+                      {report.title}
+                    </Text>
+                    <Text style={[styles.username, { fontSize: 14 * s }]}>
+                      Submitted report
+                    </Text>
+                  </View>
+
+                  <Text
+                    style={[
+                      styles.badge,
+                      statusColor(report.status),
+                      {
+                        fontSize: 14 * s,
+                        paddingHorizontal: 9 * s,
+                        paddingVertical: 5 * s,
+                      },
+                    ]}
+                  >
+                    {report.status}
+                  </Text>
+
+                  <Text style={[styles.modalDate, { fontSize: 14 * s }]}>
+                    {submitted.date}
+                  </Text>
+                </View>
+              );
+            })}
+
+          {!reports.some(
+            (report) => report.reportedByUid === selectedUser[7],
+          ) ? (
+            <Text
+              style={[
+                styles.username,
+                { fontSize: 14 * s, marginTop: 12 * s },
+              ]}
+            >
+              No submitted reports yet.
+            </Text>
+          ) : null}
+        </>
+      ) : (
+        <>
+          {joinedEventsForSelectedUser.slice(0, 5).map((event: AdminEvent) => {
+            const eventRow = event as unknown as Record<string, unknown>;
+            const eventId = String(eventRow.id ?? "");
+            const eventTitle = String(
+              eventRow.title ??
+                eventRow.eventName ??
+                eventRow.name ??
+                "Untitled event",
+            );
+            const eventStatus = String(eventRow.status ?? "Approved");
+            const eventLocation = String(
+              eventRow.location ??
+                eventRow.venue ??
+                "Location not specified",
+            );
+
+            return (
+              <View key={eventId || eventTitle} style={styles.modalEventRow}>
+                <View style={styles.eventDateBox}>
+                  <Calendar size={18 * s} color="#34733B" />
+                </View>
+
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text
+                    numberOfLines={1}
+                    style={[
+                      styles.modalReportTitle,
+                      { fontSize: 16 * s },
+                    ]}
+                  >
+                    {eventTitle}
+                  </Text>
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.username, { fontSize: 13 * s }]}
+                  >
+                    {eventLocation}
+                  </Text>
+                </View>
+
+                <Text
+                  style={[
+                    styles.badge,
+                    eventStatusColor(eventStatus),
+                    {
+                      fontSize: 13 * s,
+                      paddingHorizontal: 8 * s,
+                      paddingVertical: 5 * s,
+                    },
+                  ]}
+                >
+                  {eventStatus}
+                </Text>
+
+                <Text style={[styles.modalDate, { fontSize: 13 * s }]}>
+                  {getEventDisplayDate(event)}
+                </Text>
+              </View>
+            );
+          })}
+
+          {!joinedEventsForSelectedUser.length ? (
+            <Text
+              style={[
+                styles.username,
+                { fontSize: 14 * s, marginTop: 12 * s },
+              ]}
+            >
+              No joined events yet.
+            </Text>
+          ) : null}
+        </>
+      )}
 
       {canManageSelected ? <View style={styles.modalActions}>
         <TouchableOpacity style={styles.editButton} onPress={openEditUser}>
@@ -1827,6 +2182,23 @@ function roleColor(role: string) {
 function statusColor(status: string) {
   if (status === "Pending") return { backgroundColor: "#FFF0B8", color: "#D99A00" };
   if (status === "In Review") return { backgroundColor: "#C7DDFF", color: "#315BC9" };
+  return { backgroundColor: "#BFEBC5", color: "#168A18" };
+}
+
+
+function eventStatusColor(status: string) {
+  if (status === "Pending") {
+    return { backgroundColor: "#FFF0B8", color: "#D99A00" };
+  }
+  if (status === "Ongoing") {
+    return { backgroundColor: "#C7DDFF", color: "#315BC9" };
+  }
+  if (status === "Completed") {
+    return { backgroundColor: "#E1E1E1", color: "#555555" };
+  }
+  if (status === "Rejected") {
+    return { backgroundColor: "#FFDADA", color: "#C62828" };
+  }
   return { backgroundColor: "#BFEBC5", color: "#168A18" };
 }
 
@@ -2621,27 +2993,24 @@ activityTd: {
 },
 
 activityDateCol: {
-  width: "17%",
-},
-
-activityActionCol: {
   width: "18%",
 },
 
-activityModuleCol: {
-  width: "13%",
+activityActionCol: {
+  width: "20%",
 },
 
-activityRecordCol: {
-  width: "17%",
+activityModuleCol: {
+  width: "15%",
 },
 
 activityDetailsCol: {
-  width: "24%",
+  width: "35%",
+  paddingRight: 10,
 },
 
 activityViewCol: {
-  width: "11%",
+  width: "12%",
 },
 
 reportBadge: {
@@ -2655,7 +3024,7 @@ eventBadge: {
 },
 
 activityViewButton: {
-  width: "11%",
+  width: "12%",
   borderWidth: 1,
   borderColor: "#34733B",
   backgroundColor: "#F5FFF4",
@@ -2669,4 +3038,38 @@ activityViewText: {
   fontFamily: "Montserrat_700Bold",
   color: "#34733B",
 },
+
+userActivityBadge: {
+  backgroundColor: "#DDEAFB",
+  color: "#315B9C",
+},
+
+
+
+
+
+
+
+
+modalEventRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 12,
+  marginBottom: 14,
+  paddingVertical: 8,
+  borderBottomWidth: 1,
+  borderBottomColor: "#ECEFEC",
+},
+
+eventDateBox: {
+  width: 46,
+  height: 46,
+  borderRadius: 8,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: "#EEF7EA",
+  borderWidth: 1,
+  borderColor: "#D5E7D0",
+},
+
 });

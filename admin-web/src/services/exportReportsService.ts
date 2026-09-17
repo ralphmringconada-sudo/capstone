@@ -234,7 +234,6 @@ export function reportsToCsv(reports: Report[]): string {
     'reportedByEmail',
     'createdAt',
     'description',
-    'imageCount',
     'imageUrls',
   ];
   const rows = reports.map((report) => {
@@ -249,7 +248,6 @@ export function reportsToCsv(reports: Report[]): string {
       report.reportedByEmail || '',
       report.createdAt,
       report.description,
-      imageUrls.length,
       imageUrls.join(' | '),
     ]
       .map(escapeCsv)
@@ -553,7 +551,6 @@ export function reportsToPrintableHtml(
 
         <div class="evidence-heading">
           <h3>Evidence Photos</h3>
-          <span>${images.length} attached</span>
         </div>
         ${imageHtml}
       </article>`;
@@ -1232,7 +1229,6 @@ function xlsxReportsSheetXml(reports: Report[]): string {
     'Email',
     'Date Reported',
     'Description',
-    'Evidence Photos',
   ];
 
   const headerCells = headers
@@ -1252,7 +1248,6 @@ function xlsxReportsSheetXml(reports: Report[]): string {
         report.reportedByEmail || '',
         formatExportDateTime(report.createdAt),
         report.description || '',
-        String(getReportImageRefs(report).length),
       ];
 
       return `<row r="${row}" ht="42" customHeight="1">${values
@@ -1288,7 +1283,6 @@ function xlsxReportsSheetXml(reports: Report[]): string {
     <col min="7" max="7" width="28" customWidth="1"/>
     <col min="8" max="8" width="23" customWidth="1"/>
     <col min="9" max="9" width="48" customWidth="1"/>
-    <col min="10" max="10" width="16" customWidth="1"/>
   </cols>
 
   <sheetData>
@@ -1296,7 +1290,7 @@ function xlsxReportsSheetXml(reports: Report[]): string {
     ${rows}
   </sheetData>
 
-  <autoFilter ref="A1:J${lastRow}"/>
+  <autoFilter ref="A1:I${lastRow}"/>
 </worksheet>`;
 }
 
@@ -1517,8 +1511,6 @@ async function reportsToStyledDocx(
         <w:tr>
           ${wordCell('Email', 'F4F7F3', { bold: true })}
           ${wordCell(report.reportedByEmail || 'Not provided', 'FFFFFF')}
-          ${wordCell('Evidence Photos', 'F4F7F3', { bold: true })}
-          ${wordCell(String(getReportImageRefs(report).length), 'FFFFFF')}
         </w:tr>
       </w:tbl>
 
@@ -2008,8 +2000,6 @@ function buildStyledPdf(
     detailY += 16;
     textCmd('Date', margin + 12, detailY, 7, true, '#718071');
     textCmd(formatExportDateTime(report.createdAt) || 'Not recorded', margin + 82, detailY, 8, false, '#293329');
-    textCmd('Evidence', margin + 282, detailY, 7, true, '#718071');
-    textCmd(`${getReportImageRefs(report).length} photo(s)`, margin + 342, detailY, 8, false, '#293329');
 
     detailY += 18;
     textCmd('Location', margin + 12, detailY, 7, true, '#718071');
