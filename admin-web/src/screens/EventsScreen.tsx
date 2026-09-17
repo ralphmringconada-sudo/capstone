@@ -59,7 +59,6 @@ import type {
   EventParticipant,
 } from "@/types/admin";
 
-import { isWithinDateRange } from "@/utils/dateRange";
 import { formatDateTime } from "@/utils/format";
 
 const MONTSERRAT_FONT = "Montserrat_700Bold";
@@ -197,6 +196,73 @@ function toHhMm(date: Date): string {
   ).padStart(2, "0")}:${String(
     date.getMinutes()
   ).padStart(2, "0")}`;
+}
+
+function toLocalCalendarDateKey(value: unknown): string {
+  if (!value) return "";
+
+  if (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value)
+  ) {
+    return value;
+  }
+
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toDate" in value &&
+    typeof (value as { toDate?: unknown }).toDate === "function"
+  ) {
+    const timestampDate =
+      (value as { toDate: () => Date }).toDate();
+
+    if (!Number.isNaN(timestampDate.getTime())) {
+      return toIsoDate(timestampDate);
+    }
+  }
+
+  const parsed = new Date(value as string | number | Date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  return toIsoDate(parsed);
+}
+
+function isEventWithinDateRange(
+  eventDate: unknown,
+  fallbackCreatedAt: unknown,
+  fromDate: string,
+  toDate: string,
+): boolean {
+  if (!fromDate && !toDate) {
+    return true;
+  }
+
+  const eventDateKey =
+    toLocalCalendarDateKey(eventDate) ||
+    toLocalCalendarDateKey(fallbackCreatedAt);
+
+  if (!eventDateKey) {
+    return false;
+  }
+
+  // One selected date = exact event date only.
+  if (fromDate && !toDate) {
+    return eventDateKey === fromDate;
+  }
+
+  if (!fromDate && toDate) {
+    return eventDateKey === toDate;
+  }
+
+  // Two selected dates = inclusive date range.
+  return (
+    eventDateKey >= fromDate &&
+    eventDateKey <= toDate
+  );
 }
 
 function combineEventDateTime(
@@ -804,21 +870,10 @@ export default function EventsScreen() {
               event.status ===
                 status;
 
-            const eventDay =
-              new Date(
-                event.date
-              );
-
-            const dateValue =
-              Number.isNaN(
-                eventDay.getTime()
-              )
-                ? event.createdAt
-                : eventDay;
-
             const matchesDate =
-              isWithinDateRange(
-                dateValue,
+              isEventWithinDateRange(
+                event.date,
+                event.createdAt,
                 fromDate,
                 toDate
               );
@@ -885,61 +940,17 @@ export default function EventsScreen() {
     );
 
 
-    const filteredStats = useMemo(() => {
-  const query = search.trim().toLowerCase();
-
-  // Search + date are the shared/base filters.
-  const baseEvents = events.filter((event) => {
-    const matchesSearch =
-      !query ||
-      event.title.toLowerCase().includes(query) ||
-      event.description.toLowerCase().includes(query) ||
-      event.location.toLowerCase().includes(query) ||
-      event.id.toLowerCase().includes(query);
-
-    const eventDay = new Date(event.date);
-
-    const dateValue = Number.isNaN(eventDay.getTime())
-      ? event.createdAt
-      : eventDay;
-
-    const matchesDate = isWithinDateRange(
-      dateValue,
-      fromDate,
-      toDate
-    );
-
-    return matchesSearch && matchesDate;
-  });
-
-  const categoryCount =
-    category === "All Types"
-      ? baseEvents.length
-      : baseEvents.filter(
-          (event) => event.category === category
-        ).length;
-
-  const statusCount =
-    status === "All Statuses"
-      ? baseEvents.length
-      : baseEvents.filter(
-          (event) => event.status === status
-        ).length;
-
-  return {
-    total: filteredEvents.length,
-    categoryCount,
-    statusCount,
-  };
-}, [
-  events,
-  filteredEvents,
-  search,
-  category,
-  status,
-  fromDate,
-  toDate,
-]);
+    const filteredStats = useMemo(
+    () => ({
+      // All summary cards use the exact same filtered event set
+      // as the table and pagination. This keeps Search, Event Type,
+      // Status, and Date Range fully synchronized.
+      total: filteredEvents.length,
+      categoryCount: filteredEvents.length,
+      statusCount: filteredEvents.length,
+    }),
+    [filteredEvents],
+  );
 
   // =======================================================
   // TAB
@@ -2049,6 +2060,12 @@ const confirmRejectEvent = async () => {
               toDate={toDate}
               onChangeFrom={(value) => {
                 setFromDate(value);
+
+                // If From moves after To, keep the range valid.
+                if (toDate && value && value > toDate) {
+                  setToDate(value);
+                }
+
                 setPage(1);
               }}
               onChangeTo={(value) => {

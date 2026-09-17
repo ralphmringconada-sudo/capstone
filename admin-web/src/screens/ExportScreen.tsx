@@ -16,8 +16,6 @@ import {
   Clock3,
   Download,
   Eye,
-  FileArchive,
-  FileJson,
   FileSpreadsheet,
   FileText,
   Filter,
@@ -58,18 +56,6 @@ const FILE_TYPES = [
     name: "Excel (XLSX)",
     description: "Best for data\nanalysis",
     icon: FileSpreadsheet,
-  },
-  {
-    id: "csv",
-    name: "CSV",
-    description: "Best for importing\ninto other systems",
-    icon: FileArchive,
-  },
-  {
-    id: "json",
-    name: "JSON",
-    description: "Best for developers\nand integrations",
-    icon: FileJson,
   },
   {
     id: "word",
@@ -113,8 +99,6 @@ export default function ExportReports() {
 
   const [fileName, setFileName] = useState("");
 
-  const [openAfterSaving, setOpenAfterSaving] =
-    useState(true);
   const [isExporting, setIsExporting] = useState(false);
   const [isApplying, setIsApplying] = useState(false);
   const [summary, setSummary] = useState<ExportSummary>({
@@ -275,7 +259,7 @@ export default function ExportReports() {
         filters,
         format: selectedFile,
         fileName: fileName || undefined,
-        openAfterSaving,
+        openAfterSaving: false,
       });
       const rangeText =
         filters.fromDate || filters.toDate
@@ -288,11 +272,9 @@ export default function ExportReports() {
             ? `${result.imageCount} image(s) saved in the ZIP images folder.`
             : "No image files were packed into the ZIP.") +
           (result.imagesMissing
-            ? ` ${result.imagesMissing} image(s) could not be downloaded — see image-urls.txt inside the ZIP.`
+            ? ` ${result.imagesMissing} image(s) could not be downloaded — see image-urls.txt inside the backup ZIP.`
             : "") +
-          (selectedFile === "pdf" || selectedFile === "word"
-            ? " An HTML file was also downloaded; use Print if the print window opened."
-            : ""),
+          " A styled export file and a backup ZIP were downloaded.",
       );
       await refreshPreview(false, filters);
     } catch (error) {
@@ -726,11 +708,7 @@ export default function ExportReports() {
                           ? "#F44336"
                           : file.id === "excel"
                             ? "#1B9A50"
-                            : file.id === "csv"
-                              ? "#55A84F"
-                              : file.id === "json"
-                                ? "#8B6BA8"
-                                : "#2875C7"
+                            : "#2875C7"
                       }
                     />
                   </View>
@@ -909,40 +887,6 @@ export default function ExportReports() {
             </Pressable>
           </View>
 
-          {/* OPEN AFTER SAVING */}
-
-         <Pressable
-            style={[
-              styles.checkboxRow,
-              showSaveDropdown &&
-                styles.checkboxRowDropdownOpen,
-            ]}
-            onPress={() =>
-              setOpenAfterSaving(
-                (previous) => !previous
-              )
-            }
-          >
-            <View
-              style={[
-                styles.checkbox,
-                openAfterSaving &&
-                  styles.checkboxChecked,
-              ]}
-            >
-              {openAfterSaving && (
-                <Check
-                  size={12}
-                  color="#ffffff"
-                  strokeWidth={3}
-                />
-              )}
-            </View>
-
-            <Text style={styles.checkboxText}>
-              Open file after saving
-            </Text>
-          </Pressable>
         </View>
       </ScrollView>
     </AdminLayout>
@@ -1492,39 +1436,4 @@ const styles = StyleSheet.create({
     color: "#ffffff",
   },
 
-  checkboxRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 7,
-
-    marginTop: 6,
-    marginLeft: 24,
-  },
-
-  checkboxRowDropdownOpen: {
-    marginTop: 118,
-  },
-
-  checkbox: {
-    width: 12,
-    height: 12,
-
-    borderWidth: 1,
-    borderColor: "#BEBEBE",
-    borderRadius: 2,
-
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  checkboxChecked: {
-    backgroundColor: "#3EAD3E",
-    borderColor: "#3EAD3E",
-  },
-
-  checkboxText: {
-    fontSize: 10,
-    fontFamily: "Montserrat_500Medium",
-    color: "#333333",
-  },
 });

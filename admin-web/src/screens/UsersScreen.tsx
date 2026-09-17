@@ -18,7 +18,6 @@ import {
   ChevronDown,
   Eye,
   Filter,
-  Search,
   UserPlus,
   UsersRound,
   Flag,
@@ -39,9 +38,76 @@ import {
   updateAdminProfileInfo,
   updateAppUserProfile,
 } from "@/services/adminDataService";
-import { isWithinDateRange } from "@/utils/dateRange";
 import { formatDateTime, getUserDisplayName } from "@/utils/format";
 import type { ActivityLog } from "@/types/admin";
+
+function toLocalCalendarDateKey(value: unknown): string {
+  if (!value) return "";
+
+  if (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value)
+  ) {
+    return value;
+  }
+
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toDate" in value &&
+    typeof (value as { toDate?: unknown }).toDate === "function"
+  ) {
+    const timestampDate =
+      (value as { toDate: () => Date }).toDate();
+
+    if (!Number.isNaN(timestampDate.getTime())) {
+      const year = timestampDate.getFullYear();
+      const month = String(timestampDate.getMonth() + 1).padStart(2, "0");
+      const day = String(timestampDate.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+  }
+
+  const parsed = new Date(value as string | number | Date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function isUserWithinDateRange(
+  createdAt: unknown,
+  fromDate: string,
+  toDate: string,
+): boolean {
+  if (!fromDate && !toDate) {
+    return true;
+  }
+
+  const registeredDate = toLocalCalendarDateKey(createdAt);
+
+  if (!registeredDate) {
+    return false;
+  }
+
+  // One selected date = exact date.
+  if (fromDate && !toDate) {
+    return registeredDate === fromDate;
+  }
+
+  if (!fromDate && toDate) {
+    return registeredDate === toDate;
+  }
+
+  // Two selected dates = inclusive date range.
+  return registeredDate >= fromDate && registeredDate <= toDate;
+}
 
 /**
  * Purpose: Provides role-aware administration of citizen and administrator accounts.
@@ -136,9 +202,10 @@ export default function UsersScreen() {
   const [editError, setEditError] = useState("");
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isSendingReset, setIsSendingReset] = useState(false);
-  const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("All Roles");
   const [statusFilter, setStatusFilter] = useState("All Statuses");
+  const normalizedStatusFilter =
+    statusFilter === "Flagged" ? "Flagged" : "All Statuses";
   const [openFilter, setOpenFilter] = useState<"role" | "status" | null>(null);
   const [fromDate, setFromDate] = useState("");
   const [toDate, setToDate] = useState("");
@@ -187,40 +254,59 @@ export default function UsersScreen() {
     return admins.find((item) => item.uid === uid)?.contactNumber || "Not set";
   };
 
-  // Derive visible accounts from search, role, status, and registration date range.
+  // Derive the visible account set from the exact filters shown in the UI.
+  // The table, pagination, and summary cards all use this same result.
   const filteredTableUsers = useMemo(() => {
-    const queryText = search.trim().toLowerCase();
     const createdAtByUid = new Map<string, string>([
       ...appUsers.map((user) => [user.uid, user.createdAt] as const),
       ...admins.map((adminRow) => [adminRow.uid, adminRow.createdAt] as const),
     ]);
 
     return tableUsers.filter((u) => {
-      const matchesSearch =
-        !queryText ||
-        u[1].toLowerCase().includes(queryText) ||
-        u[3].toLowerCase().includes(queryText) ||
-        u[2].toLowerCase().includes(queryText);
-      const matchesRole = roleFilter === "All Roles" || u[4] === roleFilter;
-      const isFlagged = flaggedUserIds.has(u[7]);
+      const matchesRole =
+        roleFilter === "All Roles" ||
+        u[4] === roleFilter;
+
+      const isFlagged =
+        flaggedUserIds.has(u[7]);
+
       const matchesStatus =
-        statusFilter === "All Statuses" ||
-        (statusFilter === "Flagged" && isFlagged) ||
-        (statusFilter === "Active" && !isFlagged);
-      const matchesDate = isWithinDateRange(createdAtByUid.get(u[7]), fromDate, toDate);
-      return matchesSearch && matchesRole && matchesStatus && matchesDate;
+        normalizedStatusFilter === "All Statuses" ||
+        (normalizedStatusFilter === "Flagged" && isFlagged);
+
+      const matchesDate =
+        isUserWithinDateRange(
+          createdAtByUid.get(u[7]),
+          fromDate,
+          toDate,
+        );
+
+      return (
+        matchesRole &&
+        matchesStatus &&
+        matchesDate
+      );
     });
-  }, [tableUsers, search, roleFilter, statusFilter, fromDate, toDate, appUsers, admins, flaggedUserIds]);
+  }, [
+    tableUsers,
+    roleFilter,
+    normalizedStatusFilter,
+    fromDate,
+    toDate,
+    appUsers,
+    admins,
+    flaggedUserIds,
+  ]);
 
-const filteredUserStats = useMemo(() => {
-  return {
-    totalUsers: filteredTableUsers.length,
-
-    flaggedUsers: filteredTableUsers.filter((user) =>
-      flaggedUserIds.has(user[7]),
-    ).length,
-  };
-}, [filteredTableUsers, flaggedUserIds]);
+  const filteredUserStats = useMemo(
+    () => ({
+      totalUsers: filteredTableUsers.length,
+      flaggedUsers: filteredTableUsers.filter((user) =>
+        flaggedUserIds.has(user[7]),
+      ).length,
+    }),
+    [filteredTableUsers, flaggedUserIds],
+  );
 
   const userPageCount = Math.max(1, Math.ceil(filteredTableUsers.length / usersPerPage));
   const currentUserPage = Math.min(userPage, userPageCount);
@@ -621,20 +707,6 @@ const filteredUserStats = useMemo(() => {
             { marginTop: height * 0.025 },
           ]}
         >
-          <View style={styles.searchBox}>
-            <TextInput
-              placeholder="Search users..."
-              placeholderTextColor="#777"
-              style={styles.searchInput}
-              value={search}
-              onChangeText={(value) => {
-                setSearch(value);
-                setUserPage(1);
-              }}
-            />
-            <Search size={17} color="#555" />
-          </View>
-
           <FilterDropdown
             label="Roles"
             value={roleFilter}
@@ -658,8 +730,8 @@ const filteredUserStats = useMemo(() => {
 
           <FilterDropdown
             label="Status"
-            value={statusFilter}
-            options={["All Statuses", "Active", "Flagged"]}
+            value={normalizedStatusFilter}
+            options={["All Statuses", "Flagged"]}
             isOpen={openFilter === "status"}
             onToggle={() =>
               setOpenFilter((current) =>
@@ -679,6 +751,13 @@ const filteredUserStats = useMemo(() => {
             toDate={toDate}
             onChangeFrom={(value) => {
               setFromDate(value);
+
+              // Keep the selected range valid if the From date
+              // is moved after the current To date.
+              if (toDate && value && value > toDate) {
+                setToDate(value);
+              }
+
               setUserPage(1);
             }}
             onChangeTo={(value) => {
@@ -690,7 +769,6 @@ const filteredUserStats = useMemo(() => {
           <TouchableOpacity
             style={styles.smallButton}
             onPress={() => {
-              setSearch("");
               setRoleFilter("All Roles");
               setStatusFilter("All Statuses");
               setOpenFilter(null);
@@ -1804,31 +1882,6 @@ const styles = StyleSheet.create({
     overflow: "visible",
   },
 
-  searchBox: {
-    height: 52,
-    flexGrow: 1.35,
-    flexShrink: 1,
-    flexBasis: 250,
-    minWidth: 220,
-    borderWidth: 1,
-    borderColor: "#D9DEDA",
-    borderRadius: 8,
-    backgroundColor: "#F7F8F7",
-    paddingHorizontal: 13,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-
-  searchInput: {
-    flex: 1,
-    minWidth: 0,
-    fontSize: 12,
-    fontFamily: "Montserrat_700Bold",
-    color: "#252525",
-    outlineStyle: "none" as any,
-  },
-
   // =====================================================
   // USERS FILTER DROPDOWNS
   // Matches the Events page dropdown style
@@ -1836,10 +1889,10 @@ const styles = StyleSheet.create({
 
   dropdownContainer: {
     height: 52,
-    flexGrow: 0.8,
+    flexGrow: 1,
     flexShrink: 1,
-    flexBasis: 165,
-    minWidth: 155,
+    flexBasis: 190,
+    minWidth: 165,
     position: "relative",
     zIndex: 100,
     overflow: "visible",
@@ -1947,7 +2000,7 @@ const styles = StyleSheet.create({
 
   dateRangeBox: {
     height: 52,
-    flexGrow: 0,
+    flexGrow: 1.4,
     flexShrink: 1,
     flexBasis: 300,
     minWidth: 286,

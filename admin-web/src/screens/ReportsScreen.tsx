@@ -16,7 +16,6 @@ import {
   Check,
   ChevronDown,
   Eye,
-  Search,
   Filter,
   X,
 } from "lucide-react-native";
@@ -25,26 +24,87 @@ import AdminLayout from "../components/AdminLayout";
 import DashboardCard from "../components/DashboardCard";
 import { useAdminData } from "@/hooks/useAdminData";
 import { resolveReportImageUrls } from "@/services/reportImageService";
-import { isWithinDateRange } from "@/utils/dateRange";
 import { formatDateTime } from "@/utils/format";
 import type { Report } from "@/types/admin";
 
 const CATEGORIES = ["All Categories", "Deforestation", "Forest Fires", "Illegal Logging", "Waste Dumping", "Other"];
 const STATUSES = ["All Statuses", "Pending", "In Review", "Resolved", "Rejected"];
-/**
- * Purpose: Enables administrators to search, review, and inspect environmental reports.
- * How it works:
- * 1. Shared Firestore-backed data supplies reports and summary statistics.
- * 2. Memoized text, category, and status filters derive the visible table.
- * 3. Evidence thumbnails are resolved for visible records and opened in a modal.
- * 4. Report details are available from each row (deletion is disabled).
- * Technologies Used: React hooks, React Native Web, Expo Router, Cloud Firestore services, and image URL handling.
- * Why this implementation: A unified workspace supports efficient report triage without duplicating backend state.
- */
+
+function toLocalCalendarDateKey(value: unknown): string {
+  if (!value) return "";
+
+  // Already a date-only value.
+  if (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(value)
+  ) {
+    return value;
+  }
+
+  // Support Firestore Timestamp-like values if one reaches this screen.
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "toDate" in value &&
+    typeof (value as { toDate?: unknown }).toDate === "function"
+  ) {
+    const timestampDate =
+      (value as { toDate: () => Date }).toDate();
+
+    if (!Number.isNaN(timestampDate.getTime())) {
+      const year = timestampDate.getFullYear();
+      const month = String(timestampDate.getMonth() + 1).padStart(2, "0");
+      const day = String(timestampDate.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    }
+  }
+
+  const parsed = new Date(value as string | number | Date);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  // Use the user's local calendar date, not UTC midnight boundaries.
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+
+  return `${year}-${month}-${day}`;
+}
+
+function isReportWithinDateRange(
+  createdAt: unknown,
+  fromDate: string,
+  toDate: string,
+): boolean {
+  if (!fromDate && !toDate) {
+    return true;
+  }
+
+  const reportDate = toLocalCalendarDateKey(createdAt);
+
+  if (!reportDate) {
+    return false;
+  }
+
+  // If only one calendar date is selected, treat it as an exact-date filter.
+  if (fromDate && !toDate) {
+    return reportDate === fromDate;
+  }
+
+  if (!fromDate && toDate) {
+    return reportDate === toDate;
+  }
+
+  // If both dates are selected, use an inclusive range.
+  return reportDate >= fromDate && reportDate <= toDate;
+}
+
 export default function ReportsScreen() {
   const { width, height } = useWindowDimensions();
   const s = Math.min(width / 1920, height / 1080);
-  const { reports, stats } = useAdminData();
+  const { reports } = useAdminData();
   const [openFilter, setOpenFilter] = useState<"category" | "status" | null>(null);
 
   /*
@@ -77,7 +137,11 @@ export default function ReportsScreen() {
 
       const matchesCategory = category === "All Categories" || report.category === category;
       const matchesStatus = status === "All Statuses" || report.status === status;
-      const matchesDate = isWithinDateRange(report.createdAt, fromDate, toDate);
+      const matchesDate = isReportWithinDateRange(
+        report.createdAt,
+        fromDate,
+        toDate,
+      );
       return matchesSearch && matchesCategory && matchesStatus && matchesDate;
     });
   }, [reports, search, category, status, fromDate, toDate]);
@@ -101,57 +165,15 @@ export default function ReportsScreen() {
     setReportPage(1);
   }, [search, category, status, fromDate, toDate]);
 
-  const filteredStats = useMemo(() => {
-  const queryText = search.trim().toLowerCase();
-
-  // Base set only considers search + date.
-  // Category and status are counted separately so their cards stay meaningful.
-  const baseReports = reports.filter((report) => {
-    const matchesSearch =
-      !queryText ||
-      report.title.toLowerCase().includes(queryText) ||
-      report.description.toLowerCase().includes(queryText) ||
-      report.location.toLowerCase().includes(queryText) ||
-      report.reportedByName.toLowerCase().includes(queryText) ||
-      (report.reportedByEmail || "").toLowerCase().includes(queryText);
-
-    const matchesDate = isWithinDateRange(
-      report.createdAt,
-      fromDate,
-      toDate,
-    );
-
-    return matchesSearch && matchesDate;
-  });
-
-  const categoryCount =
-    category === "All Categories"
-      ? baseReports.length
-      : baseReports.filter(
-          (report) => report.category === category,
-        ).length;
-
-  const statusCount =
-    status === "All Statuses"
-      ? baseReports.length
-      : baseReports.filter(
-          (report) => report.status === status,
-        ).length;
-
-  return {
-    totalReports: filteredReports.length,
-    categoryCount,
-    statusCount,
-  };
-}, [
-  reports,
-  filteredReports,
-  search,
-  category,
-  status,
-  fromDate,
-  toDate,
-]);
+  const filteredStats = useMemo(
+    () => ({
+      // These values come from the exact same filtered set used by
+      // the table and pagination, so every filter stays synchronized.
+      totalReports: filteredReports.length,
+      categoryCount: filteredReports.length,
+    }),
+    [filteredReports],
+  );
 
   /**
    * Purpose: Resolves and caches a representative evidence image for one report row.
@@ -224,17 +246,6 @@ export default function ReportsScreen() {
     iconColor="#D99A00"
   />
 
-  <DashboardCard
-    title={
-      status === "All Statuses"
-        ? "All Statuses"
-        : status
-    }
-    value={String(filteredStats.statusCount)}
-    color="#CFE6FA"
-    icon={Eye}
-    iconColor="#259BEF"
-  />
 </View>
       <View
         style={[
@@ -242,17 +253,6 @@ export default function ReportsScreen() {
           { marginTop: height * 0.025 },
         ]}
       >
-          <View style={styles.searchBox}>
-            <TextInput
-              placeholder="Search reports..."
-              placeholderTextColor="#777"
-              style={styles.searchInput}
-              value={search}
-              onChangeText={setSearch}
-            />
-            <Search size={17} color="#555" />
-          </View>
-
           <FilterDropdown
             label="Category"
             value={category}
@@ -289,8 +289,20 @@ export default function ReportsScreen() {
             label="Date Reported"
             fromDate={fromDate}
             toDate={toDate}
-            onChangeFrom={setFromDate}
-            onChangeTo={setToDate}
+            onChangeFrom={(value) => {
+              setFromDate(value);
+
+              // Prevent an invalid range if "From" moves after "To".
+              if (toDate && value && value > toDate) {
+                setToDate(value);
+              }
+
+              setReportPage(1);
+            }}
+            onChangeTo={(value) => {
+              setToDate(value);
+              setReportPage(1);
+            }}
           />
 
           <TouchableOpacity
@@ -789,31 +801,6 @@ const styles = StyleSheet.create({
     overflow: "visible",
   },
 
-  searchBox: {
-    height: 52,
-    flexGrow: 1.35,
-    flexShrink: 1,
-    flexBasis: 250,
-    minWidth: 220,
-    borderWidth: 1,
-    borderColor: "#D9DEDA",
-    borderRadius: 8,
-    backgroundColor: "#F7F8F7",
-    paddingHorizontal: 13,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-
-  searchInput: {
-    flex: 1,
-    minWidth: 0,
-    fontSize: 12,
-    color: "#252525",
-    fontFamily: "Montserrat_700Bold",
-    outlineStyle: "none" as any,
-  },
-
   dropdownContainer: {
     height: 52,
     flexGrow: 0.8,
@@ -1164,7 +1151,6 @@ viewReportButtonText: {
 
 // =====================================================
 // DROPDOWNS
-// Matches Events / Users
 // =====================================================
 
 dropdownMenu: {
