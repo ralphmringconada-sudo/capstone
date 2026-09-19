@@ -23,12 +23,25 @@ import { router } from "expo-router";
 import AdminLayout from "../components/AdminLayout";
 import DashboardCard from "../components/DashboardCard";
 import { useAdminData } from "@/hooks/useAdminData";
+import { useAdminAuth } from "@/context/AdminAuthContext";
 import { resolveReportImageUrls } from "@/services/reportImageService";
 import { formatDateTime } from "@/utils/format";
 import type { Report } from "@/types/admin";
 
 const CATEGORIES = ["All Categories", "Deforestation", "Forest Fires", "Illegal Logging", "Waste Dumping", "Other"];
 const STATUSES = ["All Statuses", "Pending", "In Review", "Resolved", "Rejected"];
+
+function isAnonymousReport(report: Report): boolean {
+  const row = report as unknown as Record<string, unknown>;
+
+  return Boolean(
+    row.isAnonymous ??
+      row.anonymous ??
+      row.submitAnonymously ??
+      row.submittedAnonymously ??
+      row.isAnon,
+  );
+}
 
 function toLocalCalendarDateKey(value: unknown): string {
   if (!value) return "";
@@ -105,6 +118,7 @@ export default function ReportsScreen() {
   const { width, height } = useWindowDimensions();
   const s = Math.min(width / 1920, height / 1080);
   const { reports } = useAdminData();
+  const { isSuperAdmin } = useAdminAuth();
   const [openFilter, setOpenFilter] = useState<"category" | "status" | null>(null);
 
   /*
@@ -127,13 +141,23 @@ export default function ReportsScreen() {
   const filteredReports = useMemo(() => {
     const queryText = search.trim().toLowerCase();
     return reports.filter((report) => {
+      const anonymous = isAnonymousReport(report);
+      const canSeeIdentity = isSuperAdmin || !anonymous;
+
+      const searchableReporterName = canSeeIdentity
+        ? (report.reportedByName || "").toLowerCase()
+        : "anonymous";
+      const searchableReporterEmail = canSeeIdentity
+        ? (report.reportedByEmail || "").toLowerCase()
+        : "";
+
       const matchesSearch =
         !queryText ||
         report.title.toLowerCase().includes(queryText) ||
         report.description.toLowerCase().includes(queryText) ||
         report.location.toLowerCase().includes(queryText) ||
-        report.reportedByName.toLowerCase().includes(queryText) ||
-        (report.reportedByEmail || "").toLowerCase().includes(queryText);
+        searchableReporterName.includes(queryText) ||
+        searchableReporterEmail.includes(queryText);
 
       const matchesCategory = category === "All Categories" || report.category === category;
       const matchesStatus = status === "All Statuses" || report.status === status;
@@ -144,7 +168,7 @@ export default function ReportsScreen() {
       );
       return matchesSearch && matchesCategory && matchesStatus && matchesDate;
     });
-  }, [reports, search, category, status, fromDate, toDate]);
+  }, [reports, search, category, status, fromDate, toDate, isSuperAdmin]);
 
   const reportPageCount = Math.max(
     1,
@@ -337,6 +361,9 @@ export default function ReportsScreen() {
 
           {visibleReports.map((report) => {
             const submitted = formatDateTime(report.createdAt);
+            const anonymous = isAnonymousReport(report);
+            const hideReporterIdentity = anonymous && !isSuperAdmin;
+
             return (
               <View key={report.id} style={[styles.tableRow, { minHeight: 88 * s }]}>
                 <Text style={[styles.td, styles.idCol, { fontSize: 18 * s }]}>#{report.id.slice(0, 8)}</Text>
@@ -373,8 +400,47 @@ export default function ReportsScreen() {
                 </View>
 
                 <View style={styles.reportedCol}>
-                  <Text style={[styles.td, { fontSize: 16 * s }]}>{report.reportedByName}</Text>
-                  <Text style={[styles.username, { fontSize: 13 * s }]}>{report.reportedByEmail || report.reportedByUid}</Text>
+                  {hideReporterIdentity ? (
+                    <>
+                      <Text
+                        style={[
+                          styles.td,
+                          styles.anonymousReporter,
+                          { fontSize: 16 * s },
+                        ]}
+                      >
+                        Anonymous
+                      </Text>
+                      <Text
+                        style={[
+                          styles.username,
+                          styles.anonymousHint,
+                          { fontSize: 12 * s },
+                        ]}
+                      >
+                        Identity hidden
+                      </Text>
+                    </>
+                  ) : (
+                    <>
+                      <Text style={[styles.td, { fontSize: 16 * s }]}>
+                        {report.reportedByName}
+                      </Text>
+                      <Text style={[styles.username, { fontSize: 13 * s }]}>
+                        {report.reportedByEmail || report.reportedByUid}
+                      </Text>
+                      {anonymous && isSuperAdmin ? (
+                        <Text
+                          style={[
+                            styles.anonymousSubmissionLabel,
+                            { fontSize: 11 * s },
+                          ]}
+                        >
+                          Anonymous submission
+                        </Text>
+                      ) : null}
+                    </>
+                  )}
                 </View>
 
                 <View style={styles.dateCol}>
@@ -1060,6 +1126,23 @@ viewReportButtonText: {
   reportTitle: { fontFamily: "Montserrat_700Bold", color: "#111" },
   reportDesc: { fontFamily: "Montserrat_700Bold", color: "#666", marginTop: 2 },
   username: { fontFamily: "Montserrat_700Bold", color: "#777" },
+  anonymousReporter: {
+    color: "#4F5B52",
+  },
+  anonymousHint: {
+    color: "#8A938C",
+    marginTop: 2,
+  },
+  anonymousSubmissionLabel: {
+    alignSelf: "flex-start",
+    marginTop: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+    backgroundColor: "#EEF3ED",
+    color: "#5E6B60",
+    fontFamily: "Montserrat_700Bold",
+  },
   badgeWrap: { alignItems: "flex-start" },
   badge: { borderRadius: 5, overflow: "hidden", fontFamily: "Montserrat_700Bold" },
   actions: { flexDirection: "row", gap: 8 },

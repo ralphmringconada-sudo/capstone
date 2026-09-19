@@ -274,6 +274,13 @@ export default function UsersScreen() {
   const [adminActivity, setAdminActivity] = useState<ActivityLog[]>([]);
   const [allEvents, setAllEvents] = useState<AdminEvent[]>([]);
 
+  const [profileReturnState, setProfileReturnState] = useState<{
+    user: any;
+    activity: ActivityLog[];
+    activityPage: number;
+    profileTab: "reports" | "events";
+  } | null>(null);
+
   /*
    * Creation and editing forms use independent values, errors, and progress flags so
    * privileged backend operations cannot be submitted repeatedly or leak state between dialogs.
@@ -707,6 +714,9 @@ export default function UsersScreen() {
         return;
       }
 
+      // Reports leave the admin profile flow completely.
+      // When the user comes back to Users, the profile modal stays closed.
+      setProfileReturnState(null);
       setIsProfileOpen(false);
 
       router.navigate({
@@ -727,6 +737,9 @@ export default function UsersScreen() {
         return;
       }
 
+      // Events also leave the admin profile flow completely.
+      // Only User-module actions use the nested profile return behavior.
+      setProfileReturnState(null);
       setIsProfileOpen(false);
 
       router.navigate({
@@ -751,6 +764,22 @@ export default function UsersScreen() {
         return;
       }
 
+      // If the super admin is currently viewing an administrator's
+      // Activity History, preserve that profile before opening the
+      // affected account. Closing the affected profile restores it.
+      if (
+        isProfileOpen &&
+        selectedUser &&
+        (selectedUser[4] === "Admin" || selectedUser[4] === "Super Admin")
+      ) {
+        setProfileReturnState({
+          user: selectedUser,
+          activity: adminActivity,
+          activityPage: currentActivityPage,
+          profileTab,
+        });
+      }
+
       await openUserProfile(affectedUser);
       return;
     }
@@ -770,6 +799,16 @@ export default function UsersScreen() {
    * Why this implementation: Explicit cleanup prevents one account's data from appearing in the next profile.
    */
   const closeUserProfile = () => {
+    if (profileReturnState) {
+      setSelectedUser(profileReturnState.user);
+      setAdminActivity(profileReturnState.activity);
+      setActivityPage(profileReturnState.activityPage);
+      setProfileTab(profileReturnState.profileTab);
+      setIsProfileOpen(true);
+      setProfileReturnState(null);
+      return;
+    }
+
     setIsProfileOpen(false);
     setSelectedUser(null);
     setProfileTab("reports");
@@ -1079,7 +1118,10 @@ export default function UsersScreen() {
 
                 <View style={[styles.actionCol, styles.actionWrap]}>
                   <TouchableOpacity
-                    onPress={() => openUserProfile(u)}
+                    onPress={() => {
+                      setProfileReturnState(null);
+                      void openUserProfile(u);
+                    }}
                     style={[
                       styles.profileButton,
                       {
@@ -1286,13 +1328,27 @@ export default function UsersScreen() {
                 { padding: 26 * s },
               ]}
             >
-              <TouchableOpacity onPress={closeUserProfile} style={styles.closeButton}>
+              <TouchableOpacity
+                onPress={closeUserProfile}
+                style={styles.closeButton}
+                accessibilityLabel={
+                  profileReturnState
+                    ? "Close affected profile and return to administrator"
+                    : "Close profile"
+                }
+              >
                 <X size={24 * s} color="#000" />
               </TouchableOpacity>
 
               {selectedUser &&
               (selectedUser[4] === "Admin" || selectedUser[4] === "Super Admin") ? (
-                <ScrollView contentContainerStyle={[styles.modalContent, { paddingBottom: 24 }]}>
+                <ScrollView
+                  contentContainerStyle={[
+                    styles.modalContent,
+                    { paddingBottom: 30 },
+                  ]}
+                  showsVerticalScrollIndicator={false}
+                >
                   <View style={styles.modalLeft}>
                     <View
                       style={[
@@ -1513,7 +1569,13 @@ export default function UsersScreen() {
                   </View>
                 </ScrollView>
               ) : selectedUser ? (
-  <ScrollView contentContainerStyle={[styles.modalContent, { paddingBottom: 24 }]}>
+  <ScrollView
+    contentContainerStyle={[
+      styles.modalContent,
+      { paddingBottom: 30 },
+    ]}
+    showsVerticalScrollIndicator={false}
+  >
     <View style={styles.modalLeft}>
       <View
         style={[
@@ -2157,15 +2219,23 @@ function FeatureItem({ text, s }: any) {
 function ProfileInfoItem({ icon: Icon, label, value, s }: any) {
   return (
     <View style={styles.profileInfoItem}>
-      <View style={[styles.profileInfoIconBox, { width: 24 * s, transform: [{ translateX: 18 * s }] }]}>
-        <Icon size={30 * s} color="#000" />
+      <View
+        style={[
+          styles.profileInfoIconBox,
+          {
+            width: Math.max(28, 30 * s),
+            height: Math.max(28, 30 * s),
+          },
+        ]}
+      >
+        <Icon size={20 * s} color="#34733B" />
       </View>
 
       <View style={styles.profileInfoTextBox}>
-        <Text style={[styles.profileInfoLabel, { fontSize: 13 * s, transform: [{ translateX: 20 * s }] }]}>
+        <Text style={[styles.profileInfoLabel, { fontSize: 12 * s }]}>
           {label}
         </Text>
-        <Text style={[styles.profileInfoValue, { fontSize: 16 * s, transform: [{ translateX: 20 * s }] }]}>
+        <Text style={[styles.profileInfoValue, { fontSize: 15 * s }]}>
           {value}
         </Text>
       </View>
@@ -2628,9 +2698,9 @@ const styles = StyleSheet.create({
   },
 
   profileModal: {
-    width: "94%",
-    maxWidth: 780,
-    maxHeight: "92%",
+    width: "92%",
+    maxWidth: 820,
+    maxHeight: "90%",
     backgroundColor: "#fff",
     borderRadius: 14,
     position: "relative",
@@ -2638,9 +2708,9 @@ const styles = StyleSheet.create({
   },
 
   adminProfileModal: {
-    width: "96%",
-    maxWidth: 1040,
-    maxHeight: "92%",
+    width: "95%",
+    maxWidth: 1080,
+    maxHeight: "90%",
     backgroundColor: "#fff",
     borderRadius: 14,
     position: "relative",
@@ -2658,17 +2728,24 @@ const styles = StyleSheet.create({
 
   closeButton: {
     position: "absolute",
-    top: 16,
+    top: 18,
     right: 20,
     zIndex: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#F3F5F2",
   },
 
   modalContent: {
     flexDirection: "row",
     flexWrap: "wrap",
-    marginTop: 44,
-    paddingHorizontal: 12,
-    gap: 28,
+    marginTop: 34,
+    paddingHorizontal: 8,
+    paddingTop: 8,
+    gap: 34,
     alignItems: "flex-start",
   },
 
@@ -2677,13 +2754,16 @@ const styles = StyleSheet.create({
     maxWidth: 280,
     flexGrow: 1,
     alignItems: "center",
-    paddingBottom: 12,
+    paddingHorizontal: 10,
+    paddingBottom: 18,
   },
 
   modalRight: {
     flex: 1,
-    minWidth: 280,
+    minWidth: 300,
+    paddingLeft: 6,
     paddingRight: 8,
+    paddingBottom: 10,
   },
 
   profileAvatar: {
@@ -2700,13 +2780,16 @@ const styles = StyleSheet.create({
   profileName: {
     fontFamily: "Montserrat_700Bold",
     color: "#000",
-    marginTop: 14,
+    marginTop: 12,
+    textAlign: "center",
   },
 
   profileBadges: {
     flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
     gap: 8,
-    marginTop: 8,
+    marginTop: 10,
   },
 
   activeBadge: {
@@ -2715,43 +2798,52 @@ const styles = StyleSheet.create({
   },
 
   profileInfoGroup: {
-    width: "92%",
-    marginTop: 18,
+    width: "100%",
+    marginTop: 22,
     alignSelf: "center",
+    gap: 4,
   },
 
   profileInfoItem: {
     width: "100%",
     flexDirection: "row",
-    alignItems: "flex-start",
-    marginTop: 14,
+    alignItems: "center",
+    minHeight: 54,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: "#F8FAF7",
   },
 
   profileInfoIconBox: {
     alignItems: "center",
-    marginTop: 2,
+    justifyContent: "center",
+    flexShrink: 0,
   },
 
   profileInfoTextBox: {
     flex: 1,
-    marginLeft: 8,
+    minWidth: 0,
+    marginLeft: 12,
   },
 
   profileInfoLabel: {
     fontFamily: "Montserrat_700Bold",
-    color: "#000",
+    color: "#707970",
   },
 
   profileInfoValue: {
     fontFamily: "Montserrat_700Bold",
-    color: "#000",
-    marginTop: 2,
+    color: "#1F281F",
+    marginTop: 3,
+    lineHeight: 20,
   },
 
   modalTabs: {
     flexDirection: "row",
-    gap: 30,
-    marginBottom: 16,
+    gap: 26,
+    marginBottom: 20,
+    paddingBottom: 2,
   },
 
   activeTab: {
@@ -2771,7 +2863,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 12,
-    marginBottom: 14,
+    minHeight: 68,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: "#ECEFEC",
   },
 
   smallImageBox: {
@@ -2793,8 +2889,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "flex-end",
     flexWrap: "wrap",
-    gap: 12,
-    marginTop: 24,
+    gap: 10,
+    marginTop: 20,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#ECEFEC",
   },
 
   editButton: {
@@ -2963,21 +3062,28 @@ createAdminButtonText: {
 
 adminActivityRight: {
   flex: 1,
-  paddingRight: 10,
+  minWidth: 560,
+  paddingLeft: 6,
+  paddingRight: 6,
+  paddingBottom: 10,
 },
 
 activityHeader: {
   flexDirection: "row",
   borderBottomWidth: 1,
   borderBottomColor: "#d6d6d6",
-  paddingBottom: 8,
+  paddingHorizontal: 8,
+  paddingTop: 8,
+  paddingBottom: 10,
   alignItems: "center",
 },
 
 activityRow: {
   flexDirection: "row",
   alignItems: "center",
-  minHeight: 58,
+  minHeight: 66,
+  paddingHorizontal: 8,
+  paddingVertical: 8,
   borderBottomWidth: 1,
   borderBottomColor: "#e6e6e6",
 },
@@ -3055,8 +3161,9 @@ modalEventRow: {
   flexDirection: "row",
   alignItems: "center",
   gap: 12,
-  marginBottom: 14,
+  minHeight: 68,
   paddingVertical: 8,
+  paddingHorizontal: 4,
   borderBottomWidth: 1,
   borderBottomColor: "#ECEFEC",
 },

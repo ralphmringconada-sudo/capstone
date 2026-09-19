@@ -23,6 +23,158 @@ import { resolveReportImageUrls } from "@/services/reportImageService";
 import { formatDateTime } from "@/utils/format";
 import type { AdminEvent } from "@/types/admin";
 
+function parseEventTimeParts(value?: string): {
+  hours: number;
+  minutes: number;
+} {
+  const raw = String(value || "").trim();
+
+  if (!raw) {
+    return { hours: 0, minutes: 0 };
+  }
+
+  const twelveHour = raw.match(
+    /^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)$/i,
+  );
+
+  if (twelveHour) {
+    let hours = Number(twelveHour[1]);
+    const minutes = Number(twelveHour[2] || "0");
+    const period = twelveHour[3].toUpperCase();
+
+    if (period === "AM" && hours === 12) {
+      hours = 0;
+    } else if (period === "PM" && hours !== 12) {
+      hours += 12;
+    }
+
+    return {
+      hours: Math.min(23, Math.max(0, hours)),
+      minutes: Math.min(59, Math.max(0, minutes)),
+    };
+  }
+
+  const twentyFourHour = raw.match(/^(\d{1,2})(?::(\d{2}))?/);
+
+  if (twentyFourHour) {
+    return {
+      hours: Math.min(
+        23,
+        Math.max(0, Number(twentyFourHour[1] || "0")),
+      ),
+      minutes: Math.min(
+        59,
+        Math.max(0, Number(twentyFourHour[2] || "0")),
+      ),
+    };
+  }
+
+  return { hours: 0, minutes: 0 };
+}
+
+function getEventStartDate(event: AdminEvent): Date | null {
+  if (event.startAt) {
+    const startAt = new Date(event.startAt);
+
+    if (!Number.isNaN(startAt.getTime())) {
+      return startAt;
+    }
+  }
+
+  const rawDate = String(event.date || "").trim();
+
+  if (!rawDate) {
+    return null;
+  }
+
+  const dateOnly = rawDate.match(
+    /^(\d{4})-(\d{2})-(\d{2})$/,
+  );
+
+  if (dateOnly) {
+    const { hours, minutes } =
+      parseEventTimeParts(event.time);
+
+    const parsed = new Date(
+      Number(dateOnly[1]),
+      Number(dateOnly[2]) - 1,
+      Number(dateOnly[3]),
+      hours,
+      minutes,
+      0,
+      0,
+    );
+
+    return Number.isNaN(parsed.getTime())
+      ? null
+      : parsed;
+  }
+
+  const parsed = new Date(rawDate);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  if (event.time) {
+    const { hours, minutes } =
+      parseEventTimeParts(event.time);
+
+    parsed.setHours(hours, minutes, 0, 0);
+  }
+
+  return parsed;
+}
+
+function getUpcomingEvents(
+  events: AdminEvent[],
+  now = new Date(),
+): AdminEvent[] {
+  const nowTime = now.getTime();
+
+  return events
+    .filter((event) => {
+      const isApprovedUpcoming =
+        event.status === "Approved" ||
+        event.status === "Upcoming";
+
+      if (!isApprovedUpcoming) {
+        return false;
+      }
+
+      const start = getEventStartDate(event);
+
+      return Boolean(
+        start &&
+          start.getTime() > nowTime,
+      );
+    })
+    .sort((left, right) => {
+      const leftStart =
+        getEventStartDate(left)?.getTime() ??
+        Number.MAX_SAFE_INTEGER;
+      const rightStart =
+        getEventStartDate(right)?.getTime() ??
+        Number.MAX_SAFE_INTEGER;
+
+      return leftStart - rightStart;
+    });
+}
+
+function formatUpcomingEventDate(event: AdminEvent): string {
+  const start = getEventStartDate(event);
+
+  if (!start) {
+    return event.date || "Date not set";
+  }
+
+  return start.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 /**
  * Purpose: Presents an at-a-glance operational summary for the signed-in administrator.
  * How it works:
@@ -83,28 +235,46 @@ export default function DashboardScreen() {
 
   useEffect(() => {
     let active = true;
+
     const loadEvents = async () => {
       try {
         const events = await fetchEvents();
-        if (!active) return;
-        const liveEvents = events.filter(
-  (event) => event.status === "Upcoming" || event.status === "Ongoing",
-);
 
-// Count ALL events for the Total Events card.
-setTotalEventsCount(events.length);
+        if (!active) {
+          return;
+        }
 
-// Only Upcoming/Ongoing events appear in the Upcoming Events panel.
-setUpcomingEvents(liveEvents.slice(0, 4));
+        // Total Events still counts every event record.
+        setTotalEventsCount(events.length);
+
+        // Upcoming Events is based on the real event start date/time.
+        // The closest future approved events always appear first.
+        setUpcomingEvents(
+          getUpcomingEvents(events).slice(0, 4),
+        );
       } catch {
-        if (!active) return;
+        if (!active) {
+          return;
+        }
+
         setUpcomingEvents([]);
         setTotalEventsCount(0);
       }
     };
+
     void loadEvents();
+
+    // Keep the list accurate while the dashboard stays open.
+    const refreshTimer = setInterval(
+      () => {
+        void loadEvents();
+      },
+      60_000,
+    );
+
     return () => {
       active = false;
+      clearInterval(refreshTimer);
     };
   }, []);
 
@@ -407,7 +577,9 @@ setUpcomingEvents(liveEvents.slice(0, 4));
                     <View style={styles.eventInfo}>
                       <Text style={[styles.eventTitle, { fontSize: 18 * s }]}>{event.title}</Text>
                       <Text style={[styles.eventDate, { fontSize: 14 * s }]}>
-                        ▣ {event.date}  ♦ {event.location}
+                        ▣ {formatUpcomingEventDate(event)}
+                        {event.time ? ` · ${event.time}` : ""}
+                        {"  "}♦ {event.location}
                       </Text>
                     </View>
                     <Text
@@ -417,11 +589,11 @@ setUpcomingEvents(liveEvents.slice(0, 4));
                           fontSize: 16 * s,
                           paddingHorizontal: 18 * s,
                           paddingVertical: 10 * s,
-                          backgroundColor: event.status === "Ongoing" ? "#C7DDFF" : "#E8C1EF",
+                          backgroundColor: "#E8C1EF",
                         },
                       ]}
                     >
-                      {event.status}
+                      Upcoming
                     </Text>
                   </View>
                 );
@@ -429,7 +601,7 @@ setUpcomingEvents(liveEvents.slice(0, 4));
             ) : (
               <View style={styles.emptyEvents}>
                 <Text style={[styles.emptyEventsText, { fontSize: 15 * s }]}>
-                  No upcoming events yet. Approved admin and user events will appear here.
+                  No upcoming approved events yet.
                 </Text>
               </View>
             )}

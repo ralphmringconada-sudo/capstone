@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import {
-  Alert,
+  Modal,
   ScrollView,
   StyleSheet,
   Text,
@@ -31,6 +31,18 @@ import { resolveReportImageUrls } from "@/services/reportImageService";
 import type { Report, ReportStatusHistoryEntry } from "@/types/admin";
 import { formatDateTime } from "@/utils/format";
 
+function isAnonymousReport(report: Report): boolean {
+  const row = report as unknown as Record<string, unknown>;
+
+  return Boolean(
+    row.isAnonymous ??
+      row.anonymous ??
+      row.submitAnonymously ??
+      row.submittedAnonymously ??
+      row.isAnon,
+  );
+}
+
 /**
  * Purpose: Builds a displayable status timeline from persisted history or report timestamps.
  * How it works: Uses statusHistory when present; otherwise seeds Pending from createdAt and
@@ -40,6 +52,7 @@ function buildStatusHistoryRows(report: Report): Array<{
   status: string;
   atLabel: string;
   remarks: string;
+  changedBy: string;
   active: boolean;
 }> {
   const history = [...(report.statusHistory || [])].sort((a, b) =>
@@ -82,12 +95,24 @@ function buildStatusHistoryRows(report: Report): Array<{
 
   return uniqueRows.map((entry) => {
     const stamped = entry.at ? formatDateTime(entry.at) : null;
+    const adminName = entry.byName?.trim() || "";
+
+    const remarks =
+      entry.status === "Pending"
+        ? "Report submitted by user"
+        : entry.status === "In Review"
+          ? "Marked report as in review"
+          : entry.status === "Resolved"
+            ? "Marked report as resolved"
+            : entry.status === "Rejected"
+              ? "Marked report as rejected"
+              : entry.remarks || "Status updated";
+
     return {
       status: entry.status,
       atLabel: stamped ? `${stamped.date} · ${stamped.time}` : "—",
-      remarks:
-        entry.remarks ||
-        (entry.byName ? `Updated by ${entry.byName}` : "Status updated"),
+      remarks,
+      changedBy: adminName,
       active: true,
     };
   });
@@ -107,16 +132,26 @@ export default function ReportDetailsScreen() {
   const { width, height } = useWindowDimensions();
   const s = Math.min(width / 1920, height / 1080);
   const { id } = useLocalSearchParams<{ id?: string }>();
-  const { admin } = useAdminAuth();
+  const { admin, isSuperAdmin } = useAdminAuth();
   /*
    * Report and image state form the displayed evidence snapshot.
    * Loading, updating, and error state distinguish initial retrieval from admin actions.
    */
   const [report, setReport] = useState<Report | null>(null);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [failedImageIndexes, setFailedImageIndexes] = useState<
+    Record<number, boolean>
+  >({});
+  const [selectedImageUrl, setSelectedImageUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
   const [error, setError] = useState("");
+  const [statusPrompt, setStatusPrompt] = useState<{
+    status: Report["status"];
+    details: string;
+  } | null>(null);
+  const [statusSuccess, setStatusSuccess] =
+    useState<Report["status"] | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -130,8 +165,10 @@ export default function ReportDetailsScreen() {
         const item = await fetchReportById(String(id));
         setReport(item);
         if (item) {
+          setFailedImageIndexes({});
           setImageUrls(await resolveReportImageUrls(item));
         } else {
+          setFailedImageIndexes({});
           setImageUrls([]);
         }
       // Convert Firestore or image-resolution failures into visible screen feedback.
@@ -162,13 +199,11 @@ export default function ReportDetailsScreen() {
       const refreshed = await fetchReportById(report.id);
       setReport(refreshed);
       if (refreshed) {
+        setFailedImageIndexes({});
         setImageUrls(await resolveReportImageUrls(refreshed));
       }
-      if (typeof window !== "undefined" && typeof window.alert === "function") {
-        window.alert(`Status updated: report marked as ${status}.`);
-      } else {
-        Alert.alert("Status updated", `Report marked as ${status}.`);
-      }
+      setStatusPrompt(null);
+      setStatusSuccess(status);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to update report.");
     } finally {
@@ -176,7 +211,10 @@ export default function ReportDetailsScreen() {
     }
   };
 
-  const handleStatusUpdate = (status: Report["status"], details: string) => {
+  const handleStatusUpdate = (
+    status: Report["status"],
+    details: string,
+  ) => {
     if (!report || !admin || isUpdating) return;
 
     if (report.status === "Resolved" || report.status === "Rejected") {
@@ -189,24 +227,8 @@ export default function ReportDetailsScreen() {
       return;
     }
 
-    const title = "Confirm status change";
-    const message = `Mark this report as "${status}"?`;
-    const run = () => {
-      void applyStatusUpdate(status, details);
-    };
-
-    // Prefer window.confirm on web so the popup is reliable in browsers.
-    if (typeof window !== "undefined" && typeof window.confirm === "function") {
-      if (window.confirm(`${title}\n\n${message}`)) {
-        run();
-      }
-      return;
-    }
-
-    Alert.alert(title, message, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Confirm", onPress: run },
-    ]);
+    setError("");
+    setStatusPrompt({ status, details });
   };
 
   if (isLoading) {
@@ -230,6 +252,8 @@ export default function ReportDetailsScreen() {
   }
 
   const submitted = formatDateTime(report.createdAt);
+  const anonymousReport = isAnonymousReport(report);
+  const hideReporterIdentity = anonymousReport && !isSuperAdmin;
   const isClosed = report.status === "Resolved" || report.status === "Rejected";
   const canMarkInReview = report.status === "Pending";
   const canMarkResolved = report.status === "Pending" || report.status === "In Review";
@@ -295,20 +319,103 @@ export default function ReportDetailsScreen() {
             <View style={[styles.panel, { padding: 18 * s, marginTop: 22 * s }]}>
               <SectionTitle icon={Camera} title={`Attached Images (${imageUrls.length})`} s={s} />
 
-              <View style={styles.imagesRow}>
-                {imageUrls.length ? (
-                  imageUrls.map((imageUrl, index) => (
-                    <Image
-                      key={`${report.id}-${index}`}
-                      source={{ uri: imageUrl }}
-                      style={[styles.reportImage, { width: 180 * s, height: 140 * s }]}
-                      resizeMode="contain"
-                    />
-                  ))
-                ) : (
-                  <Text style={[styles.valueText, { fontSize: 16 * s }]}>No images attached.</Text>
-                )}
-              </View>
+              {imageUrls.length ? (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator
+                  nestedScrollEnabled
+                  style={styles.imagesScroll}
+                  contentContainerStyle={styles.imagesScrollContent}
+                >
+                  {imageUrls.map((imageUrl, index) => {
+                    const failed = Boolean(failedImageIndexes[index]);
+
+                    return (
+                      <TouchableOpacity
+                        key={`${report.id}-${index}`}
+                        activeOpacity={failed ? 1 : 0.82}
+                        disabled={failed}
+                        onPress={() => {
+                          if (!failed) {
+                            setSelectedImageUrl(imageUrl);
+                          }
+                        }}
+                        style={[
+                          styles.imageCard,
+                          {
+                            width: Math.max(145, 165 * s),
+                          },
+                        ]}
+                      >
+                        {failed ? (
+                          <View
+                            style={[
+                              styles.imageUnavailable,
+                              { height: Math.max(105, 118 * s) },
+                            ]}
+                          >
+                            <Camera size={26 * s} color="#839083" />
+                            <Text
+                              style={[
+                                styles.imageUnavailableText,
+                                { fontSize: 12 * s },
+                              ]}
+                            >
+                              Image unavailable
+                            </Text>
+                          </View>
+                        ) : (
+                          <Image
+                            source={{ uri: imageUrl }}
+                            style={[
+                              styles.reportImage,
+                              { height: Math.max(105, 118 * s) },
+                            ]}
+                            resizeMode="cover"
+                            onError={() =>
+                              setFailedImageIndexes((current) => ({
+                                ...current,
+                                [index]: true,
+                              }))
+                            }
+                          />
+                        )}
+
+                        <View style={styles.imageCardFooter}>
+                          <Text
+                            numberOfLines={1}
+                            style={[
+                              styles.imageCardLabel,
+                              { fontSize: 11 * s },
+                            ]}
+                          >
+                            Photo {index + 1}
+                          </Text>
+
+                          {!failed ? (
+                            <ExternalLink
+                              size={13 * s}
+                              color="#34733B"
+                            />
+                          ) : null}
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </ScrollView>
+              ) : (
+                <View style={styles.emptyImagesBox}>
+                  <Camera size={28 * s} color="#839083" />
+                  <Text
+                    style={[
+                      styles.emptyImagesText,
+                      { fontSize: 14 * s },
+                    ]}
+                  >
+                    No images attached.
+                  </Text>
+                </View>
+              )}
 
               {report.imageTimestamp ? (
                 <InfoRow label="Photo Time" value={report.imageTimestamp} s={s} />
@@ -361,6 +468,16 @@ export default function ReportDetailsScreen() {
 
                   <Text style={[styles.historyRemarksCol, { fontSize: 16 * s }]}>
                     {item.remarks}
+                    {item.status !== "Pending" ? (
+                      <>
+                        {" by "}
+                        <Text style={styles.historyAdminName}>
+                          {item.changedBy
+                            ? `Admin ${item.changedBy}`
+                            : "Administrator"}
+                        </Text>
+                      </>
+                    ) : null}
                   </Text>
                 </View>
               ))}
@@ -408,9 +525,45 @@ export default function ReportDetailsScreen() {
             <View style={[styles.panel, { padding: 18 * s, marginTop: 22 * s }]}>
               <SectionTitle icon={MapPin} title="Reported By" s={s} />
 
-              <InfoRow label="User ID" value={report.reportedByUid} s={s} />
-              <InfoRow label="Name" value={report.reportedByName} s={s} />
-              <InfoRow label="Email" value={report.reportedByEmail || "-"} s={s} />
+              {hideReporterIdentity ? (
+                <View style={styles.anonymousReporterBox}>
+                  <Text
+                    style={[
+                      styles.anonymousReporterTitle,
+                      { fontSize: 17 * s },
+                    ]}
+                  >
+                    Anonymous
+                  </Text>
+                  <Text
+                    style={[
+                      styles.anonymousReporterHint,
+                      { fontSize: 13 * s },
+                    ]}
+                  >
+                    The reporter chose to hide their identity.
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  <InfoRow label="User ID" value={report.reportedByUid} s={s} />
+                  <InfoRow label="Name" value={report.reportedByName} s={s} />
+                  <InfoRow label="Email" value={report.reportedByEmail || "-"} s={s} />
+
+                  {anonymousReport && isSuperAdmin ? (
+                    <View style={styles.superAdminAnonymousNote}>
+                      <Text
+                        style={[
+                          styles.superAdminAnonymousNoteText,
+                          { fontSize: 12 * s },
+                        ]}
+                      >
+                        Anonymous submission · identity visible to Super Admin only
+                      </Text>
+                    </View>
+                  ) : null}
+                </>
+              )}
             </View>
 
             <View style={[styles.panel, { padding: 18 * s, marginTop: 22 * s }]}>
@@ -441,7 +594,7 @@ export default function ReportDetailsScreen() {
                   color="#20B83B"
                   icon={Check}
                   s={s}
-                  onPress={() => handleStatusUpdate("Resolved", "Approved and resolved report")}
+                  onPress={() => handleStatusUpdate("Resolved", "Marked report as resolved")}
                   disabled={isUpdating}
                 />
               ) : null}
@@ -452,7 +605,7 @@ export default function ReportDetailsScreen() {
                   color="#FF3B3B"
                   icon={X}
                   s={s}
-                  onPress={() => handleStatusUpdate("Rejected", "Rejected report")}
+                  onPress={() => handleStatusUpdate("Rejected", "Marked report as rejected")}
                   disabled={isUpdating}
                 />
               ) : null}
@@ -460,6 +613,226 @@ export default function ReportDetailsScreen() {
           </View>
         </View>
       </ScrollView>
+
+      <Modal
+        transparent
+        visible={Boolean(selectedImageUrl)}
+        animationType="fade"
+        onRequestClose={() => setSelectedImageUrl(null)}
+      >
+        <View style={styles.imagePreviewOverlay}>
+          <TouchableOpacity
+            activeOpacity={1}
+            style={styles.imagePreviewBackdrop}
+            onPress={() => setSelectedImageUrl(null)}
+          />
+
+          <View style={styles.imagePreviewCard}>
+            <TouchableOpacity
+              onPress={() => setSelectedImageUrl(null)}
+              style={styles.imagePreviewCloseButton}
+              accessibilityLabel="Close image preview"
+            >
+              <X size={24 * s} color="#FFFFFF" />
+            </TouchableOpacity>
+
+            {selectedImageUrl ? (
+              <Image
+                source={{ uri: selectedImageUrl }}
+                style={styles.imagePreviewImage}
+                resizeMode="contain"
+              />
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        transparent
+        visible={Boolean(statusPrompt)}
+        animationType="fade"
+        onRequestClose={() => {
+          if (!isUpdating) setStatusPrompt(null);
+        }}
+      >
+        <View style={styles.statusModalOverlay}>
+          <View style={[styles.statusModalCard, { padding: 26 * s }]}>
+            {statusPrompt ? (
+              <>
+                <View
+                  style={[
+                    styles.statusModalIcon,
+                    {
+                      backgroundColor:
+                        statusPrompt.status === "Resolved"
+                          ? "#E3F5E5"
+                          : statusPrompt.status === "Rejected"
+                            ? "#FFE4E4"
+                            : "#E5F1FF",
+                    },
+                  ]}
+                >
+                  {statusPrompt.status === "Rejected" ? (
+                    <X size={30 * s} color="#D83030" />
+                  ) : (
+                    <Check
+                      size={30 * s}
+                      color={
+                        statusPrompt.status === "Resolved"
+                          ? "#168A18"
+                          : "#315BC9"
+                      }
+                    />
+                  )}
+                </View>
+
+                <Text style={[styles.statusModalTitle, { fontSize: 22 * s }]}>
+                  Change Report Status?
+                </Text>
+
+                <Text
+                  style={[styles.statusModalMessage, { fontSize: 15 * s }]}
+                >
+                  You are about to mark this report as{" "}
+                  <Text
+                    style={[
+                      styles.statusModalStatusText,
+                      {
+                        color:
+                          statusPrompt.status === "Resolved"
+                            ? "#168A18"
+                            : statusPrompt.status === "Rejected"
+                              ? "#D83030"
+                              : "#315BC9",
+                      },
+                    ]}
+                  >
+                    {statusPrompt.status}
+                  </Text>
+                  .
+                </Text>
+
+                <View style={styles.statusModalInfoBox}>
+                  <Text
+                    style={[
+                      styles.statusModalInfoLabel,
+                      { fontSize: 12 * s },
+                    ]}
+                  >
+                    Changed by
+                  </Text>
+                  <Text
+                    style={[
+                      styles.statusModalInfoValue,
+                      { fontSize: 15 * s },
+                    ]}
+                  >
+                    {admin?.fullName || "Administrator"}
+                  </Text>
+                </View>
+
+                <Text style={[styles.statusModalHint, { fontSize: 13 * s }]}>
+                  This action will be recorded in the report status history.
+                </Text>
+
+                <View style={styles.statusModalActions}>
+                  <TouchableOpacity
+                    disabled={isUpdating}
+                    onPress={() => setStatusPrompt(null)}
+                    style={styles.statusModalCancelButton}
+                  >
+                    <Text
+                      style={[
+                        styles.statusModalCancelText,
+                        { fontSize: 14 * s },
+                      ]}
+                    >
+                      Cancel
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    disabled={isUpdating}
+                    onPress={() => {
+                      if (!statusPrompt) return;
+                      void applyStatusUpdate(
+                        statusPrompt.status,
+                        statusPrompt.details,
+                      );
+                    }}
+                    style={[
+                      styles.statusModalConfirmButton,
+                      {
+                        backgroundColor:
+                          statusPrompt.status === "Resolved"
+                            ? "#20B83B"
+                            : statusPrompt.status === "Rejected"
+                              ? "#D83030"
+                              : "#259BEF",
+                        opacity: isUpdating ? 0.7 : 1,
+                      },
+                    ]}
+                  >
+                    {isUpdating ? (
+                      <ActivityIndicator color="#FFFFFF" />
+                    ) : (
+                      <Text
+                        style={[
+                          styles.statusModalConfirmText,
+                          { fontSize: 14 * s },
+                        ]}
+                      >
+                        Confirm Change
+                      </Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : null}
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        transparent
+        visible={Boolean(statusSuccess)}
+        animationType="fade"
+        onRequestClose={() => setStatusSuccess(null)}
+      >
+        <View style={styles.statusModalOverlay}>
+          <View style={[styles.statusSuccessCard, { padding: 26 * s }]}>
+            <View style={styles.statusSuccessIcon}>
+              <Check size={32 * s} color="#168A18" />
+            </View>
+
+            <Text style={[styles.statusModalTitle, { fontSize: 22 * s }]}>
+              Status Updated
+            </Text>
+
+            <Text style={[styles.statusModalMessage, { fontSize: 15 * s }]}>
+              The report has been marked as{" "}
+              <Text style={styles.statusModalStatusText}>
+                {statusSuccess}
+              </Text>
+              .
+            </Text>
+
+            <TouchableOpacity
+              onPress={() => setStatusSuccess(null)}
+              style={styles.statusSuccessButton}
+            >
+              <Text
+                style={[
+                  styles.statusModalConfirmText,
+                  { fontSize: 14 * s },
+                ]}
+              >
+                Done
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </AdminLayout>
   );
 }
@@ -554,11 +927,6 @@ const styles = StyleSheet.create({
   page: {
     flex: 1,
     backgroundColor: "#fff",
-    // Keep the report details pane independently scrollable on web.
-    // @ts-expect-error web-only overflow for visible scrollbar
-    overflowY: "auto",
-    // @ts-expect-error web-only height constraint
-    maxHeight: "calc(100vh - 72px)",
   },
   closedHint: {
     color: "#555",
@@ -642,6 +1010,7 @@ const styles = StyleSheet.create({
     fontFamily: "Montserrat_700Bold",
     overflow: "hidden",
     textAlign: "center",
+    lineHeight: 20,
   },
   pendingBadge: {
     backgroundColor: "#FFF0B8",
@@ -659,15 +1028,73 @@ const styles = StyleSheet.create({
     backgroundColor: "#FFD0D0",
     color: "#D83030",
   },
-  imagesRow: {
+  imagesScroll: {
+    width: "100%",
+    marginBottom: 18,
+  },
+  imagesScrollContent: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 10,
+    paddingBottom: 8,
+    paddingRight: 8,
+  },
+  imageCard: {
+    flexShrink: 0,
+    borderWidth: 1,
+    borderColor: "#D9E0D7",
+    borderRadius: 8,
+    backgroundColor: "#F7F9F6",
+    overflow: "hidden",
+  },
+  reportImage: {
+    width: "100%",
+    backgroundColor: "#F0F2EF",
+  },
+  imageUnavailable: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    backgroundColor: "#F2F4F1",
+  },
+  imageUnavailableText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#768176",
+  },
+  imageCardFooter: {
+    minHeight: 34,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 16,
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: "#E1E6DF",
+    backgroundColor: "#FFFFFF",
   },
-  reportImage: {
-    borderRadius: 7,
-    backgroundColor: "#ddd",
+  imageCardLabel: {
+    flex: 1,
+    fontFamily: "Montserrat_700Bold",
+    color: "#263226",
+  },
+  emptyImagesBox: {
+    minHeight: 120,
+    width: "100%",
+    borderWidth: 1,
+    borderStyle: "dashed",
+    borderColor: "#CDD5CB",
+    borderRadius: 10,
+    backgroundColor: "#F8FAF7",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginBottom: 18,
+  },
+  emptyImagesText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#758075",
   },
   arrow: {
     fontFamily: "Montserrat_700Bold",
@@ -685,21 +1112,26 @@ historyDotCol: {
 },
 
 historyStatusCol: {
-  width: "24%",
+  width: "22%",
   alignItems: "flex-start",
 },
 
 historyDateCol: {
-  width: "34%",
+  width: "30%",
   fontFamily: "Montserrat_700Bold",
   color: "#000",
 },
 
 historyRemarksCol: {
-  width: "34%",
+  width: "40%",
   fontFamily: "Montserrat_700Bold",
   color: "#000",
   textAlign: "left",
+},
+
+historyAdminName: {
+  fontFamily: "Montserrat_700Bold",
+  color: "#2468C9",
 },
   dot: {
     width: 14,
@@ -756,6 +1188,39 @@ historyRemarksCol: {
     fontFamily: "Montserrat_700Bold",
     color: "#20B83B",
   },
+  anonymousReporterBox: {
+    minHeight: 96,
+    borderWidth: 1,
+    borderColor: "#D8DED7",
+    borderRadius: 8,
+    backgroundColor: "#F7F9F6",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  anonymousReporterTitle: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#465149",
+  },
+  anonymousReporterHint: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#7A847C",
+    textAlign: "center",
+    marginTop: 6,
+  },
+  superAdminAnonymousNote: {
+    alignSelf: "flex-start",
+    marginTop: 12,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: "#EEF3ED",
+  },
+  superAdminAnonymousNoteText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#59675B",
+  },
   actionButton: {
     height: 42,
     borderWidth: 1,
@@ -768,4 +1233,175 @@ historyRemarksCol: {
   actionButtonText: {
     fontFamily: "Montserrat_700Bold",
   },
+  imagePreviewOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.82)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 28,
+  },
+  imagePreviewBackdrop: {
+    ...StyleSheet.absoluteFill,
+  },
+  imagePreviewCard: {
+    width: "92%",
+    maxWidth: 1000,
+    height: "82%",
+    maxHeight: 760,
+    borderRadius: 12,
+    backgroundColor: "#111111",
+    overflow: "hidden",
+    alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  imagePreviewImage: {
+    width: "100%",
+    height: "100%",
+  },
+  imagePreviewCloseButton: {
+    position: "absolute",
+    top: 14,
+    right: 14,
+    zIndex: 2,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  statusModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(16, 26, 17, 0.46)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+  statusModalCard: {
+    width: "92%",
+    maxWidth: 460,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    alignItems: "center",
+    shadowColor: "#000000",
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
+  },
+  statusSuccessCard: {
+    width: "92%",
+    maxWidth: 400,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 18,
+    alignItems: "center",
+    shadowColor: "#000000",
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
+  },
+  statusModalIcon: {
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+  statusSuccessIcon: {
+    width: 66,
+    height: 66,
+    borderRadius: 33,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+    backgroundColor: "#E3F5E5",
+  },
+  statusModalTitle: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#163C1D",
+    textAlign: "center",
+  },
+  statusModalMessage: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#4B554B",
+    textAlign: "center",
+    lineHeight: 22,
+    marginTop: 10,
+  },
+  statusModalStatusText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#0B5A1E",
+  },
+  statusModalInfoBox: {
+    width: "100%",
+    marginTop: 18,
+    padding: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: "#DCE6D9",
+    backgroundColor: "#F7FAF6",
+  },
+  statusModalInfoLabel: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#718071",
+    marginBottom: 4,
+  },
+  statusModalInfoValue: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#17391D",
+  },
+  statusModalHint: {
+    width: "100%",
+    fontFamily: "Montserrat_700Bold",
+    color: "#778077",
+    textAlign: "center",
+    lineHeight: 19,
+    marginTop: 14,
+  },
+  statusModalActions: {
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+    marginTop: 22,
+  },
+  statusModalCancelButton: {
+    minWidth: 108,
+    height: 40,
+    borderWidth: 1,
+    borderColor: "#CDD4CC",
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 16,
+  },
+  statusModalCancelText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#4C554C",
+  },
+  statusModalConfirmButton: {
+    minWidth: 150,
+    height: 40,
+    borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 18,
+  },
+  statusModalConfirmText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#FFFFFF",
+  },
+  statusSuccessButton: {
+    width: "100%",
+    height: 40,
+    marginTop: 22,
+    borderRadius: 8,
+    backgroundColor: "#34733B",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
 });
