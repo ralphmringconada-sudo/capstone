@@ -509,3 +509,230 @@ exports.deleteUserAccount = functions.https.onRequest(async (req, res) => {
   }
 });
 
+exports.setAccountFlag = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set(
+    'Access-Control-Allow-Headers',
+    'Authorization, Content-Type',
+  );
+
+  if (req.method === 'OPTIONS') {
+    res.status(204).send('');
+    return;
+  }
+
+  if (req.method !== 'POST') {
+    res.status(405).json({
+      error: 'Method not allowed.',
+    });
+    return;
+  }
+
+  try {
+    const authorization = String(
+      req.headers.authorization || '',
+    );
+
+    const match = authorization.match(
+      /^Bearer\s+(.+)$/i,
+    );
+
+    if (!match) {
+      res.status(401).json({
+        error: 'Missing authorization token.',
+      });
+      return;
+    }
+
+    const decoded = await admin
+      .auth()
+      .verifyIdToken(match[1], true);
+
+    const db = admin.firestore();
+
+    const actorRef = db
+      .collection('admins')
+      .doc(decoded.uid);
+
+    const actorSnap = await actorRef.get();
+
+    if (!actorSnap.exists) {
+      res.status(403).json({
+        error: 'Administrator profile not found.',
+      });
+      return;
+    }
+
+    const actor = actorSnap.data() || {};
+    const actorRole = String(actor.role || '');
+
+    if (
+      actorRole !== 'admin' &&
+      actorRole !== 'super_admin'
+    ) {
+      res.status(403).json({
+        error: 'Administrator access is required.',
+      });
+      return;
+    }
+
+    let body = req.body;
+
+    if (typeof body === 'string') {
+      try {
+        body = JSON.parse(body);
+      } catch {
+        body = {};
+      }
+    }
+
+    const accountId = String(
+      body?.accountId || '',
+    ).trim();
+
+    const accountType = String(
+      body?.accountType || '',
+    ).trim();
+
+    const isFlagged = body?.isFlagged === true;
+
+    if (!accountId) {
+      res.status(400).json({
+        error: 'Account ID is required.',
+      });
+      return;
+    }
+
+    if (
+      accountType !== 'user' &&
+      accountType !== 'admin'
+    ) {
+      res.status(400).json({
+        error: 'Invalid account type.',
+      });
+      return;
+    }
+
+    if (
+      accountType === 'admin' &&
+      actorRole !== 'super_admin'
+    ) {
+      res.status(403).json({
+        error:
+          'Only the Super Admin can flag administrator accounts.',
+      });
+      return;
+    }
+
+    const collectionName =
+      accountType === 'admin'
+        ? 'admins'
+        : 'users';
+
+    const accountRef = db
+      .collection(collectionName)
+      .doc(accountId);
+
+    const accountSnap = await accountRef.get();
+
+    if (!accountSnap.exists) {
+      res.status(404).json({
+        error: 'Account not found.',
+      });
+      return;
+    }
+
+    const accountData = accountSnap.data() || {};
+
+    if (
+      accountType === 'admin' &&
+      accountData.role === 'super_admin'
+    ) {
+      res.status(403).json({
+        error:
+          'The Super Admin account cannot be flagged.',
+      });
+      return;
+    }
+
+    const now = new Date().toISOString();
+
+    const batch = db.batch();
+
+    batch.update(accountRef, {
+      isFlagged,
+      flaggedAt: isFlagged ? now : null,
+      flaggedBy: isFlagged ? decoded.uid : null,
+      updatedAt: now,
+    });
+
+    const activityRef = db
+      .collection('admin_activity_logs')
+      .doc();
+
+    batch.set(activityRef, {
+      adminUid: decoded.uid,
+
+      adminName: String(
+        actor.fullName ||
+          actor.email ||
+          decoded.email ||
+          'Administrator',
+      ),
+
+      action: isFlagged
+        ? 'Flagged Account'
+        : 'Unflagged Account',
+
+      module: 'Users',
+
+      recordId: accountId,
+
+      details: `${
+        isFlagged ? 'Flagged' : 'Unflagged'
+      } ${accountType} account`,
+
+      createdAt: now,
+    });
+
+    await batch.commit();
+
+    res.status(200).json({
+      ok: true,
+      accountId,
+      accountType,
+      isFlagged,
+      message: isFlagged
+        ? 'Account flagged successfully.'
+        : 'Account unflagged successfully.',
+    });
+  } catch (error) {
+    console.error(
+      'setAccountFlag failed:',
+      error,
+    );
+
+    const code = String(
+      error?.code || '',
+    );
+
+    if (
+      code.includes('id-token') ||
+      code === 'auth/id-token-revoked'
+    ) {
+      res.status(401).json({
+        error:
+          'Invalid or expired administrator session.',
+      });
+      return;
+    }
+
+    res.status(500).json({
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Failed to update account flag.',
+    });
+  }
+});

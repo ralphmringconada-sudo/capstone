@@ -607,25 +607,47 @@ export async function setAccountFlag(
   accountId: string,
   accountType: 'user' | 'admin',
   isFlagged: boolean,
-  actor: AdminProfile,
+  _actor: AdminProfile,
 ) {
-  // Select the authorized collection explicitly from the validated account category.
-  const collectionName = accountType === 'admin' ? 'admins' : 'users';
-  await updateDoc(doc(db, collectionName, accountId), {
-    isFlagged,
-    flaggedAt: isFlagged ? new Date().toISOString() : null,
-    flaggedBy: isFlagged ? actor.uid : null,
-    updatedAt: new Date().toISOString(),
-  });
+  const currentUser = auth.currentUser;
 
-  await logAdminActivity({
-    adminUid: actor.uid,
-    adminName: actor.fullName,
-    action: isFlagged ? 'Flagged Account' : 'Unflagged Account',
-    module: 'Users',
-    recordId: accountId,
-    details: `${isFlagged ? 'Flagged' : 'Unflagged'} ${accountType} account`,
-  });
+  if (!currentUser) {
+    throw new Error('You must be signed in as an administrator.');
+  }
+
+  const token = await currentUser.getIdToken(true);
+
+  const response = await fetch(
+    'https://us-central1-ecobantay-18061.cloudfunctions.net/setAccountFlag',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        accountId,
+        accountType,
+        isFlagged,
+      }),
+    },
+  );
+
+  const data = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    error?: string;
+    message?: string;
+  };
+
+  if (!response.ok) {
+    throw new Error(
+      data.error ||
+        data.message ||
+        `Failed to update account flag (${response.status}).`,
+    );
+  }
+
+  return data;
 }
 
 /**
