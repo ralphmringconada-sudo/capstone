@@ -83,22 +83,24 @@ export async function syncPendingOfflineReports(userUid: string): Promise<SyncRe
     };
   }
 
-  const online = await checkIsOnline();
-  if (!online) {
-    return {
-      synced: 0,
-      failed: 0,
-      remaining: await countPendingOfflineReports(userUid),
-      skippedDuplicates: 0,
-    };
-  }
-
+  // Take the lock before the first await. Reconnecting fires several NetInfo events back to back,
+  // and setting it after checkIsOnline() let each of them pass the check above and upload the
+  // same drafts in parallel.
   syncInFlight = true;
   let synced = 0;
   let failed = 0;
   let skippedDuplicates = 0;
 
   try {
+    if (!(await checkIsOnline())) {
+      return {
+        synced: 0,
+        failed: 0,
+        remaining: await countPendingOfflineReports(userUid),
+        skippedDuplicates: 0,
+      };
+    }
+
     const pending = await listPendingOfflineReports(userUid);
     const alreadySynced = new Set(await getSyncedIds());
 
@@ -111,7 +113,10 @@ export async function syncPendingOfflineReports(userUid: string): Promise<SyncRe
           continue;
         }
 
-        await markOfflineReportSyncing(draft.id);
+        // Skip drafts another sync pass has already claimed.
+        if (!(await markOfflineReportSyncing(draft.id))) {
+          continue;
+        }
         const payload = parseOfflinePayload(draft.payloadJson);
         await submitReport({
           ...payload,

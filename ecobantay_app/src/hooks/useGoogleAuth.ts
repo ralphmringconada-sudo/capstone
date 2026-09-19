@@ -87,6 +87,15 @@ export function useGoogleAuth() {
         const { GoogleSignin, isErrorWithCode, isSuccessResponse, statusCodes } = native;
         try {
           await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+
+          /*
+           * Account chooser: the native SDK keeps its own session, so a previous sign-in would be
+           * reused silently and the picker never shown. Clearing it first makes every attempt an
+           * explicit account choice. signOut only drops the cached account; revokeAccess is avoided
+           * because it would also discard consent and force the permission screen each time.
+           */
+          await GoogleSignin.signOut().catch(() => undefined);
+
           const result = await GoogleSignin.signIn();
           if (!isSuccessResponse(result)) {
             return null;
