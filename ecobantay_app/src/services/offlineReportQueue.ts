@@ -149,12 +149,18 @@ export async function countPendingOfflineReports(userUid: string): Promise<numbe
   return row?.count ?? 0;
 }
 
-export async function markOfflineReportSyncing(id: string) {
+/**
+ * Claims a draft for upload. The status check and update happen in one statement, so only one
+ * caller can move a row out of pending/failed; returns false when another sync already owns it.
+ */
+export async function markOfflineReportSyncing(id: string): Promise<boolean> {
   const db = await getDb();
-  await db.runAsync(
-    `UPDATE offline_reports SET sync_status = 'syncing', last_error = NULL WHERE id = ?`,
+  const result = await db.runAsync(
+    `UPDATE offline_reports SET sync_status = 'syncing', last_error = NULL
+     WHERE id = ? AND sync_status IN ('pending', 'failed')`,
     id,
   );
+  return result.changes === 1;
 }
 
 export async function markOfflineReportFailed(id: string, errorMessage: string) {

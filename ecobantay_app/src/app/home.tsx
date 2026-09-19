@@ -8,7 +8,6 @@ import { useAuth } from '@/context/AuthContext';
 import { fetchUserReports, formatReportDate } from '@/services/reportService';
 import { fetchEventsForHome } from '@/services/eventService';
 import { attachDisplayImagesToReports } from '@/services/reportImageService';
-import { countPendingOfflineReports, listPendingOfflineReports, type OfflineReportRow } from '@/services/offlineReportQueue';
 import { syncPendingOfflineReports } from '@/services/offlineReportSync';
 import { getReportStatusColors, USER_REPORT_TABS, type UserReportTabKey } from '@/utils/reportStatus';
 import {
@@ -68,9 +67,6 @@ export default function HomeScreen() {
   const [isLoadingReports, setIsLoadingReports] = useState(false);
   const [isLoadingEvents, setIsLoadingEvents] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
-  const [offlinePendingCount, setOfflinePendingCount] = useState(0);
-  const [offlineDrafts, setOfflineDrafts] = useState<OfflineReportRow[]>([]);
-  const [showOfflineDetails, setShowOfflineDetails] = useState(false);
   const [showTopLoading, setShowTopLoading] = useState(false);
   const topLoadingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -175,22 +171,6 @@ export default function HomeScreen() {
     }
   }, [user?.uid]);
 
-  const loadOfflinePending = useCallback(async () => {
-    if (!user?.uid) {
-      setOfflinePendingCount(0);
-      setOfflineDrafts([]);
-      return;
-    }
-    try {
-      const drafts = await listPendingOfflineReports(user.uid);
-      setOfflineDrafts(drafts);
-      setOfflinePendingCount(drafts.length || (await countPendingOfflineReports(user.uid)));
-    } catch {
-      setOfflinePendingCount(0);
-      setOfflineDrafts([]);
-    }
-  }, [user?.uid]);
-
   // `silent` is for background refreshes (the poll, pull-to-refresh): it skips the
   // loading flag so the panel doesn't flash a spinner, and leaves the existing list
   // in place if the fetch fails rather than blanking a list the user can see.
@@ -276,7 +256,6 @@ export default function HomeScreen() {
     useCallback(() => {
       loadReports();
       loadEvents();
-      loadOfflinePending();
       loadNotifications();
 
       // Keep the badge and the panel current without needing a tap. The interval is
@@ -286,7 +265,7 @@ export default function HomeScreen() {
       }, NOTIFICATION_POLL_MS);
 
       return () => clearInterval(pollId);
-    }, [loadReports, loadEvents, loadOfflinePending, loadNotifications]),
+    }, [loadReports, loadEvents, loadNotifications]),
   );
 
   const onRefresh = useCallback(async () => {
@@ -304,13 +283,12 @@ export default function HomeScreen() {
       await Promise.all([
         loadReports(),
         loadEvents(),
-        loadOfflinePending(),
         loadNotifications({ silent: true }),
       ]);
     } finally {
       setIsRefreshing(false);
     }
-  }, [loadReports, loadEvents, loadOfflinePending, loadNotifications, user?.uid]);
+  }, [loadReports, loadEvents, loadNotifications, user?.uid]);
 
   const filteredReports = reports.filter((report) => {
     const tab = USER_REPORT_TABS.find((item) => item.key === activeReportTab);
@@ -494,14 +472,6 @@ export default function HomeScreen() {
               </View>
             </View>
 
-            {offlinePendingCount > 0 ? (
-              <TouchableOpacity activeOpacity={0.85} onPress={() => setShowOfflineDetails(true)}>
-                <Text style={styles.offlineBanner}>
-                  {offlinePendingCount} offline report{offlinePendingCount === 1 ? '' : 's'} waiting to
-                  upload. Tap for sync status · pull down to sync when online.
-                </Text>
-              </TouchableOpacity>
-            ) : null}
           </View>
 
           <View style={styles.tabsSection}>
@@ -823,72 +793,6 @@ export default function HomeScreen() {
       </View>
 
       <Modal
-        visible={showOfflineDetails}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowOfflineDetails(false)}
-      >
-        {/* The backdrop is a sibling behind the card rather than its parent: a
-            ScrollView nested inside a TouchableOpacity competes with it for the
-            gesture responder on Android, which is what kept the list from dragging. */}
-        <View style={styles.modalRoot}>
-          <TouchableOpacity
-            style={styles.notificationBackdrop}
-            activeOpacity={1}
-            onPress={() => setShowOfflineDetails(false)}
-          />
-
-          <View style={styles.notificationCard}>
-            <View style={styles.notificationHeaderRow}>
-              <Text style={styles.notificationHeaderTitle}>Offline sync status</Text>
-            </View>
-
-            <ScrollView
-              style={styles.notificationScroll}
-              contentContainerStyle={styles.notificationScrollContent}
-              showsVerticalScrollIndicator
-            >
-              {offlineDrafts.length === 0 ? (
-                <Text style={styles.notificationEmpty}>No offline drafts.</Text>
-              ) : (
-                offlineDrafts.map((draft) => {
-                  let summary = 'Saved report';
-                  try {
-                    const payload = JSON.parse(draft.payloadJson) as { categoryName?: string };
-                    summary = payload.categoryName || summary;
-                  } catch {
-                    /* ignore */
-                  }
-                  return (
-                    <View key={draft.id} style={{ marginBottom: 12 }}>
-                      <Text style={styles.notificationTitle}>{summary}</Text>
-                      <Text style={styles.notificationDesc}>
-                        Status: {draft.syncStatus.toUpperCase()}
-                        {draft.lastError ? `\nError: ${draft.lastError}` : ''}
-                      </Text>
-                      <Text style={styles.notificationDesc}>
-                        Saved: {formatReportDate(draft.createdAt)}
-                      </Text>
-                    </View>
-                  );
-                })
-              )}
-            </ScrollView>
-
-            <TouchableOpacity
-              style={styles.notificationFooter}
-              onPress={async () => {
-                setShowOfflineDetails(false);
-                await onRefresh();
-              }}
-            >
-              <Text style={styles.notificationMarkAll}>Sync now</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
         visible={showNotifications}
         transparent
         animationType="fade"
@@ -1047,18 +951,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     includeFontPadding: false,
   },
-  offlineBanner: {
-    fontFamily: 'Montserrat-Semi-Bold',
-    fontSize: 11,
-    color: '#7a5a00',
-    backgroundColor: '#FFF0B8',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    marginTop: 10,
-    includeFontPadding: false,
-  },
-
   // Segmented Control Updated Styles
   segmentedControlWrapper: {
     backgroundColor: 'rgba(255, 255, 255, 0.5)',
@@ -1411,12 +1303,21 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginBottom: 10,
   },
-  notificationPillRow: { flexDirection: 'row', gap: 8 },
+  // Wrapping matters: a status label, a date, and "Tap to open" do not fit on one line inside
+  // the card, and the card clips its overflow, so without this the last pill is cut off.
+  notificationPillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 2,
+  },
   notificationPillNeutral: {
     backgroundColor: '#eeeeee',
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 6,
+    alignSelf: 'flex-start',
   },
   notificationPillNeutralText: {
     fontFamily: 'Montserrat-Semi-Bold',

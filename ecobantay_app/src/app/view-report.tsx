@@ -282,7 +282,6 @@ export default function ViewReportScreen() {
             {report.imageTimestamp ? (
               <Text style={styles.metaText}>Photo captured: {report.imageTimestamp}</Text>
             ) : null}
-            {report.imageLocation ? <Text style={styles.metaText}>{report.imageLocation}</Text> : null}
             <View style={[styles.statusBadge, getReportStatusColors(report.status)]}>
               <Text style={[styles.statusBadgeText, { color: getReportStatusColors(report.status).color }]}>
                 {report.status}
@@ -353,9 +352,6 @@ function EvidenceMetadata({ report }: { report: EcoReport }) {
     <View style={styles.evidenceMetadata}>
       <Text style={styles.evidenceMetadataText}>
         Captured: {report.imageTimestamp || 'Not recorded'}
-      </Text>
-      <Text style={styles.evidenceMetadataText}>
-        {report.imageLocation || report.location}
       </Text>
       {report.coordinates ? (
         <Text style={styles.evidenceMetadataText}>

@@ -15,9 +15,10 @@ import {
   Dimensions,
   Alert,
   ActivityIndicator,
+  Modal,
 } from 'react-native';
 import { Shadow } from 'react-native-shadow-2';
-import { useRouter, Stack } from 'expo-router';
+import { useRouter, Stack, useNavigation } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import * as ImageManipulator from 'expo-image-manipulator';
@@ -29,6 +30,13 @@ import {
   submitReport,
 } from '@/services/reportService';
 import { enqueueOfflineReport } from '@/services/offlineReportQueue';
+import {
+  deleteDraft,
+  getDraft,
+  getLatestDraftId,
+  saveDraft,
+  type ReportDraftData,
+} from '@/services/draftService';
 import {
   checkIsOnline,
   isLikelyOfflineError,
@@ -43,6 +51,8 @@ const ITEM_SIZE = 80;
 const CENTER_OFFSET = (CAROUSEL_WIDTH - ITEM_SIZE) / 2;
 const VALENCIA_CITY = 'Valencia, Negros Oriental';
 const MAX_PROOF_PHOTOS = 5;
+/* Evidence rule: proof photos taken further than this from the report pin are flagged before submission. */
+const PHOTO_LOCATION_TOLERANCE_METERS = 150;
 const DEFAULT_REGION = {
   latitude: 9.3167,
   longitude: 123.245,
@@ -58,12 +68,69 @@ const categories = [
   { id: 'other', name: 'Other', icon: require('@/assets/images/other.png') },
 ];
 
+
+/**
+ * Purpose: Measures the ground distance between the report pin and where a photo was taken.
+ * How it works: 1) converts both points to radians. 2) applies the haversine formula. 3) scales by Earth's radius.
+ * Technologies Used: TypeScript geographic math.
+ * Why this implementation: Haversine is accurate enough at report scale without pulling in a geo library.
+ */
+function distanceInMeters(a: ReportCoordinates, b: ReportCoordinates): number {
+  const EARTH_RADIUS_METERS = 6371000;
+  const toRadians = (value: number) => (value * Math.PI) / 180;
+  const deltaLat = toRadians(b.latitude - a.latitude);
+  const deltaLon = toRadians(b.longitude - a.longitude);
+  const h =
+    Math.sin(deltaLat / 2) ** 2 +
+    Math.cos(toRadians(a.latitude)) * Math.cos(toRadians(b.latitude)) * Math.sin(deltaLon / 2) ** 2;
+  return 2 * EARTH_RADIUS_METERS * Math.asin(Math.min(1, Math.sqrt(h)));
+}
+
+/**
+ * Purpose: Reads the GPS position stored inside a camera photo's EXIF metadata.
+ * How it works: 1) reads the GPS tags. 2) validates they are usable numbers. 3) applies S/W hemisphere refs.
+ * Technologies Used: Expo ImagePicker EXIF output, TypeScript.
+ * Why this implementation: EXIF is the photo's own record of where it was taken, so it is the strongest evidence
+ * that a capture matches the reported pin. It is absent on devices that do not tag photos, hence the null result.
+ */
+/**
+ * Purpose: Presents a distance in the unit that reads most naturally to the reporter.
+ * How it works: keeps short gaps in whole metres and switches to one-decimal kilometres past 1000 m.
+ * Technologies Used: TypeScript number formatting.
+ * Why this implementation: "1.4 km" communicates a mismatch faster than "1412 m".
+ */
+function formatDistance(meters: number): string {
+  if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
+  return `${Math.round(meters)} m`;
+}
+
+function readExifCoordinates(exif: Record<string, any> | null | undefined): ReportCoordinates | null {
+  if (!exif) return null;
+  const rawLat = Number(exif.GPSLatitude);
+  const rawLon = Number(exif.GPSLongitude);
+  if (!Number.isFinite(rawLat) || !Number.isFinite(rawLon)) return null;
+  if (rawLat === 0 && rawLon === 0) return null;
+
+  /* Hemisphere refs: EXIF stores magnitudes, so southern and western positions need the sign restored. */
+  const latRef = typeof exif.GPSLatitudeRef === 'string' ? exif.GPSLatitudeRef.toUpperCase() : '';
+  const lonRef = typeof exif.GPSLongitudeRef === 'string' ? exif.GPSLongitudeRef.toUpperCase() : '';
+  const latitude = latRef === 'S' ? -Math.abs(rawLat) : rawLat;
+  const longitude = lonRef === 'W' ? -Math.abs(rawLon) : rawLon;
+
+  if (Math.abs(latitude) > 90 || Math.abs(longitude) > 180) return null;
+  return { latitude, longitude };
+}
 /**
  * Purpose: Displays visible verification metadata on a captured proof image.
  * How it works: 1) renders capture time and address. 2) adds the fixed city. 3) includes GPS when available.
  * Technologies Used: React, React Native, TypeScript geographic data.
  * Why this implementation: A visible watermark lets reviewers verify when and where evidence was captured.
  */
+/** Serializes the draftable form so unsaved changes can be detected by comparison. */
+function buildReportSnapshot(data: ReportDraftData, uris: string[]): string {
+  return JSON.stringify({ data, uris });
+}
+
 function WatermarkOverlay({
   timestamp,
   locationInfo,
@@ -94,6 +161,7 @@ function WatermarkOverlay({
  */
 export default function CreateReportScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { user } = useAuth();
 
   /*
@@ -110,7 +178,14 @@ export default function CreateReportScreen() {
    * First photo timestamp is also used as the report-level imageTimestamp.
    */
   const [proofPhotos, setProofPhotos] = useState<
-    Array<{ previewUri: string; stampedUri: string; timestamp: string }>
+    Array<{
+      previewUri: string;
+      stampedUri: string;
+      timestamp: string;
+      /* Where the camera says the shot was taken, used to flag photos that do not match the pin. */
+      captureCoordinates: ReportCoordinates | null;
+      captureSource: 'exif' | 'device' | null;
+    }>
   >([]);
   /*
    * Workflow state: independent flags prevent duplicate submission, communicate
@@ -122,6 +197,15 @@ export default function CreateReportScreen() {
   const [locating, setLocating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hideCreatorName, setHideCreatorName] = useState(false);
+  /*
+   * Verification state: holds the pin-vs-photo distance that triggered the mismatch warning,
+   * so the modal can explain the gap and the reporter can still choose to continue.
+   */
+  const [locationMismatch, setLocationMismatch] = useState<{
+    distanceMeters: number;
+    photoCount: number;
+    source: 'exif' | 'device';
+  } | null>(null);
 
   const [categoryIndex, setCategoryIndex] = useState(2);
   const currentIndexRef = useRef(2);
@@ -316,9 +400,31 @@ export default function CreateReportScreen() {
       setImageProcessing(true);
       const timestamp = formatReportTimestamp();
       const stampedUri = await captureStampedImage(result.assets[0].uri);
+
+      /*
+       * Capture position: prefer the photo's own EXIF GPS, and fall back to a fresh device fix
+       * taken right after the shutter when the camera does not tag its images.
+       */
+      let captureCoordinates = readExifCoordinates(result.assets[0].exif);
+      let captureSource: 'exif' | 'device' | null = captureCoordinates ? 'exif' : null;
+      if (!captureCoordinates) {
+        try {
+          const atCapture = await Location.getCurrentPositionAsync({
+            accuracy: Location.Accuracy.Balanced,
+          });
+          captureCoordinates = {
+            latitude: atCapture.coords.latitude,
+            longitude: atCapture.coords.longitude,
+          };
+          captureSource = 'device';
+        } catch {
+          /* Error handling: an unavailable fix only means the photo cannot be cross-checked, not that it is invalid. */
+        }
+      }
+
       setProofPhotos((prev) => {
         if (prev.length >= MAX_PROOF_PHOTOS) return prev;
-        return [...prev, { previewUri: stampedUri, stampedUri, timestamp }];
+        return [...prev, { previewUri: stampedUri, stampedUri, timestamp, captureCoordinates, captureSource }];
       });
     } catch (processingError) {
       const message =
@@ -367,6 +473,32 @@ export default function CreateReportScreen() {
       setError(message);
       Alert.alert('Missing fields', message);
       return;
+    }
+
+    /*
+     * Evidence cross-check: compare the map pin against where each photo was actually taken.
+     * Photos with no recorded position are skipped, because an unverifiable photo is not a mismatch.
+     */
+    const checkedPhotos = proofPhotos.filter((photo) => photo.captureCoordinates);
+    if (checkedPhotos.length > 0) {
+      const distances = checkedPhotos.map((photo) =>
+        distanceInMeters(coordinates, photo.captureCoordinates as ReportCoordinates),
+      );
+      const farthest = Math.max(...distances);
+      const mismatchCount = distances.filter((meters) => meters > PHOTO_LOCATION_TOLERANCE_METERS).length;
+
+      if (mismatchCount > 0) {
+        /*
+         * Consequential state update: reject the submission. Evidence photos must be taken at the
+         * reported location, so the reporter has to fix the pin or retake the photos to continue.
+         */
+        setLocationMismatch({
+          distanceMeters: farthest,
+          photoCount: mismatchCount,
+          source: checkedPhotos.some((photo) => photo.captureSource === 'exif') ? 'exif' : 'device',
+        });
+        return;
+      }
     }
 
     finalizeSubmit();
@@ -433,7 +565,7 @@ export default function CreateReportScreen() {
           'Saved offline',
           'No internet connection. Your report was saved on this device and will upload to EcoBantay automatically when you are back online.',
         );
-        router.replace('/home');
+        await leaveAfterSubmit();
         return;
       }
 
@@ -446,7 +578,7 @@ export default function CreateReportScreen() {
             ? `\nAlso uploaded ${syncResult.synced} previously saved offline report(s).`
             : '';
         Alert.alert('Success', `Report submitted successfully with timestamped image proof.${syncNote}`);
-        router.replace('/home');
+        await leaveAfterSubmit();
       } catch (submitError) {
         // Network dropped mid-upload: keep the report on-device instead of losing it.
         if (isLikelyOfflineError(submitError)) {
@@ -455,7 +587,7 @@ export default function CreateReportScreen() {
             'Saved offline',
             'Upload failed because of a network problem. Your report was saved on this device and will sync when internet is restored.',
           );
-          router.replace('/home');
+          await leaveAfterSubmit();
           return;
         }
         throw submitError;
@@ -503,6 +635,174 @@ export default function CreateReportScreen() {
   const handleCategoryTap = (index: number) => {
     scrollViewRef.current?.scrollTo({ x: index * ITEM_SIZE, animated: true });
   };
+
+  /*
+   * Drafts: an unfinished report is kept on this device when the reporter leaves and chooses to
+   * save it, then restored the next time this screen opens. draftIdRef tracks the draft being
+   * edited so saving updates it, and baselineRef holds the form as last saved or restored so
+   * leaving only asks when something has actually changed.
+   */
+  const draftIdRef = useRef<string | null>(null);
+  const baselineRef = useRef<string | null>(null);
+  const leaveAllowedRef = useRef(false);
+
+  const draftData: ReportDraftData = {
+    categoryIndex,
+    barangay,
+    locationText,
+    description,
+    coordinates,
+    locationAccuracy,
+    hideCreatorName,
+    photos: proofPhotos.map((photo) => ({
+      timestamp: photo.timestamp,
+      captureCoordinates: photo.captureCoordinates,
+      captureSource: photo.captureSource,
+    })),
+  };
+  const draftImageUris = proofPhotos.map((photo) => photo.stampedUri);
+  const hasContent = Boolean(description.trim() || proofPhotos.length > 0 || coordinates);
+  const isDirty = hasContent && buildReportSnapshot(draftData, draftImageUris) !== baselineRef.current;
+
+  /* Draft restore: reopen the most recent saved draft so an unfinished report is never lost. */
+  useEffect(() => {
+    if (!user?.uid) return;
+    let cancelled = false;
+    (async () => {
+      const latestId = await getLatestDraftId(user.uid, 'report');
+      if (cancelled || !latestId) return;
+      const draft = await getDraft(latestId, user.uid, 'report');
+      if (cancelled || !draft) return;
+      const { data } = draft;
+      const index = Math.max(0, Math.min(categories.length - 1, data.categoryIndex));
+      const restoredPhotos = draft.imageUris.map((uri, photoIndex) => ({
+        previewUri: uri,
+        stampedUri: uri,
+        timestamp: data.photos[photoIndex]?.timestamp ?? '',
+        captureCoordinates: data.photos[photoIndex]?.captureCoordinates ?? null,
+        captureSource: data.photos[photoIndex]?.captureSource ?? null,
+      }));
+      setBarangay(data.barangay);
+      setLocationText(data.locationText);
+      setDescription(data.description);
+      setCoordinates(data.coordinates);
+      setLocationAccuracy(data.locationAccuracy);
+      setHideCreatorName(data.hideCreatorName);
+      setProofPhotos(restoredPhotos);
+      currentIndexRef.current = index;
+      setCategoryIndex(index);
+      setTimeout(() => scrollViewRef.current?.scrollTo({ x: index * ITEM_SIZE, animated: false }), 50);
+      draftIdRef.current = draft.id;
+      baselineRef.current = buildReportSnapshot(
+        {
+          ...data,
+          categoryIndex: index,
+          photos: restoredPhotos.map((photo) => ({
+            timestamp: photo.timestamp,
+            captureCoordinates: photo.captureCoordinates,
+            captureSource: photo.captureSource,
+          })),
+        },
+        draft.imageUris,
+      );
+    })().catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid]);
+
+  /**
+   * Purpose: Saves the current form as a draft on this device.
+   * How it works: 1) copies photos to durable storage. 2) upserts the draft row. 3) points the form at the saved copies.
+   * Technologies Used: expo-sqlite, expo-file-system, React state.
+   * Why this implementation: Drafts never leave the phone, so an unfinished report is not uploaded as evidence.
+   */
+  const handleSaveDraft = async (): Promise<boolean> => {
+    if (!user?.uid || !hasContent) return false;
+
+    try {
+      const category = categories[categoryIndex];
+      const snippet = description.trim().slice(0, 60);
+      const saved = await saveDraft({
+        id: draftIdRef.current,
+        userUid: user.uid,
+        type: 'report',
+        title: snippet ? `${category.name} — ${snippet}` : category.name,
+        data: draftData,
+        imageUris: draftImageUris,
+      });
+
+      draftIdRef.current = saved.id;
+      setProofPhotos((prev) =>
+        prev.map((photo, index) => ({
+          ...photo,
+          previewUri: saved.imageUris[index] ?? photo.previewUri,
+          stampedUri: saved.imageUris[index] ?? photo.stampedUri,
+        })),
+      );
+      baselineRef.current = buildReportSnapshot(draftData, saved.imageUris);
+      return true;
+    } catch (draftError) {
+      console.error('Saving report draft failed:', draftError);
+      Alert.alert('Draft not saved', 'Something went wrong while saving this draft. Please try again.');
+      return false;
+    }
+  };
+
+  /* After a successful submit or offline queueing the draft is finished, so remove it and leave. */
+  const leaveAfterSubmit = async () => {
+    if (draftIdRef.current) {
+      await deleteDraft(draftIdRef.current).catch(() => undefined);
+      draftIdRef.current = null;
+    }
+    leaveAllowedRef.current = true;
+    router.replace('/home');
+  };
+
+  /*
+   * Leave guard: back button, gesture, or header arrow with unsaved changes asks whether to save
+   * them as a draft. Refs give the listener the latest form without re-subscribing every render.
+   */
+  const isDirtyRef = useRef(isDirty);
+  isDirtyRef.current = isDirty;
+  const saveDraftRef = useRef(handleSaveDraft);
+  saveDraftRef.current = handleSaveDraft;
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (event) => {
+      if (leaveAllowedRef.current || !isDirtyRef.current) return;
+      event.preventDefault();
+      Alert.alert(
+        'Save as draft?',
+        'Keep this report on your phone so you can finish it later?',
+        [
+          {
+            text: "Don't save",
+            style: 'destructive',
+            onPress: async () => {
+              // Saying no clears any stored draft too, so nothing reappears unasked for.
+              if (draftIdRef.current) {
+                await deleteDraft(draftIdRef.current).catch(() => undefined);
+                draftIdRef.current = null;
+              }
+              leaveAllowedRef.current = true;
+              navigation.dispatch(event.data.action);
+            },
+          },
+          {
+            text: 'Save draft',
+            onPress: async () => {
+              if (await saveDraftRef.current()) {
+                leaveAllowedRef.current = true;
+                navigation.dispatch(event.data.action);
+              }
+            },
+          },
+        ],
+      );
+    });
+    return unsubscribe;
+  }, [navigation]);
 
   const isBusy = submitting || imageProcessing;
 
@@ -822,12 +1122,107 @@ export default function CreateReportScreen() {
         </ScrollView>
       </KeyboardAvoidingView>
 
+      {/*
+        Verification block: shown when a proof photo was taken far from the map pin.
+        The report cannot be submitted until the pin and photos agree.
+      */}
+      <Modal
+        visible={locationMismatch !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLocationMismatch(null)}
+      >
+        <View style={styles.warningBackdrop}>
+          <View style={styles.warningCard}>
+            <Image source={require('@/assets/images/warning_icon.png')} style={styles.warningIcon} />
+            <Text style={styles.warningTitle}>Report cannot be submitted</Text>
+            <Text style={styles.warningMessage}>
+              {locationMismatch
+                ? `${locationMismatch.photoCount} of your ${proofPhotos.length} proof photo${
+                    proofPhotos.length === 1 ? '' : 's'
+                  } ${locationMismatch.photoCount === 1 ? 'was' : 'were'} taken about ${formatDistance(
+                    locationMismatch.distanceMeters,
+                  )} away from the pin on the map.`
+                : ''}
+            </Text>
+            <Text style={styles.warningHint}>
+              {locationMismatch?.source === 'exif'
+                ? 'This comes from the photo\u2019s own GPS data. Move the pin to where the photo was taken, or retake the photos at the reported location, before submitting.'
+                : 'This comes from your device location when the photo was taken. Move the pin to where the photo was taken, or retake the photos at the reported location, before submitting.'}
+            </Text>
+
+            <TouchableOpacity
+              activeOpacity={0.8}
+              style={styles.warningPrimaryButton}
+              onPress={() => setLocationMismatch(null)}
+            >
+              <Text style={styles.warningPrimaryButtonText}>REVIEW LOCATION</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8f9fa' },
+  warningBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 28,
+  },
+  warningCard: {
+    width: '100%',
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 28,
+    alignItems: 'center',
+  },
+  warningIcon: { width: 40, height: 40, tintColor: '#c0392b', marginBottom: 14 },
+  warningTitle: {
+    fontFamily: 'Montserrat-Semi-Bold',
+    fontSize: 16,
+    color: '#1d1d1d',
+    textAlign: 'center',
+    marginBottom: 10,
+    includeFontPadding: false,
+  },
+  warningMessage: {
+    fontFamily: 'Montserrat-Regular',
+    fontSize: 13,
+    lineHeight: 19,
+    color: '#3d3d3d',
+    textAlign: 'center',
+    marginBottom: 8,
+    includeFontPadding: false,
+  },
+  warningHint: {
+    fontFamily: 'Montserrat-Regular',
+    fontSize: 12,
+    lineHeight: 18,
+    color: '#6b6b6b',
+    textAlign: 'center',
+    marginBottom: 22,
+    includeFontPadding: false,
+  },
+  warningPrimaryButton: {
+    width: '100%',
+    backgroundColor: '#3f5c2b',
+    borderRadius: 8,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  warningPrimaryButtonText: {
+    fontFamily: 'Montserrat-Semi-Bold',
+    fontSize: 13,
+    color: '#ffffff',
+    letterSpacing: 0.5,
+    includeFontPadding: false,
+  },
   topHeader: {
     backgroundColor: '#E1F0B9',
     flexDirection: 'row',
