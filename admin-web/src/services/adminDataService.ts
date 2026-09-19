@@ -638,20 +638,32 @@ export async function setAccountFlag(
  * Why this implementation: Privileged account deletion belongs on a trusted server, not in browser code.
  */
 export async function deleteAppUserAccount(token: string, userId: string) {
-  const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3001';
-  // Send the caller's fresh Firebase token so the backend can enforce administrative permissions.
-  const response = await fetch(`${apiUrl}/api/users/${userId}`, {
-    method: 'DELETE',
-    headers: {
-      Authorization: `Bearer ${token}`,
+  const response = await fetch(
+    'https://us-central1-ecobantay-18061.cloudfunctions.net/deleteUserAccount',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ userId }),
     },
-  });
+  );
 
-  // Normalize backend failure responses into exceptions handled by the account screen.
-  const data = await response.json();
+  const data = (await response.json().catch(() => ({}))) as {
+    ok?: boolean;
+    error?: string;
+    message?: string;
+  };
+
   if (!response.ok) {
-    throw new Error(data.error || 'Failed to delete user account.');
+    throw new Error(
+      data.error ||
+        data.message ||
+        `Failed to delete user account (${response.status}).`,
+    );
   }
+
   return data;
 }
 

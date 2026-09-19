@@ -312,6 +312,14 @@ export default function UsersScreen() {
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   const [isSendingReset, setIsSendingReset] = useState(false);
 
+  const [deleteTarget, setDeleteTarget] = useState<{
+    uid: string;
+    name: string;
+    role: string;
+  } | null>(null);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
+
   useEffect(() => {
     let isMounted = true;
 
@@ -615,31 +623,51 @@ export default function UsersScreen() {
    * Why this implementation: Server-authorized deletion protects privileged identity operations from browser misuse.
    */
   const handleDeleteUser = () => {
-    // Do not offer destructive behavior outside the established account-role boundary.
-    if (!selectedUser || !canManageSelected) return;
-    const uid = selectedUser[7];
+    // Only Super Admin can delete citizen and standard administrator accounts.
+    if (!selectedUser || !canManageSelected || isDeletingAccount) return;
 
-    Alert.alert("Delete Account", `Delete ${selectedUser[1]} permanently?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Delete",
-        style: "destructive",
-        onPress: async () => {
-          // Refresh the Firebase bearer token immediately before the protected API request.
-          try {
-            const token = await auth.currentUser?.getIdToken();
-            if (!token) throw new Error("You must be signed in.");
-            await deleteAppUserAccount(token, uid);
-            closeUserProfile();
-            await reload();
-            Alert.alert("Deleted", "Account deleted successfully.");
-          // Leave the profile available and surface backend authorization or deletion errors.
-          } catch (err) {
-            Alert.alert("Error", err instanceof Error ? err.message : "Failed to delete account.");
-          }
-        },
-      },
-    ]);
+    setDeleteError("");
+    setDeleteTarget({
+      uid: String(selectedUser[7]),
+      name: String(selectedUser[1] || "this account"),
+      role: String(selectedUser[4] || "User"),
+    });
+  };
+
+  const confirmDeleteUser = async () => {
+    if (!deleteTarget || !canManageSelected || isDeletingAccount) return;
+
+    setIsDeletingAccount(true);
+    setDeleteError("");
+
+    try {
+      // Force-refresh the token so the backend receives the latest Super Admin claims.
+      const currentUser = auth.currentUser;
+      if (!currentUser) {
+        throw new Error("You must be signed in as Super Admin.");
+      }
+
+      const token = await currentUser.getIdToken(true);
+      if (!token) {
+        throw new Error("Unable to verify your Super Admin session.");
+      }
+
+      await deleteAppUserAccount(token, deleteTarget.uid);
+
+      setDeleteTarget(null);
+      closeUserProfile();
+      await reload();
+
+      Alert.alert("Deleted", "Account deleted successfully.");
+    } catch (err) {
+      setDeleteError(
+        err instanceof Error
+          ? err.message
+          : "Failed to delete account. Please try again.",
+      );
+    } finally {
+      setIsDeletingAccount(false);
+    }
   };
 
   /**
@@ -1702,21 +1730,30 @@ export default function UsersScreen() {
                     </Text>
                   </View>
 
+                  <View style={styles.modalStatusCol}>
+                    <Text
+                      style={[
+                        styles.badge,
+                        styles.modalStatusBadge,
+                        statusColor(report.status),
+                        {
+                          fontSize: 14 * s,
+                          paddingHorizontal: 9 * s,
+                          paddingVertical: 5 * s,
+                        },
+                      ]}
+                    >
+                      {report.status}
+                    </Text>
+                  </View>
+
                   <Text
                     style={[
-                      styles.badge,
-                      statusColor(report.status),
-                      {
-                        fontSize: 14 * s,
-                        paddingHorizontal: 9 * s,
-                        paddingVertical: 5 * s,
-                      },
+                      styles.modalDate,
+                      styles.modalDateCol,
+                      { fontSize: 14 * s },
                     ]}
                   >
-                    {report.status}
-                  </Text>
-
-                  <Text style={[styles.modalDate, { fontSize: 14 * s }]}>
                     {submitted.date}
                   </Text>
                 </View>
@@ -1778,21 +1815,30 @@ export default function UsersScreen() {
                   </Text>
                 </View>
 
+                <View style={styles.modalStatusCol}>
+                  <Text
+                    style={[
+                      styles.badge,
+                      styles.modalStatusBadge,
+                      eventStatusColor(eventStatus),
+                      {
+                        fontSize: 13 * s,
+                        paddingHorizontal: 8 * s,
+                        paddingVertical: 5 * s,
+                      },
+                    ]}
+                  >
+                    {eventStatus}
+                  </Text>
+                </View>
+
                 <Text
                   style={[
-                    styles.badge,
-                    eventStatusColor(eventStatus),
-                    {
-                      fontSize: 13 * s,
-                      paddingHorizontal: 8 * s,
-                      paddingVertical: 5 * s,
-                    },
+                    styles.modalDate,
+                    styles.modalDateCol,
+                    { fontSize: 13 * s },
                   ]}
                 >
-                  {eventStatus}
-                </Text>
-
-                <Text style={[styles.modalDate, { fontSize: 13 * s }]}>
                   {getEventDisplayDate(event)}
                 </Text>
               </View>
@@ -1843,6 +1889,83 @@ export default function UsersScreen() {
     </View>
   </ScrollView>
 ) : null}
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          transparent
+          visible={Boolean(deleteTarget)}
+          animationType="fade"
+          onRequestClose={() => {
+            if (!isDeletingAccount) {
+              setDeleteTarget(null);
+              setDeleteError("");
+            }
+          }}
+        >
+          <View style={styles.deleteModalOverlay}>
+            <View style={styles.deleteModalCard}>
+              <View style={styles.deleteModalIcon}>
+                <X size={30 * s} color="#D83030" />
+              </View>
+
+              <Text style={[styles.deleteModalTitle, { fontSize: 21 * s }]}>
+                Delete Account?
+              </Text>
+
+              <Text style={[styles.deleteModalMessage, { fontSize: 14 * s }]}>
+                {deleteTarget
+                  ? `Are you sure you want to permanently delete ${deleteTarget.name}?`
+                  : "Are you sure you want to permanently delete this account?"}
+              </Text>
+
+              <Text style={[styles.deleteModalWarning, { fontSize: 12 * s }]}>
+                This removes the account from EcoBantay and cannot be undone.
+              </Text>
+
+              {deleteError ? (
+                <View style={styles.deleteErrorBox}>
+                  <Text style={[styles.deleteErrorText, { fontSize: 12 * s }]}>
+                    {deleteError}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={styles.deleteModalActions}>
+                <TouchableOpacity
+                  disabled={isDeletingAccount}
+                  style={[
+                    styles.deleteCancelButton,
+                    isDeletingAccount && styles.deleteButtonDisabled,
+                  ]}
+                  onPress={() => {
+                    setDeleteTarget(null);
+                    setDeleteError("");
+                  }}
+                >
+                  <Text style={[styles.deleteCancelText, { fontSize: 14 * s }]}>
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  disabled={isDeletingAccount}
+                  style={[
+                    styles.deleteConfirmButton,
+                    isDeletingAccount && styles.deleteButtonDisabled,
+                  ]}
+                  onPress={() => void confirmDeleteUser()}
+                >
+                  {isDeletingAccount ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={[styles.deleteConfirmText, { fontSize: 14 * s }]}>
+                      Delete Account
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </View>
           </View>
         </Modal>
@@ -2788,8 +2911,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     flexWrap: "wrap",
     justifyContent: "center",
-    gap: 8,
+    alignItems: "center",
+    gap: 12,
     marginTop: 10,
+    marginBottom: 2,
   },
 
   activeBadge: {
@@ -2880,9 +3005,28 @@ const styles = StyleSheet.create({
     color: "#000",
   },
 
+  modalStatusCol: {
+    width: 112,
+    flexShrink: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 8,
+  },
+
+  modalStatusBadge: {
+    alignSelf: "center",
+  },
+
   modalDate: {
     fontFamily: "Montserrat_700Bold",
     color: "#000",
+  },
+
+  modalDateCol: {
+    width: 96,
+    flexShrink: 0,
+    textAlign: "right",
+    paddingLeft: 8,
   },
 
   modalActions: {
@@ -2920,6 +3064,121 @@ const styles = StyleSheet.create({
   flagUserText: {
     fontFamily: "Montserrat_700Bold",
     color: "#FF3B3B",
+  },
+
+  deleteModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(16, 20, 16, 0.5)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+
+  deleteModalCard: {
+    width: "92%",
+    maxWidth: 430,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 26,
+    alignItems: "center",
+    shadowColor: "#000000",
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
+  },
+
+  deleteModalIcon: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: "#FFE7E7",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+
+  deleteModalTitle: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#8F2020",
+    textAlign: "center",
+  },
+
+  deleteModalMessage: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#333333",
+    textAlign: "center",
+    lineHeight: 21,
+    marginTop: 10,
+  },
+
+  deleteModalWarning: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#777777",
+    textAlign: "center",
+    lineHeight: 18,
+    marginTop: 8,
+  },
+
+  deleteErrorBox: {
+    width: "100%",
+    marginTop: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#F0BBBB",
+    backgroundColor: "#FFF3F3",
+  },
+
+  deleteErrorText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#A32828",
+    textAlign: "center",
+  },
+
+  deleteModalActions: {
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+    marginTop: 22,
+  },
+
+  deleteCancelButton: {
+    minWidth: 100,
+    height: 40,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: "#CDD4CC",
+    borderRadius: 7,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+
+  deleteCancelText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#4B554B",
+  },
+
+  deleteConfirmButton: {
+    minWidth: 145,
+    height: 40,
+    paddingHorizontal: 16,
+    borderRadius: 7,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#D83030",
+  },
+
+  deleteConfirmText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#FFFFFF",
+  },
+
+  deleteButtonDisabled: {
+    opacity: 0.6,
   },
 
   addAdminModal: {

@@ -201,4 +201,311 @@ exports.issueGoogleLinkToken = functions.https.onRequest(async (req, res) => {
     console.error('issueGoogleLinkToken failed', error);
     res.status(500).json({ error: 'Unable to complete Google sign-in for this email.' });
   }
+
+  
 });
+
+exports.deleteUserAccount = functions.https.onRequest(async (req, res) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.set(
+    'Access-Control-Allow-Headers',
+    'Authorization, Content-Type',
+  );
+
+  // Handle browser preflight request.
+  if (req.method === 'OPTIONS') {
+    res.status(204).send('');
+    return;
+  }
+
+  // Delete requests from the admin web use POST.
+  if (req.method !== 'POST') {
+    res.status(405).json({
+      error: 'Method not allowed.',
+    });
+    return;
+  }
+
+  try {
+    // ---------------------------------------------------------
+    // 1. Get and verify the Firebase ID token.
+    // ---------------------------------------------------------
+    const authorization = String(
+      req.headers.authorization || '',
+    );
+
+    const match = authorization.match(
+      /^Bearer\s+(.+)$/i,
+    );
+
+    if (!match) {
+      res.status(401).json({
+        error: 'Missing authorization token.',
+      });
+      return;
+    }
+
+    const decoded = await admin
+      .auth()
+      .verifyIdToken(match[1], true);
+
+    const db = admin.firestore();
+
+    // ---------------------------------------------------------
+    // 2. Verify that the caller is a Super Admin.
+    // ---------------------------------------------------------
+    const actorRef = db
+      .collection('admins')
+      .doc(decoded.uid);
+
+    const actorSnap = await actorRef.get();
+
+    if (!actorSnap.exists) {
+      res.status(403).json({
+        error: 'Administrator profile not found.',
+      });
+      return;
+    }
+
+    const actor = actorSnap.data() || {};
+
+    if (actor.role !== 'super_admin') {
+      res.status(403).json({
+        error:
+          'Only the Super Admin can delete accounts.',
+      });
+      return;
+    }
+
+    // ---------------------------------------------------------
+    // 3. Read the target account UID.
+    // ---------------------------------------------------------
+    let body = req.body;
+
+    if (typeof body === 'string') {
+      try {
+        body = JSON.parse(body);
+      } catch {
+        body = {};
+      }
+    }
+
+    const userId = String(
+      body?.userId || '',
+    ).trim();
+
+    if (!userId) {
+      res.status(400).json({
+        error: 'User ID is required.',
+      });
+      return;
+    }
+
+    // Prevent the signed-in Super Admin from deleting themself.
+    if (userId === decoded.uid) {
+      res.status(400).json({
+        error:
+          'You cannot delete your own Super Admin account.',
+      });
+      return;
+    }
+
+    // ---------------------------------------------------------
+    // 4. Check whether it is a citizen or admin account.
+    // ---------------------------------------------------------
+    const userRef = db
+      .collection('users')
+      .doc(userId);
+
+    const adminRef = db
+      .collection('admins')
+      .doc(userId);
+
+    const [userSnap, adminSnap] =
+      await Promise.all([
+        userRef.get(),
+        adminRef.get(),
+      ]);
+
+    if (
+      !userSnap.exists &&
+      !adminSnap.exists
+    ) {
+      res.status(404).json({
+        error: 'Account not found.',
+      });
+      return;
+    }
+
+    const accountType = adminSnap.exists
+      ? 'admin'
+      : 'user';
+
+    const targetData = adminSnap.exists
+      ? adminSnap.data() || {}
+      : userSnap.data() || {};
+
+    // Never allow another Super Admin account to be deleted.
+    if (
+      accountType === 'admin' &&
+      targetData.role === 'super_admin'
+    ) {
+      res.status(403).json({
+        error:
+          'The Super Admin account cannot be deleted.',
+      });
+      return;
+    }
+
+    // ---------------------------------------------------------
+    // 5. Build a readable name for the audit log.
+    // ---------------------------------------------------------
+    const targetName =
+      accountType === 'admin'
+        ? String(
+            targetData.fullName ||
+              targetData.email ||
+              userId,
+          )
+        : `${String(
+            targetData.firstName || '',
+          ).trim()} ${String(
+            targetData.lastName || '',
+          ).trim()}`
+            .trim() ||
+          String(
+            targetData.email || userId,
+          );
+
+    // ---------------------------------------------------------
+    // 6. Delete the account from Firebase Authentication.
+    // ---------------------------------------------------------
+    try {
+      await admin
+        .auth()
+        .deleteUser(userId);
+    } catch (error) {
+      // Continue if the Authentication account
+      // was already removed.
+      if (
+        error?.code !==
+        'auth/user-not-found'
+      ) {
+        throw error;
+      }
+    }
+
+    // ---------------------------------------------------------
+    // 7. Delete the Firestore account.
+    // ---------------------------------------------------------
+    const batch = db.batch();
+
+    // Citizen account.
+    if (userSnap.exists) {
+      batch.delete(userRef);
+    }
+
+    // Administrator account.
+    if (adminSnap.exists) {
+      batch.delete(adminRef);
+
+      // Remove the administrator username lookup document.
+      const username = String(
+        targetData.username || '',
+      )
+        .trim()
+        .toLowerCase()
+        .replace(/^@+/, '');
+
+      if (username) {
+        const usernameRef = db
+          .collection('admin_usernames')
+          .doc(username);
+
+        batch.delete(usernameRef);
+      }
+    }
+
+    // ---------------------------------------------------------
+    // 8. Record the deletion in admin activity history.
+    // ---------------------------------------------------------
+    const activityRef = db
+      .collection('admin_activity_logs')
+      .doc();
+
+    batch.set(activityRef, {
+      adminUid: decoded.uid,
+
+      adminName: String(
+        actor.fullName ||
+          actor.email ||
+          decoded.email ||
+          'Super Admin',
+      ),
+
+      action:
+        accountType === 'admin'
+          ? 'Deleted Admin Account'
+          : 'Deleted User Account',
+
+      module: 'Users',
+
+      recordId: userId,
+
+      details:
+        `Permanently deleted ${accountType} account "${targetName}"`,
+
+      createdAt: new Date().toISOString(),
+
+      deletedAccountType: accountType,
+
+      deletedAccountName: targetName,
+
+      deletedAccountEmail: String(
+        targetData.email || '',
+      ),
+    });
+
+    await batch.commit();
+
+    // ---------------------------------------------------------
+    // 9. Return success to the admin dashboard.
+    // ---------------------------------------------------------
+    res.status(200).json({
+      ok: true,
+      userId,
+      accountType,
+      message:
+        'Account deleted successfully.',
+    });
+  } catch (error) {
+    console.error(
+      'deleteUserAccount failed:',
+      error,
+    );
+
+    const code = String(
+      error?.code || '',
+    );
+
+    if (
+      code.includes('id-token') ||
+      code === 'auth/id-token-revoked'
+    ) {
+      res.status(401).json({
+        error:
+          'Invalid or expired administrator session.',
+      });
+      return;
+    }
+
+    res.status(500).json({
+      error:
+        error instanceof Error
+          ? error.message
+          : 'Failed to delete account.',
+    });
+  }
+});
+
