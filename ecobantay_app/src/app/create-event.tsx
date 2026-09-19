@@ -18,12 +18,19 @@ import {
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Shadow } from 'react-native-shadow-2';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, useNavigation, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import MapView, { Marker, type MapPressEvent, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useAuth } from '@/context/AuthContext';
 import { submitEvent } from '@/services/eventService';
+import {
+  deleteDraft,
+  getDraft,
+  getLatestDraftId,
+  saveDraft,
+  type EventDraftData,
+} from '@/services/draftService';
 import type { EventCoordinates } from '@/types/event';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -40,11 +47,11 @@ const DEFAULT_REGION = {
 };
 
 const categories = [
-  { name: 'Clean-up', icon: require('@/assets/images/calendar_icon.png') },
-  { name: 'Tree Planting', icon: require('@/assets/images/information_icon.png') },
-  { name: 'Seminar', icon: require('@/assets/images/warning_icon.png') },
-  { name: 'Rehabilitation', icon: require('@/assets/images/location_icon.png') },
-  { name: 'Collection', icon: require('@/assets/images/settings_icon.png') },
+  { name: 'Clean-up', icon: require('@/assets/images/cleanup_icon.png') },
+  { name: 'Tree Planting', icon: require('@/assets/images/tree_planting_icon.png') },
+  { name: 'Seminar', icon: require('@/assets/images/seminar_icon.png') },
+  { name: 'Rehabilitation', icon: require('@/assets/images/rehabilitation_icon.png') },
+  { name: 'Collection', icon: require('@/assets/images/collection_icon.png') },
 ];
 
 function formatDisplayDate(date: Date): string {
@@ -63,8 +70,14 @@ function formatDisplayTime(date: Date): string {
   });
 }
 
+/** Serializes the draftable form so unsaved changes can be detected by comparison. */
+function buildEventSnapshot(data: EventDraftData, uris: string[]): string {
+  return JSON.stringify({ data, uris });
+}
+
 export default function CreateEventScreen() {
   const router = useRouter();
+  const navigation = useNavigation();
   const { user } = useAuth();
 
   const [barangay, setBarangay] = useState('');
@@ -109,6 +122,7 @@ export default function CreateEventScreen() {
   }, [scrollX]);
 
   useEffect(() => {
+    // A restored draft brings its own pin, so don't overwrite one that is already set.
     (async () => {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') return;
@@ -117,10 +131,157 @@ export default function CreateEventScreen() {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
       };
+      if (draftIdRef.current) return;
       setCoordinates(next);
       await updateAddressForCoords(next);
     })().catch(() => undefined);
+    // updateAddressForCoords only uses state setters; this should run once per screen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /*
+   * Drafts: an unfinished event is kept on this device when the organizer leaves and chooses to
+   * save it, then restored the next time this screen opens. draftIdRef tracks the draft being
+   * edited so saving updates it, and baselineRef holds the form as last saved or restored so
+   * leaving only asks when something has actually changed.
+   */
+  const draftIdRef = useRef<string | null>(null);
+  const baselineRef = useRef<string | null>(null);
+  const leaveAllowedRef = useRef(false);
+
+  const draftData: EventDraftData = {
+    categoryIndex,
+    barangay,
+    locationText,
+    title,
+    description,
+    capacity,
+    hideParticipants,
+    coordinates,
+    eventDateIso: eventDate.toISOString(),
+    eventTimeIso: eventTime.toISOString(),
+  };
+  // Location fields fill in automatically from GPS, so they alone don't count as user content.
+  const hasContent = Boolean(
+    title.trim() || description.trim() || imageUris.length > 0 || capacity !== '50',
+  );
+  const isDirty = hasContent && buildEventSnapshot(draftData, imageUris) !== baselineRef.current;
+
+  /* Draft restore: reopen the most recent saved draft so an unfinished event is never lost. */
+  useEffect(() => {
+    if (!user?.uid) return;
+    let cancelled = false;
+    (async () => {
+      const latestId = await getLatestDraftId(user.uid, 'event');
+      if (cancelled || !latestId) return;
+      const draft = await getDraft(latestId, user.uid, 'event');
+      if (cancelled || !draft) return;
+      const { data } = draft;
+      const index = Math.max(0, Math.min(categories.length - 1, data.categoryIndex));
+      const restoredDate = new Date(data.eventDateIso);
+      const restoredTime = new Date(data.eventTimeIso);
+      setBarangay(data.barangay);
+      setLocationText(data.locationText);
+      setTitle(data.title);
+      setDescription(data.description);
+      setCapacity(data.capacity);
+      setHideParticipants(data.hideParticipants);
+      setCoordinates(data.coordinates);
+      setEventDate(restoredDate);
+      setEventTime(restoredTime);
+      setImageUris(draft.imageUris);
+      currentIndexRef.current = index;
+      setCategoryIndex(index);
+      setTimeout(() => scrollViewRef.current?.scrollTo({ x: index * ITEM_SIZE, animated: false }), 50);
+      draftIdRef.current = draft.id;
+      baselineRef.current = buildEventSnapshot(
+        {
+          ...data,
+          categoryIndex: index,
+          eventDateIso: restoredDate.toISOString(),
+          eventTimeIso: restoredTime.toISOString(),
+        },
+        draft.imageUris,
+      );
+    })().catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid]);
+
+  /**
+   * Purpose: Saves the current form as a draft on this device.
+   * How it works: 1) copies photos to durable storage. 2) upserts the draft row. 3) points the form at the saved copies.
+   * Technologies Used: expo-sqlite, expo-file-system, React state.
+   */
+  const handleSaveDraft = async (): Promise<boolean> => {
+    if (!user?.uid || !hasContent) return false;
+
+    try {
+      const saved = await saveDraft({
+        id: draftIdRef.current,
+        userUid: user.uid,
+        type: 'event',
+        title: title.trim() || categories[categoryIndex].name,
+        data: draftData,
+        imageUris,
+      });
+
+      draftIdRef.current = saved.id;
+      setImageUris(saved.imageUris);
+      baselineRef.current = buildEventSnapshot(draftData, saved.imageUris);
+      return true;
+    } catch (draftError) {
+      console.error('Saving event draft failed:', draftError);
+      Alert.alert('Draft not saved', 'Something went wrong while saving this draft. Please try again.');
+      return false;
+    }
+  };
+
+  /*
+   * Leave guard: back button, gesture, or header arrow with unsaved changes asks whether to save
+   * them as a draft. Refs give the listener the latest form without re-subscribing every render.
+   */
+  const isDirtyRef = useRef(isDirty);
+  isDirtyRef.current = isDirty;
+  const saveDraftRef = useRef(handleSaveDraft);
+  saveDraftRef.current = handleSaveDraft;
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (event) => {
+      if (leaveAllowedRef.current || !isDirtyRef.current) return;
+      event.preventDefault();
+      Alert.alert(
+        'Save as draft?',
+        'Keep this event on your phone so you can finish it later?',
+        [
+          {
+            text: "Don't save",
+            style: 'destructive',
+            onPress: async () => {
+              // Saying no clears any stored draft too, so nothing reappears unasked for.
+              if (draftIdRef.current) {
+                await deleteDraft(draftIdRef.current).catch(() => undefined);
+                draftIdRef.current = null;
+              }
+              leaveAllowedRef.current = true;
+              navigation.dispatch(event.data.action);
+            },
+          },
+          {
+            text: 'Save draft',
+            onPress: async () => {
+              if (await saveDraftRef.current()) {
+                leaveAllowedRef.current = true;
+                navigation.dispatch(event.data.action);
+              }
+            },
+          },
+        ],
+      );
+    });
+    return unsubscribe;
+  }, [navigation]);
 
   const region = coordinates
     ? {
@@ -220,6 +381,12 @@ export default function CreateEventScreen() {
           email: user.email || '',
         },
       });
+      // The event is submitted, so its draft is finished and leaving no longer needs a prompt.
+      if (draftIdRef.current) {
+        await deleteDraft(draftIdRef.current).catch(() => undefined);
+        draftIdRef.current = null;
+      }
+      leaveAllowedRef.current = true;
       Alert.alert('Event created', 'Waiting for admin approval.', [
         {
           text: 'OK',
@@ -488,8 +655,12 @@ export default function CreateEventScreen() {
                   <TouchableOpacity
                     style={styles.eventPhotoRemove}
                     onPress={() => removeEventPhoto(index)}
+                    hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
                   >
-                    <Text style={styles.eventPhotoRemoveText}>×</Text>
+                    <Image
+                      source={require('@/assets/images/back_arrow.png')}
+                      style={styles.eventPhotoRemoveIcon}
+                    />
                   </TouchableOpacity>
                 </View>
               ))}
@@ -740,24 +911,28 @@ const styles = StyleSheet.create({
   photoPreview: { width: 36, height: 36, borderRadius: 6 },
   photoButtonDisabled: { opacity: 0.55 },
   eventPhotosRow: { gap: 10, paddingBottom: 12, marginBottom: 8 },
-  eventPhotoCard: { width: 88, height: 88, position: 'relative' },
-  eventPhotoThumb: { width: 88, height: 88, borderRadius: 8, backgroundColor: '#d9d9d9' },
+  eventPhotoCard: {
+    width: 88,
+    height: 88,
+    borderRadius: 8,
+    overflow: 'hidden',
+    position: 'relative',
+    backgroundColor: '#d9d9d9',
+  },
+  eventPhotoThumb: { width: 88, height: 88 },
   eventPhotoRemove: {
     position: 'absolute',
-    top: -6,
-    right: -6,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#3B703C',
-    alignItems: 'center',
-    justifyContent: 'center',
+    top: 4,
+    right: 4,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 14,
+    padding: 5,
   },
-  eventPhotoRemoveText: {
-    color: '#ffffff',
-    fontSize: 16,
-    fontFamily: 'Montserrat-Bold',
-    lineHeight: 18,
+  eventPhotoRemoveIcon: {
+    width: 12,
+    height: 12,
+    tintColor: '#ffffff',
+    transform: [{ rotate: '45deg' }],
   },
   photoStackIconBase: {
     position: 'absolute',

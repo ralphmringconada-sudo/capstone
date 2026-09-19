@@ -38,11 +38,11 @@ const DEFAULT_REGION = {
 };
 
 const categories = [
-  { name: 'Clean-up', icon: require('@/assets/images/calendar_icon.png') },
-  { name: 'Tree Planting', icon: require('@/assets/images/information_icon.png') },
-  { name: 'Seminar', icon: require('@/assets/images/warning_icon.png') },
-  { name: 'Rehabilitation', icon: require('@/assets/images/location_icon.png') },
-  { name: 'Collection', icon: require('@/assets/images/settings_icon.png') },
+  { name: 'Clean-up', icon: require('@/assets/images/cleanup_icon.png') },
+  { name: 'Tree Planting', icon: require('@/assets/images/tree_planting_icon.png') },
+  { name: 'Seminar', icon: require('@/assets/images/seminar_icon.png') },
+  { name: 'Rehabilitation', icon: require('@/assets/images/rehabilitation_icon.png') },
+  { name: 'Collection', icon: require('@/assets/images/collection_icon.png') },
 ];
 
 function formatDisplayDate(date: Date): string {
