@@ -319,6 +319,19 @@ export default function UsersScreen() {
   } | null>(null);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+  const [deleteSuccess, setDeleteSuccess] = useState<{
+    name: string;
+    role: string;
+  } | null>(null);
+
+  const [flagTarget, setFlagTarget] = useState<{
+    uid: string;
+    name: string;
+    role: string;
+    currentlyFlagged: boolean;
+  } | null>(null);
+  const [isUpdatingFlag, setIsUpdatingFlag] = useState(false);
+  const [flagError, setFlagError] = useState("");
 
   useEffect(() => {
     let isMounted = true;
@@ -654,11 +667,16 @@ export default function UsersScreen() {
 
       await deleteAppUserAccount(token, deleteTarget.uid);
 
+      const deletedAccount = {
+        name: deleteTarget.name,
+        role: deleteTarget.role,
+      };
+
       setDeleteTarget(null);
       closeUserProfile();
       await reload();
 
-      Alert.alert("Deleted", "Account deleted successfully.");
+      setDeleteSuccess(deletedAccount);
     } catch (err) {
       setDeleteError(
         err instanceof Error
@@ -853,8 +871,9 @@ export default function UsersScreen() {
    * Technologies Used: React Context, role checks, Cloud Firestore services, and React Native alerts.
    * Why this implementation: Persisted, audited flags remain visible and attributable across sessions.
    */
-  const toggleFlagUser = async (userId: string, role: string) => {
-    if (!admin) return;
+  const toggleFlagUser = (userId: string, role: string) => {
+    if (!admin || isUpdatingFlag) return;
+
     // Standard admins may flag citizens; only super admins may flag standard administrators.
     const canFlag = role === "User" || (isSuperAdmin && role === "Admin");
     if (!canFlag) {
@@ -862,18 +881,41 @@ export default function UsersScreen() {
       return;
     }
 
-    // Persist the new flag and its audit metadata before refreshing the visible account list.
+    const account = tableUsers.find((user) => user[7] === userId);
+
+    setFlagError("");
+    setFlagTarget({
+      uid: userId,
+      name: String(account?.[1] || "this account"),
+      role,
+      currentlyFlagged: flaggedUserIds.has(userId),
+    });
+  };
+
+  const confirmFlagUser = async () => {
+    if (!admin || !flagTarget || isUpdatingFlag) return;
+
+    setIsUpdatingFlag(true);
+    setFlagError("");
+
     try {
       await setAccountFlag(
-        userId,
-        role === "Admin" ? "admin" : "user",
-        !flaggedUserIds.has(userId),
+        flagTarget.uid,
+        flagTarget.role === "Admin" ? "admin" : "user",
+        !flagTarget.currentlyFlagged,
         admin,
       );
+
       await reload();
-    // Report Firestore or permission failures without changing the local flag representation.
+      setFlagTarget(null);
     } catch (error) {
-      Alert.alert("Error", error instanceof Error ? error.message : "Failed to update account flag.");
+      setFlagError(
+        error instanceof Error
+          ? error.message
+          : "Failed to update account flag.",
+      );
+    } finally {
+      setIsUpdatingFlag(false);
     }
   };
 
@@ -1895,6 +1937,104 @@ export default function UsersScreen() {
 
         <Modal
           transparent
+          visible={Boolean(flagTarget)}
+          animationType="fade"
+          onRequestClose={() => {
+            if (!isUpdatingFlag) {
+              setFlagTarget(null);
+              setFlagError("");
+            }
+          }}
+        >
+          <View style={styles.flagModalOverlay}>
+            <View style={styles.flagModalCard}>
+              <View
+                style={[
+                  styles.flagModalIcon,
+                  flagTarget?.currentlyFlagged && styles.unflagModalIcon,
+                ]}
+              >
+                <Flag
+                  size={30 * s}
+                  color={flagTarget?.currentlyFlagged ? "#34733B" : "#D83030"}
+                />
+              </View>
+
+              <Text
+                style={[
+                  styles.flagModalTitle,
+                  {
+                    fontSize: 21 * s,
+                    color: flagTarget?.currentlyFlagged ? "#34733B" : "#8F2020",
+                  },
+                ]}
+              >
+                {flagTarget?.currentlyFlagged ? "Unflag Account?" : "Flag Account?"}
+              </Text>
+
+              <Text style={[styles.flagModalMessage, { fontSize: 14 * s }]}>
+                {flagTarget
+                  ? flagTarget.currentlyFlagged
+                    ? `Are you sure you want to remove the flag from ${flagTarget.name}?`
+                    : `Are you sure you want to flag ${flagTarget.name}?`
+                  : "Are you sure you want to update this account flag?"}
+              </Text>
+
+              <Text style={[styles.flagModalHint, { fontSize: 12 * s }]}>
+                {flagTarget?.currentlyFlagged
+                  ? "This account will no longer appear under the Flagged filter."
+                  : "This account will be marked for attention and appear under the Flagged filter."}
+              </Text>
+
+              {flagError ? (
+                <View style={styles.flagErrorBox}>
+                  <Text style={[styles.flagErrorText, { fontSize: 12 * s }]}>
+                    {flagError}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={styles.flagModalActions}>
+                <TouchableOpacity
+                  disabled={isUpdatingFlag}
+                  style={[
+                    styles.flagCancelButton,
+                    isUpdatingFlag && styles.deleteButtonDisabled,
+                  ]}
+                  onPress={() => {
+                    setFlagTarget(null);
+                    setFlagError("");
+                  }}
+                >
+                  <Text style={[styles.flagCancelText, { fontSize: 14 * s }]}>
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  disabled={isUpdatingFlag}
+                  style={[
+                    styles.flagConfirmButton,
+                    flagTarget?.currentlyFlagged && styles.unflagConfirmButton,
+                    isUpdatingFlag && styles.deleteButtonDisabled,
+                  ]}
+                  onPress={() => void confirmFlagUser()}
+                >
+                  {isUpdatingFlag ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={[styles.flagConfirmText, { fontSize: 14 * s }]}>
+                      {flagTarget?.currentlyFlagged ? "Unflag Account" : "Flag Account"}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          transparent
           visible={Boolean(deleteTarget)}
           animationType="fade"
           onRequestClose={() => {
@@ -1966,6 +2106,44 @@ export default function UsersScreen() {
                   )}
                 </TouchableOpacity>
               </View>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal
+          transparent
+          visible={Boolean(deleteSuccess)}
+          animationType="fade"
+          onRequestClose={() => setDeleteSuccess(null)}
+        >
+          <View style={styles.deleteModalOverlay}>
+            <View style={styles.deleteSuccessCard}>
+              <View style={styles.deleteSuccessIcon}>
+                <Check size={30 * s} color="#168A18" />
+              </View>
+
+              <Text style={[styles.deleteSuccessTitle, { fontSize: 21 * s }]}>
+                Account Deleted
+              </Text>
+
+              <Text style={[styles.deleteSuccessMessage, { fontSize: 14 * s }]}>
+                {deleteSuccess
+                  ? `${deleteSuccess.name}'s ${deleteSuccess.role.toLowerCase()} account was deleted successfully.`
+                  : "The account was deleted successfully."}
+              </Text>
+
+              <Text style={[styles.deleteSuccessHint, { fontSize: 12 * s }]}>
+                The account can no longer sign in to EcoBantay.
+              </Text>
+
+              <TouchableOpacity
+                style={styles.deleteSuccessButton}
+                onPress={() => setDeleteSuccess(null)}
+              >
+                <Text style={[styles.deleteSuccessButtonText, { fontSize: 14 * s }]}>
+                  Done
+                </Text>
+              </TouchableOpacity>
             </View>
           </View>
         </Modal>
@@ -3066,6 +3244,124 @@ const styles = StyleSheet.create({
     color: "#FF3B3B",
   },
 
+  flagModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(16, 20, 16, 0.5)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+
+  flagModalCard: {
+    width: "92%",
+    maxWidth: 430,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 26,
+    alignItems: "center",
+    shadowColor: "#000000",
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
+  },
+
+  flagModalIcon: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: "#FFE7E7",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+
+  unflagModalIcon: {
+    backgroundColor: "#E7F2E7",
+  },
+
+  flagModalTitle: {
+    fontFamily: "Montserrat_700Bold",
+    textAlign: "center",
+  },
+
+  flagModalMessage: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#333333",
+    textAlign: "center",
+    lineHeight: 21,
+    marginTop: 10,
+  },
+
+  flagModalHint: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#777777",
+    textAlign: "center",
+    lineHeight: 18,
+    marginTop: 8,
+  },
+
+  flagErrorBox: {
+    width: "100%",
+    marginTop: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#F0BBBB",
+    backgroundColor: "#FFF3F3",
+  },
+
+  flagErrorText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#A32828",
+    textAlign: "center",
+  },
+
+  flagModalActions: {
+    width: "100%",
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: 10,
+    marginTop: 22,
+  },
+
+  flagCancelButton: {
+    minWidth: 100,
+    height: 40,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: "#CDD4CC",
+    borderRadius: 7,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+
+  flagCancelText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#4B554B",
+  },
+
+  flagConfirmButton: {
+    minWidth: 140,
+    height: 40,
+    paddingHorizontal: 16,
+    borderRadius: 7,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#D83030",
+  },
+
+  unflagConfirmButton: {
+    backgroundColor: "#34733B",
+  },
+
+  flagConfirmText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#FFFFFF",
+  },
+
   deleteModalOverlay: {
     flex: 1,
     backgroundColor: "rgba(16, 20, 16, 0.5)",
@@ -3179,6 +3475,67 @@ const styles = StyleSheet.create({
 
   deleteButtonDisabled: {
     opacity: 0.6,
+  },
+
+  deleteSuccessCard: {
+    width: "92%",
+    maxWidth: 410,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    padding: 26,
+    alignItems: "center",
+    shadowColor: "#000000",
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 12,
+  },
+
+  deleteSuccessIcon: {
+    width: 62,
+    height: 62,
+    borderRadius: 31,
+    backgroundColor: "#E3F5E5",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 14,
+  },
+
+  deleteSuccessTitle: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#168A18",
+    textAlign: "center",
+  },
+
+  deleteSuccessMessage: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#333333",
+    textAlign: "center",
+    lineHeight: 21,
+    marginTop: 10,
+  },
+
+  deleteSuccessHint: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#777777",
+    textAlign: "center",
+    lineHeight: 18,
+    marginTop: 8,
+  },
+
+  deleteSuccessButton: {
+    width: "100%",
+    height: 40,
+    marginTop: 22,
+    borderRadius: 7,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#34733B",
+  },
+
+  deleteSuccessButtonText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#FFFFFF",
   },
 
   addAdminModal: {
