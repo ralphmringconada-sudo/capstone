@@ -189,15 +189,14 @@ export default function ResetPasswordScreen() {
           compact && styles.pageContentCompact,
         ]}
       >
-        <View style={styles.brandWrap}>
-          <Image
-            source={require("../../assets/images/ecobantay-logo.png")}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-        </View>
-
         <View style={styles.card}>
+          <View style={styles.brandWrap}>
+            <Image
+              source={require("../../assets/images/ecobantay-logo.png")}
+              style={styles.logo}
+              resizeMode="contain"
+            />
+          </View>
           <Pressable
             onPress={() => router.replace("/")}
             style={({ pressed }) => [
@@ -484,7 +483,7 @@ const styles = StyleSheet.create({
     minHeight: "100%",
     paddingHorizontal: 32,
     paddingVertical: 28,
-    alignItems: "flex-end",
+    alignItems: "center",
     justifyContent: "center",
   },
 
@@ -493,27 +492,27 @@ const styles = StyleSheet.create({
   },
 
   brandWrap: {
-    position: "absolute",
-    top: 18,
-    right: 38,
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 10,
   },
 
   logo: {
-    width: 220,
-    height: 92,
+    width: 190,
+    height: 76,
   },
 
   card: {
     width: "92%",
-    maxWidth: 520,
+    maxWidth: 540,
     minHeight: 540,
-    marginRight: "8%",
     backgroundColor: "#FFFFFF",
     borderRadius: 20,
     borderWidth: 1,
     borderColor: "#D7E6D3",
-    paddingHorizontal: 34,
-    paddingTop: 28,
+    paddingHorizontal: 36,
+    paddingTop: 22,
     paddingBottom: 32,
 
     shadowColor: "#000000",
@@ -529,6 +528,7 @@ const styles = StyleSheet.create({
   backButton: {
     alignSelf: "flex-start",
     minHeight: 34,
+    marginBottom: 4,
     flexDirection: "row",
     alignItems: "center",
     gap: 7,
