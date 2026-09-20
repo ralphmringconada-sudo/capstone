@@ -190,23 +190,26 @@ export default function ResetPasswordScreen() {
         ]}
       >
         <View style={styles.card}>
-          <View style={styles.brandWrap}>
-            <Image
-              source={require("../../assets/images/ecobantay-logo.png")}
-              style={styles.logo}
-              resizeMode="contain"
-            />
+          <View style={styles.cardTopRow}>
+            <Pressable
+              onPress={() => router.replace("/")}
+              style={({ pressed }) => [
+                styles.backButton,
+                pressed && styles.pressed,
+              ]}
+            >
+              <ArrowLeft size={18} color="#3F5741" strokeWidth={2.3} />
+              <Text style={styles.backText}>Back to login</Text>
+            </Pressable>
+
+            <View style={styles.brandWrap}>
+              <Image
+                source={require("../../assets/images/ecobantay-logo.png")}
+                style={styles.logo}
+                resizeMode="contain"
+              />
+            </View>
           </View>
-          <Pressable
-            onPress={() => router.replace("/")}
-            style={({ pressed }) => [
-              styles.backButton,
-              pressed && styles.pressed,
-            ]}
-          >
-            <ArrowLeft size={18} color="#3F5741" strokeWidth={2.3} />
-            <Text style={styles.backText}>Back to login</Text>
-          </Pressable>
 
           {isVerifying ? (
             <View style={styles.stateContent}>
@@ -491,16 +494,24 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
 
-  brandWrap: {
+  cardTopRow: {
     width: "100%",
+    minHeight: 58,
+    flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+  },
+
+  brandWrap: {
+    alignItems: "flex-end",
     justifyContent: "center",
-    marginBottom: 10,
+    marginLeft: 16,
   },
 
   logo: {
-    width: 190,
-    height: 76,
+    width: 150,
+    height: 58,
   },
 
   card: {
@@ -528,7 +539,6 @@ const styles = StyleSheet.create({
   backButton: {
     alignSelf: "flex-start",
     minHeight: 34,
-    marginBottom: 4,
     flexDirection: "row",
     alignItems: "center",
     gap: 7,

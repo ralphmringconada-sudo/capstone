@@ -2148,108 +2148,171 @@ export default function UsersScreen() {
           </View>
         </Modal>
 
-        <Modal transparent visible={isEditOpen} animationType="fade">
-          <View style={styles.modalOverlay}>
-            <ScrollView
-              style={styles.editModal}
-              contentContainerStyle={{ paddingBottom: 20 }}
-              showsVerticalScrollIndicator
-            >
-              <Text style={[styles.pageTitle, { fontSize: 28 * s, marginBottom: 16 * s }]}>
-                {selectedUser?.[4] === "Admin" ? "Edit Administrator" : "Edit User"}
-              </Text>
+        <Modal
+          transparent
+          visible={isEditOpen}
+          animationType="fade"
+          onRequestClose={() => {
+            if (!isSavingEdit && !isSendingReset) {
+              setIsEditOpen(false);
+              setEditError("");
+            }
+          }}
+        >
+          <View style={styles.editModalOverlay}>
+            <View style={styles.editModalCard}>
+              <View style={styles.editModalHeader}>
+                <View style={styles.editModalHeaderText}>
+                  <Text style={[styles.editModalTitle, { fontSize: 22 * s }]}>
+                    {selectedUser?.[4] === "Admin"
+                      ? "Edit Administrator"
+                      : "Edit User Information"}
+                  </Text>
+                  <Text style={[styles.editModalSubtitle, { fontSize: 12 * s }]}>
+                    Update the account information below.
+                  </Text>
+                </View>
 
-              {selectedUser?.[4] === "User" ? (
-                <>
-                  <AdminInput
-                    label="First Name"
-                    placeholder="First name"
-                    s={s}
-                    value={editForm.firstName}
-                    onChangeText={(value: string) => setEditForm((prev) => ({ ...prev, firstName: value }))}
-                  />
-                  <AdminInput
-                    label="Last Name"
-                    placeholder="Last name"
-                    s={s}
-                    value={editForm.lastName}
-                    onChangeText={(value: string) => setEditForm((prev) => ({ ...prev, lastName: value }))}
-                  />
-                  <AdminInput
-                    label="Birthday"
-                    placeholder="Birthday"
-                    s={s}
-                    value={editForm.birthday}
-                    onChangeText={(value: string) => setEditForm((prev) => ({ ...prev, birthday: value }))}
-                  />
-                </>
-              ) : (
-                <>
-                  <AdminInput
-                    label="Full Name"
-                    placeholder="Full name"
-                    s={s}
-                    value={editForm.fullName}
-                    onChangeText={(value: string) => setEditForm((prev) => ({ ...prev, fullName: value }))}
-                  />
-                  <AdminInput
-                    label="Username"
-                    placeholder="Username"
-                    s={s}
-                    value={editForm.username}
-                    onChangeText={(value: string) => setEditForm((prev) => ({ ...prev, username: value }))}
-                  />
-                  {selectedUser?.[4] === "Admin" ? (
-                    <Text style={{ color: "#555", marginBottom: 12, fontFamily: "Montserrat_700Bold" }}>
-                      Email: {selectedUser[3]}
-                    </Text>
-                  ) : null}
-                </>
-              )}
-
-              <AdminInput
-                label="Contact Number"
-                placeholder="Contact number"
-                s={s}
-                value={editForm.contactNumber}
-                onChangeText={(value: string) => setEditForm((prev) => ({ ...prev, contactNumber: value }))}
-              />
-
-              {editError ? <Text style={{ color: "#8B1E1E", marginBottom: 8 }}>{editError}</Text> : null}
-
-              {isSuperAdmin && selectedUser?.[4] === "Admin" ? (
                 <TouchableOpacity
-                  style={[styles.editButton, { marginBottom: 16, alignSelf: "flex-start" }]}
-                  onPress={() => void handleSendAdminPasswordReset()}
-                  disabled={isSendingReset}
+                  style={styles.editModalCloseButton}
+                  disabled={isSavingEdit || isSendingReset}
+                  onPress={() => {
+                    setIsEditOpen(false);
+                    setEditError("");
+                  }}
+                  accessibilityLabel="Close edit account"
                 >
-                  {isSendingReset ? (
-                    <ActivityIndicator color="#34733B" />
-                  ) : (
-                    <Text style={[styles.editButtonText, { fontSize: 15 * s }]}>
-                      Send Password Reset Email
-                    </Text>
-                  )}
+                  <X size={20 * s} color="#445047" />
                 </TouchableOpacity>
-              ) : null}
+              </View>
 
-              <View style={styles.modalActions}>
-                <TouchableOpacity style={styles.editButton} onPress={() => setIsEditOpen(false)}>
-                  <Text style={[styles.editButtonText, { fontSize: 16 * s }]}>Cancel</Text>
-                </TouchableOpacity>
+              <ScrollView
+                style={styles.editModalScroll}
+                contentContainerStyle={styles.editModalBody}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
+                {selectedUser?.[4] === "User" ? (
+                  <View style={styles.editFormGrid}>
+                    <EditField
+                      label="First Name"
+                      placeholder="Enter first name"
+                      s={s}
+                      value={editForm.firstName}
+                      onChangeText={(value: string) =>
+                        setEditForm((prev) => ({ ...prev, firstName: value }))
+                      }
+                    />
+                    <EditField
+                      label="Last Name"
+                      placeholder="Enter last name"
+                      s={s}
+                      value={editForm.lastName}
+                      onChangeText={(value: string) =>
+                        setEditForm((prev) => ({ ...prev, lastName: value }))
+                      }
+                    />
+                    <EditField
+                      label="Birthday"
+                      placeholder="Enter birthday"
+                      s={s}
+                      value={editForm.birthday}
+                      onChangeText={(value: string) =>
+                        setEditForm((prev) => ({ ...prev, birthday: value }))
+                      }
+                    />
+                    <EditField
+                      label="Contact Number"
+                      placeholder="Enter contact number"
+                      s={s}
+                      value={editForm.contactNumber}
+                      onChangeText={(value: string) =>
+                        setEditForm((prev) => ({ ...prev, contactNumber: value }))
+                      }
+                    />
+                  </View>
+                ) : (
+                  <>
+                    <View style={styles.editFormGrid}>
+                      <EditField
+                        label="Full Name"
+                        placeholder="Enter full name"
+                        s={s}
+                        value={editForm.fullName}
+                        onChangeText={(value: string) =>
+                          setEditForm((prev) => ({ ...prev, fullName: value }))
+                        }
+                      />
+                      <EditField
+                        label="Username"
+                        placeholder="Enter username"
+                        s={s}
+                        value={editForm.username}
+                        onChangeText={(value: string) =>
+                          setEditForm((prev) => ({ ...prev, username: value }))
+                        }
+                      />
+                      <EditField
+                        label="Contact Number"
+                        placeholder="Enter contact number"
+                        s={s}
+                        value={editForm.contactNumber}
+                        onChangeText={(value: string) =>
+                          setEditForm((prev) => ({ ...prev, contactNumber: value }))
+                        }
+                      />
+
+                      <View style={styles.editField}>
+                        <Text style={[styles.editFieldLabel, { fontSize: 12 * s }]}>Email Address</Text>
+                        <View style={styles.editReadOnlyBox}>
+                          <Mail size={17 * s} color="#7B857D" />
+                          <Text numberOfLines={1} style={[styles.editReadOnlyText, { fontSize: 13 * s }]}>
+                            {selectedUser?.[3] || "—"}
+                          </Text>
+                        </View>
+                      </View>
+                    </View>
+                  </>
+                )}
+
+                {editError ? (
+                  <View style={styles.editErrorBox}>
+                    <Text style={[styles.editErrorText, { fontSize: 12 * s }]}>{editError}</Text>
+                  </View>
+                ) : null}
+              </ScrollView>
+
+              <View style={styles.editModalFooter}>
                 <TouchableOpacity
-                  style={[styles.editButton, { backgroundColor: "#34733B" }]}
+                  style={styles.editCancelButton}
+                  disabled={isSavingEdit || isSendingReset}
+                  onPress={() => {
+                    setIsEditOpen(false);
+                    setEditError("");
+                  }}
+                >
+                  <Text style={[styles.editCancelButtonText, { fontSize: 13 * s }]}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.editSaveButton,
+                    (isSavingEdit || isSendingReset) && styles.editActionDisabled,
+                  ]}
                   onPress={handleSaveEdit}
-                  disabled={isSavingEdit}
+                  disabled={isSavingEdit || isSendingReset}
                 >
                   {isSavingEdit ? (
-                    <ActivityIndicator color="#fff" />
+                    <ActivityIndicator size="small" color="#FFFFFF" />
                   ) : (
-                    <Text style={[styles.editButtonText, { fontSize: 16 * s, color: "#fff" }]}>Save</Text>
+                    <>
+                      <Check size={17 * s} color="#FFFFFF" />
+                      <Text style={[styles.editSaveButtonText, { fontSize: 13 * s }]}>Save Changes</Text>
+                    </>
                   )}
                 </TouchableOpacity>
               </View>
-            </ScrollView>
+            </View>
           </View>
         </Modal>
       </ScrollView>
@@ -2485,6 +2548,33 @@ function AdminInput({ label, placeholder, s, value, onChangeText }: any) {
         style={[styles.inputBox, styles.inputText, { fontSize: 14 * s }]}
         value={value}
         onChangeText={onChangeText}
+      />
+    </View>
+  );
+}
+
+function EditField({
+  label,
+  placeholder,
+  s,
+  value,
+  onChangeText,
+}: {
+  label: string;
+  placeholder: string;
+  s: number;
+  value: string;
+  onChangeText: (value: string) => void;
+}) {
+  return (
+    <View style={styles.editField}>
+      <Text style={[styles.editFieldLabel, { fontSize: 12 * s }]}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor="#9AA29C"
+        style={[styles.editFieldInput, { fontSize: 13 * s }]}
       />
     </View>
   );
@@ -3018,14 +3108,233 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
 
-  editModal: {
-    width: "92%",
-    maxWidth: 600,
-    maxHeight: "90%",
-    backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 28,
+  editModalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(18, 24, 19, 0.48)",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 24,
   },
+
+  editModalCard: {
+    width: "92%",
+    maxWidth: 690,
+    maxHeight: "88%",
+    backgroundColor: "#FFFFFF",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#E0E6E0",
+    overflow: "hidden",
+    shadowColor: "#000000",
+    shadowOpacity: 0.18,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 14,
+  },
+
+  editModalHeader: {
+    minHeight: 88,
+    paddingHorizontal: 24,
+    paddingVertical: 18,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 18,
+    backgroundColor: "#F7FAF6",
+    borderBottomWidth: 1,
+    borderBottomColor: "#E3E8E3",
+  },
+
+  editModalHeaderText: { flex: 1, minWidth: 0 },
+
+  editModalTitle: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#0B5A1E",
+  },
+
+  editModalSubtitle: {
+    marginTop: 5,
+    fontFamily: "Montserrat_700Bold",
+    color: "#748075",
+  },
+
+  editModalCloseButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "#EDF1ED",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+
+  editModalScroll: { maxHeight: 520 },
+
+  editModalBody: {
+    paddingHorizontal: 24,
+    paddingTop: 22,
+    paddingBottom: 22,
+  },
+
+  editFormGrid: {
+    width: "100%",
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 16,
+  },
+
+  editField: {
+    flexGrow: 1,
+    flexBasis: 280,
+    minWidth: 240,
+  },
+
+  editFieldLabel: {
+    marginBottom: 7,
+    fontFamily: "Montserrat_700Bold",
+    color: "#465048",
+  },
+
+  editFieldInput: {
+    width: "100%",
+    height: 44,
+    borderWidth: 1,
+    borderColor: "#D4DCD4",
+    borderRadius: 8,
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
+    fontFamily: "Montserrat_700Bold",
+    color: "#1D261E",
+    outlineStyle: "none" as any,
+  },
+
+  editReadOnlyBox: {
+    width: "100%",
+    height: 44,
+    borderWidth: 1,
+    borderColor: "#DCE1DC",
+    borderRadius: 8,
+    backgroundColor: "#F3F5F3",
+    paddingHorizontal: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+  },
+
+  editReadOnlyText: {
+    flex: 1,
+    minWidth: 0,
+    fontFamily: "Montserrat_700Bold",
+    color: "#687169",
+  },
+
+  editSecurityBox: {
+    marginTop: 20,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: "#DCE8DA",
+    borderRadius: 10,
+    backgroundColor: "#F7FBF5",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 16,
+  },
+
+  editSecurityText: { flex: 1, minWidth: 0 },
+
+  editSecurityTitle: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#294A2F",
+  },
+
+  editSecurityHint: {
+    marginTop: 4,
+    fontFamily: "Montserrat_700Bold",
+    color: "#748075",
+    lineHeight: 16,
+  },
+
+  editResetButton: {
+    minWidth: 135,
+    height: 38,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: "#34733B",
+    borderRadius: 7,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+
+  editResetButtonText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#34733B",
+  },
+
+  editErrorBox: {
+    marginTop: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: "#F0CACA",
+    backgroundColor: "#FFF3F3",
+  },
+
+  editErrorText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#9E2F2F",
+  },
+
+  editModalFooter: {
+    minHeight: 72,
+    paddingHorizontal: 24,
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderTopColor: "#E4E9E4",
+    backgroundColor: "#FBFCFB",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 10,
+  },
+
+  editCancelButton: {
+    minWidth: 96,
+    height: 40,
+    paddingHorizontal: 18,
+    borderWidth: 1,
+    borderColor: "#CDD5CD",
+    borderRadius: 7,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#FFFFFF",
+  },
+
+  editCancelButtonText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#4E5A50",
+  },
+
+  editSaveButton: {
+    minWidth: 150,
+    height: 40,
+    paddingHorizontal: 18,
+    borderRadius: 7,
+    backgroundColor: "#34733B",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+  },
+
+  editSaveButtonText: {
+    fontFamily: "Montserrat_700Bold",
+    color: "#FFFFFF",
+  },
+
+  editActionDisabled: { opacity: 0.6 },
 
   closeButton: {
     position: "absolute",
