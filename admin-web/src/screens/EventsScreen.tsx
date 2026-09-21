@@ -19,6 +19,7 @@ import {
 import DateTimePicker from "@react-native-community/datetimepicker";
 import * as ImagePicker from "expo-image-picker";
 import { useLocalSearchParams } from "expo-router";
+import { doc, updateDoc } from "firebase/firestore";
 
 import {
   ArrowLeft,
@@ -40,6 +41,7 @@ import {
 } from "lucide-react-native";
 
 import AdminLayout from "@/components/AdminLayout";
+import { db } from "@/config/firebase";
 import InteractiveLocationMap from "@/components/InteractiveLocationMap";
 
 import { useAdminAuth } from "@/context/AdminAuthContext";
@@ -112,6 +114,15 @@ type EventFormAlertState = {
 type RejectedEventView = AdminEvent & {
   rejectedAt?: string;
   rejectionReason?: string;
+};
+
+type ModeratedEventView = AdminEvent & {
+  approvedByUid?: string;
+  approvedByName?: string;
+  approvedAt?: string;
+  rejectedByUid?: string;
+  rejectedByName?: string;
+  rejectedAt?: string;
 };
 
 type EventStatus = AdminEvent["status"];
@@ -309,6 +320,31 @@ function getEventImages(event: {
   if (event.images?.length) return event.images.filter(Boolean);
   if (event.imageUrl) return [event.imageUrl];
   return [];
+}
+
+function getEventModerationInfo(event: AdminEvent): {
+  label: "Approved By" | "Rejected By";
+  adminName: string;
+  moderatedAt: string;
+  rejected: boolean;
+} {
+  const moderatedEvent = event as ModeratedEventView;
+
+  if (event.status === "Rejected") {
+    return {
+      label: "Rejected By",
+      adminName: moderatedEvent.rejectedByName || "Not recorded",
+      moderatedAt: moderatedEvent.rejectedAt || "",
+      rejected: true,
+    };
+  }
+
+  return {
+    label: "Approved By",
+    adminName: moderatedEvent.approvedByName || "Not recorded",
+    moderatedAt: moderatedEvent.approvedAt || "",
+    rejected: false,
+  };
 }
 
 function resolveAutomaticEventStatus(
@@ -1483,6 +1519,28 @@ export default function EventsScreen() {
           admin,
           details
         );
+
+        const moderatedAt = new Date().toISOString();
+
+        if (nextStatus === "Approved") {
+          await updateDoc(
+            doc(db, "events", selectedEvent.id),
+            {
+              approvedByUid: admin.uid,
+              approvedByName: admin.fullName,
+              approvedAt: moderatedAt,
+            }
+          );
+        } else if (nextStatus === "Rejected") {
+          await updateDoc(
+            doc(db, "events", selectedEvent.id),
+            {
+              rejectedByUid: admin.uid,
+              rejectedByName: admin.fullName,
+              rejectedAt: moderatedAt,
+            }
+          );
+        }
 
         closeEventDetails();
 
@@ -3735,6 +3793,69 @@ const confirmRejectEvent = async () => {
                     </Text>
                   </View>
                 </View>
+
+                {(() => {
+                  const moderationInfo =
+                    getEventModerationInfo(selectedEvent);
+
+                  const moderatedDate = moderationInfo.moderatedAt
+                    ? formatDateTime(moderationInfo.moderatedAt)
+                    : null;
+
+                  return (
+                    <View
+                      style={[
+                        styles.eventModerationRow,
+                        moderationInfo.rejected
+                          ? styles.eventModerationRejected
+                          : styles.eventModerationApproved,
+                      ]}
+                    >
+                      <View
+                        style={[
+                          styles.eventModerationIcon,
+                          moderationInfo.rejected
+                            ? styles.eventModerationIconRejected
+                            : styles.eventModerationIconApproved,
+                        ]}
+                      >
+                        {moderationInfo.rejected ? (
+                          <X
+                            size={18}
+                            color="#B42318"
+                            strokeWidth={2.4}
+                          />
+                        ) : (
+                          <Check
+                            size={18}
+                            color="#237A36"
+                            strokeWidth={2.6}
+                          />
+                        )}
+                      </View>
+
+                      <View style={styles.eventInfoCopy}>
+                        <Text style={styles.eventModerationLabel}>
+                          {moderationInfo.label}
+                        </Text>
+
+                        <Text style={styles.eventModerationValue}>
+                          {moderationInfo.adminName}
+                        </Text>
+
+                        {moderatedDate ? (
+                          <Text style={styles.eventModerationDate}>
+                            {moderatedDate.date} · {moderatedDate.time}
+                          </Text>
+                        ) : (
+                          <Text style={styles.eventModerationDate}>
+                            Moderation date not recorded
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })()}
               </View>
             </View>
 
@@ -7639,6 +7760,66 @@ eventLocationRow: {
   paddingVertical: 11,
   flexDirection: "row",
   alignItems: "flex-start",
+},
+
+eventModerationRow: {
+  marginTop: 12,
+  minHeight: 70,
+  borderWidth: 1,
+  borderRadius: 9,
+  paddingHorizontal: 12,
+  paddingVertical: 11,
+  flexDirection: "row",
+  alignItems: "center",
+},
+
+eventModerationApproved: {
+  backgroundColor: "#F1F8F1",
+  borderColor: "#D2E7D3",
+},
+
+eventModerationRejected: {
+  backgroundColor: "#FFF4F3",
+  borderColor: "#F0D0CD",
+},
+
+eventModerationIcon: {
+  width: 34,
+  height: 34,
+  borderRadius: 17,
+  alignItems: "center",
+  justifyContent: "center",
+  marginRight: 10,
+},
+
+eventModerationIconApproved: {
+  backgroundColor: "#DCEEDD",
+},
+
+eventModerationIconRejected: {
+  backgroundColor: "#F7DEDC",
+},
+
+eventModerationLabel: {
+  fontSize: 10,
+  color: "#777777",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventModerationValue: {
+  marginTop: 3,
+  fontSize: 13,
+  lineHeight: 18,
+  color: "#222222",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventModerationDate: {
+  marginTop: 2,
+  fontSize: 10,
+  lineHeight: 14,
+  color: "#777777",
+  fontFamily: MONTSERRAT_FONT,
 },
 
 eventDetailsMap: {
