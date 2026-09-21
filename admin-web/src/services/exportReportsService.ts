@@ -1792,6 +1792,7 @@ function buildStyledPdf(
   const pageHeight = 842;
   const margin = 38;
   const contentWidth = pageWidth - margin * 2;
+  const pageBottom = 790;
   const summary = summarizeReports(reports);
 
   const pages: string[][] = [];
@@ -1845,10 +1846,10 @@ function buildStyledPdf(
   };
 
   const drawPageHeader = (subtitle = 'Environmental Reports') => {
-    rect(0, 0, pageWidth, 62, '#145C1E');
-    textCmd('ECOBANTAY', margin, 24, 9, true, '#DDF0DE');
-    textCmd(subtitle, margin, 44, 20, true, '#FFFFFF');
-    y = 84;
+    rect(0, 0, pageWidth, 58, '#145C1E');
+    textCmd('ECOBANTAY', margin, 21, 8.5, true, '#DDF0DE');
+    textCmd(subtitle, margin, 42, 18, true, '#FFFFFF');
+    y = 78;
   };
 
   const newPage = (subtitle?: string) => {
@@ -1857,12 +1858,114 @@ function buildStyledPdf(
     drawPageHeader(subtitle);
   };
 
+  const ensureSpace = (needed: number, subtitle = 'Environmental Reports') => {
+    if (y + needed > pageBottom) {
+      newPage(subtitle);
+      return true;
+    }
+    return false;
+  };
+
+  const statusStyle = (status: string) => {
+    if (status === 'Pending') {
+      return {
+        fill: '#FFF4D5',
+        accent: '#D89A00',
+        text: '#8B6505',
+      };
+    }
+    if (status === 'In Review') {
+      return {
+        fill: '#E7F0FF',
+        accent: '#4773C7',
+        text: '#315B9C',
+      };
+    }
+    if (status === 'Resolved') {
+      return {
+        fill: '#E5F4E7',
+        accent: '#2E8B3C',
+        text: '#197126',
+      };
+    }
+    if (status === 'Rejected') {
+      return {
+        fill: '#FDE8E8',
+        accent: '#D14A4A',
+        text: '#A33131',
+      };
+    }
+    return {
+      fill: '#EEF1EE',
+      accent: '#738073',
+      text: '#4F5B4F',
+    };
+  };
+
+  const preferredStatusOrder = [
+    'Pending',
+    'In Review',
+    'Resolved',
+    'Rejected',
+  ];
+
+  const allStatuses = Array.from(
+    new Set(reports.map((report) => String(report.status || 'Other'))),
+  );
+
+  const orderedStatuses = [
+    ...preferredStatusOrder.filter((status) => allStatuses.includes(status)),
+    ...allStatuses.filter((status) => !preferredStatusOrder.includes(status)),
+  ];
+
+  const groupedReports = orderedStatuses
+    .map((status) => ({
+      status,
+      reports: reports.filter(
+        (report) => String(report.status || 'Other') === status,
+      ),
+    }))
+    .filter((group) => group.reports.length > 0);
+
+  const reportNumberById = new Map(
+    reports.map((report, index) => [report.id, index + 1] as const),
+  );
+
+  const drawStatusSectionHeader = (
+    status: string,
+    count: number,
+    subtitle: string,
+  ) => {
+    ensureSpace(40, subtitle);
+    const style = statusStyle(status);
+
+    rect(margin, y, contentWidth, 30, style.fill, '#D9E0D6');
+    rect(margin, y, 5, 30, style.accent);
+    textCmd(status, margin + 14, y + 19, 11, true, style.text);
+    textCmd(
+      `${count} report${count === 1 ? '' : 's'}`,
+      margin + contentWidth - 70,
+      y + 19,
+      8,
+      true,
+      style.text,
+    );
+    y += 39;
+  };
+
   newPage('Environmental Reports');
 
-  textCmd(`Generated: ${new Date().toLocaleString()}`, margin, y, 9, false, '#647064');
-  y += 16;
-  textCmd(`Date Range: ${label}`, margin, y, 9, false, '#647064');
-  y += 25;
+  textCmd(
+    `Generated: ${new Date().toLocaleString()}`,
+    margin,
+    y,
+    8.5,
+    false,
+    '#647064',
+  );
+  y += 15;
+  textCmd(`Date Range: ${label}`, margin, y, 8.5, false, '#647064');
+  y += 22;
 
   const cardGap = 6;
   const cardWidth = (contentWidth - cardGap * 4) / 5;
@@ -1876,148 +1979,372 @@ function buildStyledPdf(
 
   stats.forEach(([labelText, value, color], index) => {
     const x = margin + index * (cardWidth + cardGap);
-    rect(x, y, cardWidth, 58, color, '#D9E0D6');
-    textCmd(labelText, x + 8, y + 18, 7.5, true, '#647064');
-    textCmd(String(value), x + 8, y + 43, 20, true, '#172018');
+    rect(x, y, cardWidth, 54, color, '#D9E0D6');
+    textCmd(labelText, x + 8, y + 17, 7.2, true, '#647064');
+    textCmd(String(value), x + 8, y + 39, 18, true, '#172018');
   });
-  y += 78;
+  y += 74;
 
-  textCmd('Report Overview', margin, y, 14, true, '#145C1E');
-  y += 16;
+  textCmd('Reports by Status', margin, y, 14, true, '#145C1E');
+  y += 11;
+  textCmd(
+    'Reports are grouped by their current processing status.',
+    margin,
+    y + 11,
+    8,
+    false,
+    '#748075',
+  );
+  y += 29;
 
-  const columns = [
-    { title: 'ID', width: 58 },
-    { title: 'Report', width: 116 },
-    { title: 'Category', width: 74 },
-    { title: 'Status', width: 62 },
-    { title: 'Location', width: 118 },
+  const overviewColumns = [
+    { title: 'No.', width: 34 },
+    { title: 'Report', width: 128 },
+    { title: 'Category', width: 88 },
+    { title: 'Location', width: 178 },
     { title: 'Date', width: 91 },
   ];
 
-  const tableHeaderHeight = 24;
-  rect(margin, y, contentWidth, tableHeaderHeight, '#174F22');
-  let x = margin;
-  columns.forEach((column) => {
-    textCmd(column.title, x + 5, y + 16, 7, true, '#FFFFFF');
-    x += column.width;
-  });
-  y += tableHeaderHeight;
+  const drawOverviewHeader = () => {
+    rect(margin, y, contentWidth, 24, '#245C2D');
+    let headerX = margin;
 
-  for (const report of reports) {
-    const rowHeight = 34;
-    if (y + rowHeight > pageHeight - 52) {
-      newPage('Report Overview');
-      rect(margin, y, contentWidth, tableHeaderHeight, '#174F22');
-      let headerX = margin;
-      columns.forEach((column) => {
-        textCmd(column.title, headerX + 5, y + 16, 7, true, '#FFFFFF');
-        headerX += column.width;
-      });
-      y += tableHeaderHeight;
-    }
+    overviewColumns.forEach((column) => {
+      textCmd(column.title, headerX + 6, y + 16, 7, true, '#FFFFFF');
+      headerX += column.width;
+    });
 
-    rect(margin, y, contentWidth, rowHeight, '#FFFFFF', '#E2E7DF');
-    const values = [
-      `#${report.id.slice(0, 6).toUpperCase()}`,
-      report.title || '',
-      report.category || '',
-      report.status || '',
-      report.location || '',
-      report.createdAt ? new Date(report.createdAt).toLocaleDateString() : '',
-    ];
+    y += 24;
+  };
 
-    let valueX = margin;
-    values.forEach((value, index) => {
-      const maxChars = Math.max(5, Math.floor(columns[index].width / 5.2));
-      const lines = wrapPdfText(value, maxChars).slice(0, 2);
-      lines.forEach((valueLine, lineIndex) => {
+  groupedReports.forEach((group) => {
+    drawStatusSectionHeader(group.status, group.reports.length, 'Reports by Status');
+    drawOverviewHeader();
+
+    group.reports.forEach((report) => {
+      const reportNo = reportNumberById.get(report.id) || 0;
+      const titleLines = wrapPdfText(report.title || 'Untitled report', 27).slice(0, 2);
+      const categoryLines = wrapPdfText(report.category || 'Not specified', 16).slice(0, 2);
+      const locationLines = wrapPdfText(report.location || 'Not specified', 32).slice(0, 3);
+
+      const maxLines = Math.max(
+        titleLines.length,
+        categoryLines.length,
+        locationLines.length,
+        1,
+      );
+      const rowHeight = Math.max(34, 14 + maxLines * 10);
+
+      if (ensureSpace(rowHeight + 8, 'Reports by Status')) {
+        drawStatusSectionHeader(
+          `${group.status} - continued`,
+          group.reports.length,
+          'Reports by Status',
+        );
+        drawOverviewHeader();
+      }
+
+      rect(margin, y, contentWidth, rowHeight, '#FFFFFF', '#E2E7DF');
+
+      let cellX = margin;
+      textCmd(String(reportNo), cellX + 10, y + 20, 8, true, '#315B35');
+      cellX += overviewColumns[0].width;
+
+      titleLines.forEach((valueLine, lineIndex) => {
         textCmd(
           valueLine,
-          valueX + 5,
-          y + 12 + lineIndex * 10,
-          7,
-          index === 3,
-          '#2B332B',
+          cellX + 6,
+          y + 16 + lineIndex * 10,
+          7.5,
+          lineIndex === 0,
+          '#263128',
         );
       });
-      valueX += columns[index].width;
+      cellX += overviewColumns[1].width;
+
+      categoryLines.forEach((valueLine, lineIndex) => {
+        textCmd(
+          valueLine,
+          cellX + 6,
+          y + 16 + lineIndex * 10,
+          7.2,
+          false,
+          '#3C463D',
+        );
+      });
+      cellX += overviewColumns[2].width;
+
+      locationLines.forEach((valueLine, lineIndex) => {
+        textCmd(
+          valueLine,
+          cellX + 6,
+          y + 16 + lineIndex * 10,
+          7.2,
+          false,
+          '#3C463D',
+        );
+      });
+      cellX += overviewColumns[3].width;
+
+      textCmd(
+        report.createdAt
+          ? new Date(report.createdAt).toLocaleDateString()
+          : '',
+        cellX + 6,
+        y + 20,
+        7.2,
+        false,
+        '#3C463D',
+      );
+
+      y += rowHeight;
     });
 
-    y += rowHeight;
-  }
+    y += 14;
+  });
 
-  y += 24;
-  textCmd('Report Details', margin, y, 15, true, '#145C1E');
-  y += 22;
+  newPage('Report Details');
 
-  reports.forEach((report, index) => {
-    const descLines = wrapPdfText(report.description || 'No description provided.', 88);
-    const locationLines = wrapPdfText(report.location || 'Not specified', 62);
-    const blockHeight =
-      106 + Math.max(1, descLines.length) * 11 + Math.max(0, locationLines.length - 1) * 10;
+  groupedReports.forEach((group) => {
+    drawStatusSectionHeader(group.status, group.reports.length, 'Report Details');
 
-    if (y + blockHeight > pageHeight - 48) {
-      newPage('Report Details');
-    }
+    group.reports.forEach((report) => {
+      const reportNo = reportNumberById.get(report.id) || 0;
+      const style = statusStyle(group.status);
+      const titleLines = wrapPdfText(
+        report.title || 'Untitled report',
+        54,
+      ).slice(0, 2);
+      const categoryLines = wrapPdfText(
+        report.category || 'Not specified',
+        27,
+      );
+      const reporterLines = wrapPdfText(
+        report.reportedByName || 'Unknown',
+        29,
+      );
+      const emailLines = wrapPdfText(
+        report.reportedByEmail || 'Not provided',
+        34,
+      );
+      const locationLines = wrapPdfText(
+        report.location || 'Not specified',
+        73,
+      );
+      const descriptionLines = wrapPdfText(
+        report.description || 'No description provided.',
+        92,
+      );
 
-    rect(margin, y, contentWidth, blockHeight, '#FFFFFF', '#D9E1D7');
-    rect(margin, y, contentWidth, 38, '#F6FAF4');
+      const headerHeight = 52 + Math.max(0, titleLines.length - 1) * 11;
+      const infoHeight =
+        73 +
+        Math.max(0, categoryLines.length - 1) * 10 +
+        Math.max(0, reporterLines.length - 1) * 10 +
+        Math.max(0, emailLines.length - 1) * 10 +
+        Math.max(0, locationLines.length - 1) * 10;
 
-    textCmd(`REPORT ${String(index + 1).padStart(2, '0')}`, margin + 12, y + 14, 7, true, '#4A8C50');
-    textCmd(report.title || 'Untitled report', margin + 12, y + 29, 12, true, '#143E1C');
+      const minimumReportHeight = headerHeight + infoHeight + 90;
 
-    const statusWidth = 72;
-    rect(
-      margin + contentWidth - statusWidth - 12,
-      y + 9,
-      statusWidth,
-      20,
-      report.status === 'Pending'
-        ? '#FFF0B8'
-        : report.status === 'In Review'
-          ? '#D9E8FF'
-          : report.status === 'Resolved'
-            ? '#D8F0DA'
-            : report.status === 'Rejected'
-              ? '#FFDCDC'
-              : '#E9EEE8',
-    );
-    textCmd(
-      report.status || '',
-      margin + contentWidth - statusWidth - 6,
-      y + 23,
-      7,
-      true,
-      '#334033',
-    );
+      if (ensureSpace(minimumReportHeight, 'Report Details')) {
+        drawStatusSectionHeader(
+          `${group.status} - continued`,
+          group.reports.length,
+          'Report Details',
+        );
+      }
 
-    let detailY = y + 54;
-    textCmd('Category', margin + 12, detailY, 7, true, '#718071');
-    textCmd(report.category || 'Not specified', margin + 82, detailY, 8.5, true, '#293329');
-    textCmd('Reporter', margin + 282, detailY, 7, true, '#718071');
-    textCmd(report.reportedByName || 'Unknown', margin + 342, detailY, 8.5, true, '#293329');
+      const reportTop = y;
 
-    detailY += 16;
-    textCmd('Date', margin + 12, detailY, 7, true, '#718071');
-    textCmd(formatExportDateTime(report.createdAt) || 'Not recorded', margin + 82, detailY, 8, false, '#293329');
+      rect(margin, y, contentWidth, headerHeight, '#F8FAF7', '#DCE4DA');
+      rect(margin, y, 6, headerHeight, style.accent);
 
-    detailY += 18;
-    textCmd('Location', margin + 12, detailY, 7, true, '#718071');
-    locationLines.slice(0, 2).forEach((valueLine, lineIndex) => {
-      textCmd(valueLine, margin + 82, detailY + lineIndex * 10, 8, false, '#293329');
+      rect(margin + 16, y + 12, 32, 26, style.fill, style.accent);
+      textCmd(
+        String(reportNo),
+        margin + 26,
+        y + 30,
+        10,
+        true,
+        style.text,
+      );
+
+      textCmd(
+        `REPORT ${String(reportNo).padStart(2, '0')}`,
+        margin + 60,
+        y + 16,
+        7,
+        true,
+        '#678069',
+      );
+
+      titleLines.forEach((valueLine, lineIndex) => {
+        textCmd(
+          valueLine,
+          margin + 60,
+          y + 31 + lineIndex * 11,
+          12,
+          true,
+          '#143E1C',
+        );
+      });
+
+      rect(
+        margin + contentWidth - 86,
+        y + 12,
+        72,
+        22,
+        style.fill,
+        style.accent,
+      );
+      textCmd(
+        group.status,
+        margin + contentWidth - 78,
+        y + 27,
+        7,
+        true,
+        style.text,
+      );
+
+      y += headerHeight + 14;
+
+      const leftX = margin + 14;
+      const rightX = margin + 274;
+      const labelColor = '#748075';
+      const valueColor = '#293329';
+
+      textCmd('CATEGORY', leftX, y, 6.8, true, labelColor);
+      categoryLines.forEach((valueLine, lineIndex) => {
+        textCmd(
+          valueLine,
+          leftX,
+          y + 13 + lineIndex * 10,
+          8,
+          true,
+          valueColor,
+        );
+      });
+
+      textCmd('REPORTED BY', rightX, y, 6.8, true, labelColor);
+      reporterLines.forEach((valueLine, lineIndex) => {
+        textCmd(
+          valueLine,
+          rightX,
+          y + 13 + lineIndex * 10,
+          8,
+          true,
+          valueColor,
+        );
+      });
+
+      const firstInfoRows = Math.max(
+        categoryLines.length,
+        reporterLines.length,
+        1,
+      );
+      y += 24 + Math.max(0, firstInfoRows - 1) * 10;
+
+      textCmd('DATE REPORTED', leftX, y, 6.8, true, labelColor);
+      textCmd(
+        formatExportDateTime(report.createdAt) || 'Not recorded',
+        leftX,
+        y + 13,
+        8,
+        false,
+        valueColor,
+      );
+
+      textCmd('EMAIL', rightX, y, 6.8, true, labelColor);
+      emailLines.forEach((valueLine, lineIndex) => {
+        textCmd(
+          valueLine,
+          rightX,
+          y + 13 + lineIndex * 10,
+          8,
+          false,
+          valueColor,
+        );
+      });
+
+      y += 24 + Math.max(0, emailLines.length - 1) * 10;
+
+      textCmd('LOCATION', leftX, y, 6.8, true, labelColor);
+      locationLines.forEach((valueLine, lineIndex) => {
+        textCmd(
+          valueLine,
+          leftX,
+          y + 13 + lineIndex * 10,
+          8,
+          false,
+          valueColor,
+        );
+      });
+
+      y += 24 + Math.max(0, locationLines.length - 1) * 10;
+      line(margin + 14, y, margin + contentWidth - 14, y, '#DFE5DD');
+      y += 16;
+
+      textCmd('DESCRIPTION', leftX, y, 6.8, true, labelColor);
+      y += 14;
+
+      let descriptionIndex = 0;
+
+      if (!descriptionLines.length) {
+        textCmd(
+          'No description provided.',
+          leftX,
+          y,
+          8,
+          false,
+          '#414A41',
+        );
+        y += 11;
+      } else {
+        while (descriptionIndex < descriptionLines.length) {
+          if (y + 14 > pageBottom) {
+            newPage('Report Details');
+
+            rect(margin, y, contentWidth, 34, '#F8FAF7', '#DCE4DA');
+            rect(margin, y, 6, 34, style.accent);
+            textCmd(
+              `REPORT ${String(reportNo).padStart(2, '0')} - CONTINUED`,
+              margin + 16,
+              y + 21,
+              9,
+              true,
+              '#143E1C',
+            );
+            y += 50;
+
+            textCmd('DESCRIPTION - CONTINUED', margin + 14, y, 6.8, true, labelColor);
+            y += 14;
+          }
+
+          textCmd(
+            descriptionLines[descriptionIndex],
+            leftX,
+            y,
+            8,
+            false,
+            '#414A41',
+          );
+          y += 11;
+          descriptionIndex += 1;
+        }
+      }
+
+      y += 12;
+      line(margin, y, margin + contentWidth, y, '#D7DED5');
+      y += 22;
+
+      // If the report consumed a very small amount of space, keep consistent
+      // vertical rhythm before the next report.
+      if (y < reportTop + minimumReportHeight) {
+        y = reportTop + minimumReportHeight;
+      }
     });
 
-    detailY += 20 + Math.max(0, locationLines.length - 1) * 10;
-    line(margin + 12, detailY, margin + contentWidth - 12, detailY);
-    detailY += 15;
-    textCmd('Description', margin + 12, detailY, 7, true, '#718071');
-    detailY += 12;
-
-    descLines.forEach((valueLine, lineIndex) => {
-      textCmd(valueLine, margin + 12, detailY + lineIndex * 11, 8, false, '#414A41');
-    });
-
-    y += blockHeight + 14;
+    y += 4;
   });
 
   if (current.length) pages.push(current);
@@ -2025,12 +2352,12 @@ function buildStyledPdf(
   pages.forEach((page, index) => {
     page.push(
       `${pdfColor('#7A847A')} rg BT /F1 7 Tf 1 0 0 1 ${margin} 20 Tm (${pdfSafeText(
-        `EcoBantay Environmental Report Export`,
+        'EcoBantay Environmental Report Export',
       )}) Tj ET`,
     );
     page.push(
       `${pdfColor('#7A847A')} rg BT /F1 7 Tf 1 0 0 1 ${
-        pageWidth - margin - 54
+        pageWidth - margin - 62
       } 20 Tm (${pdfSafeText(`Page ${index + 1} of ${pages.length}`)}) Tj ET`,
     );
   });
