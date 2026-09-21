@@ -1927,10 +1927,6 @@ function buildStyledPdf(
     }))
     .filter((group) => group.reports.length > 0);
 
-  const reportNumberById = new Map(
-    reports.map((report, index) => [report.id, index + 1] as const),
-  );
-
   const drawStatusSectionHeader = (
     status: string,
     count: number,
@@ -1998,11 +1994,12 @@ function buildStyledPdf(
   y += 29;
 
   const overviewColumns = [
-    { title: 'No.', width: 34 },
-    { title: 'Report', width: 128 },
-    { title: 'Category', width: 88 },
-    { title: 'Location', width: 178 },
-    { title: 'Date', width: 91 },
+    { title: 'No.', width: 30 },
+    { title: 'Report ID', width: 72 },
+    { title: 'Report', width: 108 },
+    { title: 'Category', width: 78 },
+    { title: 'Location', width: 148 },
+    { title: 'Date', width: 83 },
   ];
 
   const drawOverviewHeader = () => {
@@ -2021,11 +2018,12 @@ function buildStyledPdf(
     drawStatusSectionHeader(group.status, group.reports.length, 'Reports by Status');
     drawOverviewHeader();
 
-    group.reports.forEach((report) => {
-      const reportNo = reportNumberById.get(report.id) || 0;
-      const titleLines = wrapPdfText(report.title || 'Untitled report', 27).slice(0, 2);
-      const categoryLines = wrapPdfText(report.category || 'Not specified', 16).slice(0, 2);
-      const locationLines = wrapPdfText(report.location || 'Not specified', 32).slice(0, 3);
+    group.reports.forEach((report, groupIndex) => {
+      const reportNo = groupIndex + 1;
+      const reportId = `#${report.id.slice(0, 8).toUpperCase()}`;
+      const titleLines = wrapPdfText(report.title || 'Untitled report', 22).slice(0, 2);
+      const categoryLines = wrapPdfText(report.category || 'Not specified', 14).slice(0, 2);
+      const locationLines = wrapPdfText(report.location || 'Not specified', 27).slice(0, 3);
 
       const maxLines = Math.max(
         titleLines.length,
@@ -2050,6 +2048,9 @@ function buildStyledPdf(
       textCmd(String(reportNo), cellX + 10, y + 20, 8, true, '#315B35');
       cellX += overviewColumns[0].width;
 
+      textCmd(reportId, cellX + 6, y + 20, 7.2, true, '#657066');
+      cellX += overviewColumns[1].width;
+
       titleLines.forEach((valueLine, lineIndex) => {
         textCmd(
           valueLine,
@@ -2060,7 +2061,7 @@ function buildStyledPdf(
           '#263128',
         );
       });
-      cellX += overviewColumns[1].width;
+      cellX += overviewColumns[2].width;
 
       categoryLines.forEach((valueLine, lineIndex) => {
         textCmd(
@@ -2072,7 +2073,7 @@ function buildStyledPdf(
           '#3C463D',
         );
       });
-      cellX += overviewColumns[2].width;
+      cellX += overviewColumns[3].width;
 
       locationLines.forEach((valueLine, lineIndex) => {
         textCmd(
@@ -2084,7 +2085,7 @@ function buildStyledPdf(
           '#3C463D',
         );
       });
-      cellX += overviewColumns[3].width;
+      cellX += overviewColumns[4].width;
 
       textCmd(
         report.createdAt
@@ -2108,8 +2109,9 @@ function buildStyledPdf(
   groupedReports.forEach((group) => {
     drawStatusSectionHeader(group.status, group.reports.length, 'Report Details');
 
-    group.reports.forEach((report) => {
-      const reportNo = reportNumberById.get(report.id) || 0;
+    group.reports.forEach((report, groupIndex) => {
+      const reportNo = groupIndex + 1;
+      const reportId = `#${report.id.slice(0, 10).toUpperCase()}`;
       const style = statusStyle(group.status);
       const titleLines = wrapPdfText(
         report.title || 'Untitled report',
@@ -2136,7 +2138,7 @@ function buildStyledPdf(
         92,
       );
 
-      const headerHeight = 52 + Math.max(0, titleLines.length - 1) * 11;
+      const headerHeight = 64 + Math.max(0, titleLines.length - 1) * 11;
       const infoHeight =
         73 +
         Math.max(0, categoryLines.length - 1) * 10 +
@@ -2188,6 +2190,15 @@ function buildStyledPdf(
           '#143E1C',
         );
       });
+
+      textCmd(
+        `Report ID: ${reportId}`,
+        margin + 60,
+        y + 49 + Math.max(0, titleLines.length - 1) * 11,
+        7,
+        true,
+        '#6B756C',
+      );
 
       rect(
         margin + contentWidth - 86,
@@ -2309,10 +2320,18 @@ function buildStyledPdf(
             textCmd(
               `REPORT ${String(reportNo).padStart(2, '0')} - CONTINUED`,
               margin + 16,
-              y + 21,
+              y + 18,
               9,
               true,
               '#143E1C',
+            );
+            textCmd(
+              `Report ID: ${reportId}`,
+              margin + 16,
+              y + 29,
+              6.8,
+              true,
+              '#6B756C',
             );
             y += 50;
 
