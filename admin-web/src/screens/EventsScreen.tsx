@@ -395,9 +395,9 @@ function resolveAutomaticEventStatus(
   ) {
     return {
       ...event,
-      // Legacy "Upcoming" events are shown as Approved.
-      // Approved remains Approved until the event start time.
-      status: "Approved",
+      // Legacy "Approved" events are shown as Upcoming.
+      // Upcoming remains Upcoming until the event start time.
+      status: "Upcoming",
     };
   }
 
@@ -458,7 +458,7 @@ const CATEGORY_OPTIONS = [
 const STATUS_OPTIONS = [
   "All Statuses",
   "Pending",
-  "Approved",
+  "Upcoming",
   "Ongoing",
   "Completed",
   "Rejected",
@@ -1522,7 +1522,10 @@ export default function EventsScreen() {
 
         const moderatedAt = new Date().toISOString();
 
-        if (nextStatus === "Approved") {
+        if (
+          nextStatus === "Upcoming" ||
+          nextStatus === "Approved"
+        ) {
           await updateDoc(
             doc(db, "events", selectedEvent.id),
             {
@@ -1684,7 +1687,7 @@ const confirmRejectEvent = async () => {
             setRejectModalOpen(true);
           }}
           onApprove={() =>
-            void moderateEvent("Approved")
+            void moderateEvent("Upcoming")
           }
         />
       ) : (
