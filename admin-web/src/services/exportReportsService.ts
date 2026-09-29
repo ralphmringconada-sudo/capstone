@@ -1072,17 +1072,44 @@ function xlsxStatusStyle(status: string): number {
 }
 
 
+function groupedReportsByStatus(reports: Report[]): Array<{
+  status: string;
+  reports: Report[];
+}> {
+  const preferredOrder = ['Pending', 'In Review', 'Resolved', 'Rejected'];
+  const statuses = Array.from(
+    new Set(reports.map((report) => String(report.status || 'Other'))),
+  );
+
+  const ordered = [
+    ...preferredOrder.filter((status) => statuses.includes(status)),
+    ...statuses.filter((status) => !preferredOrder.includes(status)),
+  ];
+
+  return ordered
+    .map((status) => ({
+      status,
+      reports: reports.filter(
+        (report) => String(report.status || 'Other') === status,
+      ),
+    }))
+    .filter((group) => group.reports.length > 0);
+}
+
+
 function xlsxStylesXml(): string {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-  <fonts count="4">
+  <fonts count="6">
     <font><sz val="10"/><name val="Aptos"/></font>
     <font><b/><sz val="10"/><name val="Aptos"/></font>
     <font><b/><sz val="20"/><color rgb="FFFFFFFF"/><name val="Aptos Display"/></font>
     <font><b/><sz val="10"/><color rgb="FFFFFFFF"/><name val="Aptos"/></font>
+    <font><b/><sz val="13"/><color rgb="FF145C1E"/><name val="Aptos Display"/></font>
+    <font><b/><sz val="11"/><color rgb="FF17391D"/><name val="Aptos"/></font>
   </fonts>
 
-  <fills count="9">
+  <fills count="10">
     <fill><patternFill patternType="none"/></fill>
     <fill><patternFill patternType="gray125"/></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FF145C1E"/><bgColor indexed="64"/></patternFill></fill>
@@ -1092,9 +1119,10 @@ function xlsxStylesXml(): string {
     <fill><patternFill patternType="solid"><fgColor rgb="FFE2F3E4"/><bgColor indexed="64"/></patternFill></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FFFCE5E5"/><bgColor indexed="64"/></patternFill></fill>
     <fill><patternFill patternType="solid"><fgColor rgb="FFF4F6F3"/><bgColor indexed="64"/></patternFill></fill>
+    <fill><patternFill patternType="solid"><fgColor rgb="FFF9FBF8"/><bgColor indexed="64"/></patternFill></fill>
   </fills>
 
-  <borders count="2">
+  <borders count="3">
     <border/>
     <border>
       <left style="thin"><color rgb="FFD9E0D6"/></left>
@@ -1103,28 +1131,37 @@ function xlsxStylesXml(): string {
       <bottom style="thin"><color rgb="FFD9E0D6"/></bottom>
       <diagonal/>
     </border>
+    <border>
+      <bottom style="medium"><color rgb="FF145C1E"/></bottom>
+      <diagonal/>
+    </border>
   </borders>
 
   <cellStyleXfs count="1">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0"/>
   </cellStyleXfs>
 
-  <cellXfs count="15">
+  <cellXfs count="20">
     <xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>
-    <xf numFmtId="0" fontId="2" fillId="2" borderId="0" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0"/>
+    <xf numFmtId="0" fontId="2" fillId="2" borderId="0" xfId="0" applyAlignment="1"><alignment horizontal="left" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyAlignment="1"><alignment vertical="center"/></xf>
     <xf numFmtId="0" fontId="3" fillId="2" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
     <xf numFmtId="0" fontId="0" fillId="0" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="3" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="4" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="5" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="6" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="7" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="5" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="4" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="6" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="7" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
-    <xf numFmtId="0" fontId="1" fillId="8" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="3" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="4" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="5" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="6" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="7" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="center" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="5" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="4" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="6" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="7" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="8" borderId="1" xfId="0" applyAlignment="1"><alignment horizontal="left" vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="4" fillId="0" borderId="2" xfId="0" applyAlignment="1"><alignment vertical="center"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="8" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="5" fillId="9" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="center" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="1" fillId="0" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
+    <xf numFmtId="0" fontId="0" fillId="9" borderId="1" xfId="0" applyAlignment="1"><alignment vertical="top" wrapText="1"/></xf>
   </cellXfs>
 
   <cellStyles count="1">
@@ -1140,59 +1177,77 @@ function xlsxSummarySheetXml(
   generatedAt: string,
 ): string {
   const rows = [
-    `<row r="1" ht="30" customHeight="1">${xlsxInlineCell(
+    `<row r="1" ht="34" customHeight="1">${xlsxInlineCell(
       1,
       1,
       'EcoBantay Environmental Reports',
       1,
     )}</row>`,
-    `<row r="2">${xlsxInlineCell(
+    `<row r="2" ht="22" customHeight="1">${xlsxInlineCell(
       1,
       2,
       `Generated: ${generatedAt}`,
       2,
     )}</row>`,
-    `<row r="3">${xlsxInlineCell(
+    `<row r="3" ht="22" customHeight="1">${xlsxInlineCell(
       1,
       3,
       `Date Range: ${label}`,
       2,
     )}</row>`,
-    `<row r="5" ht="24" customHeight="1">${xlsxInlineCell(
-      1,
+    `<row r="5" ht="24" customHeight="1">${xlsxInlineCell(1, 5, 'Total Reports', 5)}${xlsxInlineCell(
+      3,
       5,
-      'Total Reports',
-      5,
-    )}${xlsxInlineCell(3, 5, 'In Review', 6)}${xlsxInlineCell(
-      5,
-      5,
-      'Pending',
-      7,
-    )}</row>`,
-    `<row r="6" ht="30" customHeight="1">${xlsxInlineCell(
-      1,
+      'In Review',
       6,
-      summary.total,
-      5,
-    )}${xlsxInlineCell(3, 6, summary.inReview, 6)}${xlsxInlineCell(
-      5,
-      6,
-      summary.pending,
+    )}${xlsxInlineCell(5, 5, 'Pending', 7)}${xlsxInlineCell(
       7,
-    )}</row>`,
-    `<row r="8" ht="24" customHeight="1">${xlsxInlineCell(
-      1,
-      8,
+      5,
       'Resolved',
       8,
-    )}${xlsxInlineCell(3, 8, 'Rejected', 9)}</row>`,
-    `<row r="9" ht="30" customHeight="1">${xlsxInlineCell(
-      1,
-      9,
+    )}${xlsxInlineCell(9, 5, 'Rejected', 9)}</row>`,
+    `<row r="6" ht="34" customHeight="1">${xlsxInlineCell(1, 6, summary.total, 5)}${xlsxInlineCell(
+      3,
+      6,
+      summary.inReview,
+      6,
+    )}${xlsxInlineCell(5, 6, summary.pending, 7)}${xlsxInlineCell(
+      7,
+      6,
       summary.resolved,
       8,
-    )}${xlsxInlineCell(3, 9, summary.rejected, 9)}</row>`,
+    )}${xlsxInlineCell(9, 6, summary.rejected, 9)}</row>`,
+    `<row r="8" ht="26" customHeight="1">${xlsxInlineCell(
+      1,
+      8,
+      'Workbook Guide',
+      15,
+    )}</row>`,
+    `<row r="9" ht="38" customHeight="1">${xlsxInlineCell(
+      1,
+      9,
+      'Reports by Status contains the grouped overview. Report Details contains the same detailed information shown in the PDF, including numbering that restarts at 1 for each status section and the permanent Report ID.',
+      19,
+    )}</row>`,
   ].join('');
+
+  const merges = [
+    'A1:J1',
+    'A2:J2',
+    'A3:J3',
+    'A5:B5',
+    'C5:D5',
+    'E5:F5',
+    'G5:H5',
+    'I5:J5',
+    'A6:B6',
+    'C6:D6',
+    'E6:F6',
+    'G6:H6',
+    'I6:J6',
+    'A8:J8',
+    'A9:J9',
+  ];
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
@@ -1200,97 +1255,365 @@ function xlsxSummarySheetXml(
     <sheetView workbookViewId="0" showGridLines="0"/>
   </sheetViews>
   <cols>
-    <col min="1" max="6" width="18" customWidth="1"/>
+    <col min="1" max="10" width="12" customWidth="1"/>
   </cols>
   <sheetData>${rows}</sheetData>
-  <mergeCells count="9">
-    <mergeCell ref="A1:F1"/>
-    <mergeCell ref="A2:F2"/>
-    <mergeCell ref="A3:F3"/>
-    <mergeCell ref="A5:B5"/>
-    <mergeCell ref="C5:D5"/>
-    <mergeCell ref="E5:F5"/>
-    <mergeCell ref="A6:B6"/>
-    <mergeCell ref="C6:D6"/>
-    <mergeCell ref="E6:F6"/>
+  <mergeCells count="${merges.length}">
+    ${merges.map((ref) => `<mergeCell ref="${ref}"/>`).join('')}
   </mergeCells>
 </worksheet>`;
 }
 
 
-function xlsxReportsSheetXml(reports: Report[]): string {
+function xlsxReportsSheetXml(
+  reports: Report[],
+  label: string,
+  generatedAt: string,
+): string {
+  const groups = groupedReportsByStatus(reports);
   const headers = [
-    'ID',
+    'No.',
+    'Report ID',
     'Report Title',
     'Category',
-    'Status',
     'Location',
+    'Date Reported',
     'Reported By',
     'Email',
-    'Date Reported',
     'Description',
   ];
 
-  const headerCells = headers
-    .map((header, index) => xlsxInlineCell(index + 1, 1, header, 3))
-    .join('');
+  let row = 1;
+  const rows: string[] = [];
+  const merges: string[] = [];
 
-  const rows = reports
-    .map((report, index) => {
-      const row = index + 2;
+  rows.push(
+    `<row r="${row}" ht="34" customHeight="1">${xlsxInlineCell(
+      1,
+      row,
+      'EcoBantay - Reports by Status',
+      1,
+    )}</row>`,
+  );
+  merges.push(`A${row}:I${row}`);
+  row += 1;
+
+  rows.push(
+    `<row r="${row}" ht="20" customHeight="1">${xlsxInlineCell(
+      1,
+      row,
+      `Generated: ${generatedAt}`,
+      2,
+    )}</row>`,
+  );
+  merges.push(`A${row}:I${row}`);
+  row += 1;
+
+  rows.push(
+    `<row r="${row}" ht="20" customHeight="1">${xlsxInlineCell(
+      1,
+      row,
+      `Date Range: ${label}`,
+      2,
+    )}</row>`,
+  );
+  merges.push(`A${row}:I${row}`);
+  row += 2;
+
+  for (const group of groups) {
+    rows.push(
+      `<row r="${row}" ht="28" customHeight="1">${xlsxInlineCell(
+        1,
+        row,
+        `${group.status} - ${group.reports.length} report${
+          group.reports.length === 1 ? '' : 's'
+        }`,
+        xlsxStatusStyle(group.status),
+      )}</row>`,
+    );
+    merges.push(`A${row}:I${row}`);
+    row += 1;
+
+    rows.push(
+      `<row r="${row}" ht="30" customHeight="1">${headers
+        .map((header, index) => xlsxInlineCell(index + 1, row, header, 3))
+        .join('')}</row>`,
+    );
+    row += 1;
+
+    group.reports.forEach((report, groupIndex) => {
+      const longestText = Math.max(
+        String(report.title || '').length,
+        String(report.location || '').length,
+        String(report.reportedByEmail || '').length,
+        String(report.description || '').length,
+      );
+      const rowHeight = Math.min(96, Math.max(42, 30 + Math.floor(longestText / 55) * 14));
       const values = [
-        `#${report.id.slice(0, 8).toUpperCase()}`,
-        report.title || '',
-        report.category || '',
-        report.status || '',
-        report.location || '',
-        report.reportedByName || '',
-        report.reportedByEmail || '',
-        formatExportDateTime(report.createdAt),
-        report.description || '',
+        String(groupIndex + 1),
+        `#${report.id.slice(0, 10).toUpperCase()}`,
+        report.title || 'Untitled report',
+        report.category || 'Not specified',
+        report.location || 'Not specified',
+        formatExportDateTime(report.createdAt) || 'Not recorded',
+        report.reportedByName || 'Unknown',
+        report.reportedByEmail || 'Not provided',
+        report.description || 'No description provided.',
       ];
 
-      return `<row r="${row}" ht="42" customHeight="1">${values
-        .map((value, columnIndex) =>
-          xlsxInlineCell(
-            columnIndex + 1,
-            row,
-            value,
-            columnIndex === 3 ? xlsxStatusStyle(report.status || '') : 4,
-          ),
-        )
-        .join('')}</row>`;
-    })
-    .join('');
+      rows.push(
+        `<row r="${row}" ht="${rowHeight}" customHeight="1">${values
+          .map((value, columnIndex) =>
+            xlsxInlineCell(
+              columnIndex + 1,
+              row,
+              value,
+              columnIndex === 2 ? 18 : columnIndex === 8 ? 19 : 4,
+            ),
+          )
+          .join('')}</row>`,
+      );
+      row += 1;
+    });
 
-  const lastRow = Math.max(1, reports.length + 1);
+    row += 1;
+  }
 
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheetViews>
-    <sheetView workbookViewId="0">
-      <pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>
+    <sheetView workbookViewId="0" showGridLines="0">
+      <pane ySplit="4" topLeftCell="A5" activePane="bottomLeft" state="frozen"/>
     </sheetView>
   </sheetViews>
-
   <cols>
-    <col min="1" max="1" width="14" customWidth="1"/>
-    <col min="2" max="2" width="28" customWidth="1"/>
-    <col min="3" max="3" width="19" customWidth="1"/>
-    <col min="4" max="4" width="15" customWidth="1"/>
+    <col min="1" max="1" width="7" customWidth="1"/>
+    <col min="2" max="2" width="17" customWidth="1"/>
+    <col min="3" max="3" width="30" customWidth="1"/>
+    <col min="4" max="4" width="19" customWidth="1"/>
     <col min="5" max="5" width="34" customWidth="1"/>
-    <col min="6" max="6" width="22" customWidth="1"/>
-    <col min="7" max="7" width="28" customWidth="1"/>
-    <col min="8" max="8" width="23" customWidth="1"/>
-    <col min="9" max="9" width="48" customWidth="1"/>
+    <col min="6" max="6" width="23" customWidth="1"/>
+    <col min="7" max="7" width="23" customWidth="1"/>
+    <col min="8" max="8" width="30" customWidth="1"/>
+    <col min="9" max="9" width="52" customWidth="1"/>
   </cols>
+  <sheetData>${rows.join('')}</sheetData>
+  <mergeCells count="${merges.length}">
+    ${merges.map((ref) => `<mergeCell ref="${ref}"/>`).join('')}
+  </mergeCells>
+</worksheet>`;
+}
 
-  <sheetData>
-    <row r="1" ht="28" customHeight="1">${headerCells}</row>
-    ${rows}
-  </sheetData>
 
-  <autoFilter ref="A1:I${lastRow}"/>
+function xlsxReportDetailsSheetXml(
+  reports: Report[],
+  label: string,
+  generatedAt: string,
+): string {
+  const groups = groupedReportsByStatus(reports);
+  let row = 1;
+  const rows: string[] = [];
+  const merges: string[] = [];
+
+  rows.push(
+    `<row r="${row}" ht="34" customHeight="1">${xlsxInlineCell(
+      1,
+      row,
+      'EcoBantay - Report Details',
+      1,
+    )}</row>`,
+  );
+  merges.push(`A${row}:I${row}`);
+  row += 1;
+
+  rows.push(
+    `<row r="${row}" ht="20" customHeight="1">${xlsxInlineCell(
+      1,
+      row,
+      `Generated: ${generatedAt}`,
+      2,
+    )}</row>`,
+  );
+  merges.push(`A${row}:I${row}`);
+  row += 1;
+
+  rows.push(
+    `<row r="${row}" ht="20" customHeight="1">${xlsxInlineCell(
+      1,
+      row,
+      `Date Range: ${label}`,
+      2,
+    )}</row>`,
+  );
+  merges.push(`A${row}:I${row}`);
+  row += 2;
+
+  for (const group of groups) {
+    rows.push(
+      `<row r="${row}" ht="30" customHeight="1">${xlsxInlineCell(
+        1,
+        row,
+        `${group.status} - ${group.reports.length} report${
+          group.reports.length === 1 ? '' : 's'
+        }`,
+        xlsxStatusStyle(group.status),
+      )}</row>`,
+    );
+    merges.push(`A${row}:I${row}`);
+    row += 2;
+
+    group.reports.forEach((report, groupIndex) => {
+      rows.push(
+        `<row r="${row}" ht="28" customHeight="1">${xlsxInlineCell(
+          1,
+          row,
+          `REPORT ${String(groupIndex + 1).padStart(2, '0')} - ${
+            report.title || 'Untitled report'
+          }`,
+          15,
+        )}</row>`,
+      );
+      merges.push(`A${row}:I${row}`);
+      row += 1;
+
+      rows.push(
+        `<row r="${row}" ht="24" customHeight="1">${xlsxInlineCell(
+          1,
+          row,
+          'Report No.',
+          16,
+        )}${xlsxInlineCell(2, row, String(groupIndex + 1), 17)}${xlsxInlineCell(
+          5,
+          row,
+          'Report ID',
+          16,
+        )}${xlsxInlineCell(
+          6,
+          row,
+          `#${report.id.slice(0, 10).toUpperCase()}`,
+          17,
+        )}</row>`,
+      );
+      merges.push(`B${row}:D${row}`, `F${row}:I${row}`);
+      row += 1;
+
+      rows.push(
+        `<row r="${row}" ht="36" customHeight="1">${xlsxInlineCell(
+          1,
+          row,
+          'Report Title',
+          16,
+        )}${xlsxInlineCell(
+          2,
+          row,
+          report.title || 'Untitled report',
+          18,
+        )}</row>`,
+      );
+      merges.push(`B${row}:I${row}`);
+      row += 1;
+
+      rows.push(
+        `<row r="${row}" ht="30" customHeight="1">${xlsxInlineCell(
+          1,
+          row,
+          'Category',
+          16,
+        )}${xlsxInlineCell(
+          2,
+          row,
+          report.category || 'Not specified',
+          4,
+        )}${xlsxInlineCell(5, row, 'Reported By', 16)}${xlsxInlineCell(
+          6,
+          row,
+          report.reportedByName || 'Unknown',
+          4,
+        )}</row>`,
+      );
+      merges.push(`B${row}:D${row}`, `F${row}:I${row}`);
+      row += 1;
+
+      rows.push(
+        `<row r="${row}" ht="30" customHeight="1">${xlsxInlineCell(
+          1,
+          row,
+          'Date Reported',
+          16,
+        )}${xlsxInlineCell(
+          2,
+          row,
+          formatExportDateTime(report.createdAt) || 'Not recorded',
+          4,
+        )}${xlsxInlineCell(5, row, 'Email', 16)}${xlsxInlineCell(
+          6,
+          row,
+          report.reportedByEmail || 'Not provided',
+          4,
+        )}</row>`,
+      );
+      merges.push(`B${row}:D${row}`, `F${row}:I${row}`);
+      row += 1;
+
+      const locationHeight = Math.min(
+        72,
+        Math.max(30, 28 + Math.floor(String(report.location || '').length / 70) * 14),
+      );
+      rows.push(
+        `<row r="${row}" ht="${locationHeight}" customHeight="1">${xlsxInlineCell(
+          1,
+          row,
+          'Location',
+          16,
+        )}${xlsxInlineCell(
+          2,
+          row,
+          report.location || 'Not specified',
+          19,
+        )}</row>`,
+      );
+      merges.push(`B${row}:I${row}`);
+      row += 1;
+
+      const descriptionHeight = Math.min(
+        150,
+        Math.max(52, 40 + Math.floor(String(report.description || '').length / 85) * 15),
+      );
+      rows.push(
+        `<row r="${row}" ht="${descriptionHeight}" customHeight="1">${xlsxInlineCell(
+          1,
+          row,
+          'Description',
+          16,
+        )}${xlsxInlineCell(
+          2,
+          row,
+          report.description || 'No description provided.',
+          19,
+        )}</row>`,
+      );
+      merges.push(`B${row}:I${row}`);
+      row += 2;
+    });
+  }
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <sheetViews>
+    <sheetView workbookViewId="0" showGridLines="0">
+      <pane ySplit="4" topLeftCell="A5" activePane="bottomLeft" state="frozen"/>
+    </sheetView>
+  </sheetViews>
+  <cols>
+    <col min="1" max="1" width="18" customWidth="1"/>
+    <col min="2" max="4" width="16" customWidth="1"/>
+    <col min="5" max="5" width="18" customWidth="1"/>
+    <col min="6" max="9" width="16" customWidth="1"/>
+  </cols>
+  <sheetData>${rows.join('')}</sheetData>
+  <mergeCells count="${merges.length}">
+    ${merges.map((ref) => `<mergeCell ref="${ref}"/>`).join('')}
+  </mergeCells>
 </worksheet>`;
 }
 
@@ -1312,6 +1635,7 @@ async function reportsToStyledXlsx(
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
   <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  <Override PartName="/xl/worksheets/sheet3.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
   <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
 </Types>`,
   );
@@ -1332,7 +1656,8 @@ async function reportsToStyledXlsx(
  xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheets>
     <sheet name="Summary" sheetId="1" r:id="rId1"/>
-    <sheet name="Reports" sheetId="2" r:id="rId2"/>
+    <sheet name="Reports by Status" sheetId="2" r:id="rId2"/>
+    <sheet name="Report Details" sheetId="3" r:id="rId3"/>
   </sheets>
 </workbook>`,
   );
@@ -1343,7 +1668,8 @@ async function reportsToStyledXlsx(
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
   <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
-  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+  <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet3.xml"/>
+  <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
 </Relationships>`,
   );
 
@@ -1354,7 +1680,14 @@ async function reportsToStyledXlsx(
     'sheet1.xml',
     xlsxSummarySheetXml(summary, label, generatedAt),
   );
-  worksheets?.file('sheet2.xml', xlsxReportsSheetXml(reports));
+  worksheets?.file(
+    'sheet2.xml',
+    xlsxReportsSheetXml(reports, label, generatedAt),
+  );
+  worksheets?.file(
+    'sheet3.xml',
+    xlsxReportDetailsSheetXml(reports, label, generatedAt),
+  );
 
   return zip.generateAsync({
     type: 'blob',
@@ -1379,9 +1712,14 @@ function wordRun(
     options?.size ? `<w:szCs w:val="${options.size}"/>` : '',
   ].join('');
 
-  return `<w:r><w:rPr>${props}</w:rPr><w:t xml:space="preserve">${escapeXml(
-    value,
-  )}</w:t></w:r>`;
+  const lines = String(value ?? '').split(/\r?\n/);
+  const content = lines
+    .map((line, index) =>
+      `${index > 0 ? '<w:br/>' : ''}<w:t xml:space="preserve">${escapeXml(line)}</w:t>`,
+    )
+    .join('');
+
+  return `<w:r><w:rPr>${props}</w:rPr>${content}</w:r>`;
 }
 
 
@@ -1391,14 +1729,23 @@ function wordParagraph(
     bold?: boolean;
     color?: string;
     size?: number;
+    before?: number;
     after?: number;
-    align?: 'left' | 'center';
+    align?: 'left' | 'center' | 'right';
+    keepNext?: boolean;
   },
 ): string {
   return `<w:p>
     <w:pPr>
       ${options?.align ? `<w:jc w:val="${options.align}"/>` : ''}
-      ${options?.after !== undefined ? `<w:spacing w:after="${options.after}"/>` : ''}
+      ${
+        options?.before !== undefined || options?.after !== undefined
+          ? `<w:spacing${
+              options?.before !== undefined ? ` w:before="${options.before}"` : ''
+            }${options?.after !== undefined ? ` w:after="${options.after}"` : ''}/>`
+          : ''
+      }
+      ${options?.keepNext ? '<w:keepNext/>' : ''}
     </w:pPr>
     ${wordRun(value, options)}
   </w:p>`;
@@ -1408,12 +1755,22 @@ function wordParagraph(
 function wordCell(
   value: unknown,
   shade = 'FFFFFF',
-  options?: { bold?: boolean; color?: string; width?: number },
+  options?: {
+    bold?: boolean;
+    color?: string;
+    width?: number;
+    gridSpan?: number;
+    size?: number;
+    align?: 'left' | 'center' | 'right';
+    keepNext?: boolean;
+  },
 ): string {
   return `<w:tc>
     <w:tcPr>
       ${options?.width ? `<w:tcW w:w="${options.width}" w:type="dxa"/>` : ''}
+      ${options?.gridSpan ? `<w:gridSpan w:val="${options.gridSpan}"/>` : ''}
       <w:shd w:fill="${shade}"/>
+      <w:vAlign w:val="center"/>
       <w:tcMar>
         <w:top w:w="90" w:type="dxa"/>
         <w:left w:w="110" w:type="dxa"/>
@@ -1424,19 +1781,64 @@ function wordCell(
     ${wordParagraph(value, {
       bold: options?.bold,
       color: options?.color,
-      size: 20,
+      size: options?.size || 19,
       after: 0,
+      align: options?.align,
+      keepNext: options?.keepNext,
     })}
   </w:tc>`;
 }
 
 
 function wordStatusShade(status: string): string {
-  if (status === 'Pending') return 'FFF0B8';
-  if (status === 'In Review') return 'D9E8FF';
-  if (status === 'Resolved') return 'D8F0DA';
-  if (status === 'Rejected') return 'FFDCDC';
-  return 'E9EEE8';
+  if (status === 'Pending') return 'FFF4D5';
+  if (status === 'In Review') return 'E7F0FF';
+  if (status === 'Resolved') return 'E5F4E7';
+  if (status === 'Rejected') return 'FDE8E8';
+  return 'EEF1EE';
+}
+
+
+function wordStatusTextColor(status: string): string {
+  if (status === 'Pending') return '8B6505';
+  if (status === 'In Review') return '315B9C';
+  if (status === 'Resolved') return '197126';
+  if (status === 'Rejected') return 'A33131';
+  return '4F5B4F';
+}
+
+
+function wordTableBorders(color = 'D9E0D6'): string {
+  return `<w:tblBorders>
+    <w:top w:val="single" w:sz="4" w:color="${color}"/>
+    <w:left w:val="single" w:sz="4" w:color="${color}"/>
+    <w:bottom w:val="single" w:sz="4" w:color="${color}"/>
+    <w:right w:val="single" w:sz="4" w:color="${color}"/>
+    <w:insideH w:val="single" w:sz="4" w:color="E5EAE3"/>
+    <w:insideV w:val="single" w:sz="4" w:color="E5EAE3"/>
+  </w:tblBorders>`;
+}
+
+
+function wordStatusBanner(status: string, count: number): string {
+  return `<w:tbl>
+    <w:tblPr>
+      <w:tblW w:w="0" w:type="auto"/>
+      ${wordTableBorders('D9E0D6')}
+    </w:tblPr>
+    <w:tr>
+      ${wordCell(
+        `${status} - ${count} report${count === 1 ? '' : 's'}`,
+        wordStatusShade(status),
+        {
+          bold: true,
+          color: wordStatusTextColor(status),
+          size: 22,
+          keepNext: true,
+        },
+      )}
+    </w:tr>
+  </w:tbl>`;
 }
 
 
@@ -1446,91 +1848,158 @@ async function reportsToStyledDocx(
 ): Promise<Blob> {
   const zip = new JSZip();
   const summary = summarizeReports(reports);
+  const groups = groupedReportsByStatus(reports);
 
-  const overviewRows = reports
-    .map(
-      (report) => `
-      <w:tr>
-        ${wordCell(`#${report.id.slice(0, 8).toUpperCase()}`, 'FFFFFF')}
-        ${wordCell(report.title || '', 'FFFFFF')}
-        ${wordCell(report.category || '', 'FFFFFF')}
-        ${wordCell(report.status || '', wordStatusShade(report.status || ''), {
-          bold: true,
-        })}
-        ${wordCell(report.location || '', 'FFFFFF')}
-        ${wordCell(formatExportDateTime(report.createdAt), 'FFFFFF')}
-      </w:tr>`,
-    )
-    .join('');
+  const overviewSections = groups
+    .map((group) => {
+      const rows = group.reports
+        .map(
+          (report, groupIndex) => `
+          <w:tr>
+            ${wordCell(String(groupIndex + 1), 'FFFFFF', {
+              bold: true,
+              align: 'center',
+              width: 650,
+            })}
+            ${wordCell(`#${report.id.slice(0, 10).toUpperCase()}`, 'FFFFFF', {
+              bold: true,
+              width: 1800,
+            })}
+            ${wordCell(report.title || 'Untitled report', 'FFFFFF', {
+              bold: true,
+              width: 1900,
+            })}
+            ${wordCell(report.category || 'Not specified', 'FFFFFF', {
+              width: 1350,
+            })}
+            ${wordCell(report.location || 'Not specified', 'FFFFFF', {
+              width: 2150,
+            })}
+            ${wordCell(formatExportDateTime(report.createdAt) || 'Not recorded', 'FFFFFF', {
+              width: 1850,
+            })}
+          </w:tr>`,
+        )
+        .join('');
 
-  const detailSections = reports
-    .map(
-      (report, index) => `
-      ${wordParagraph(`REPORT ${String(index + 1).padStart(2, '0')}`, {
-        bold: true,
-        color: '4A8C50',
-        size: 18,
-        after: 80,
-      })}
-      ${wordParagraph(report.title || 'Untitled report', {
-        bold: true,
-        color: '145C1E',
-        size: 30,
-        after: 50,
-      })}
-      ${wordParagraph(`#${report.id.slice(0, 10).toUpperCase()}  •  ${report.status || ''}`, {
-        color: '647064',
-        size: 18,
-        after: 120,
-      })}
-
+      return `
+      ${wordStatusBanner(group.status, group.reports.length)}
       <w:tbl>
         <w:tblPr>
           <w:tblW w:w="0" w:type="auto"/>
-          <w:tblBorders>
-            <w:top w:val="single" w:sz="4" w:color="DDE3DB"/>
-            <w:left w:val="single" w:sz="4" w:color="DDE3DB"/>
-            <w:bottom w:val="single" w:sz="4" w:color="DDE3DB"/>
-            <w:right w:val="single" w:sz="4" w:color="DDE3DB"/>
-            <w:insideH w:val="single" w:sz="4" w:color="DDE3DB"/>
-            <w:insideV w:val="single" w:sz="4" w:color="DDE3DB"/>
-          </w:tblBorders>
+          <w:tblLayout w:type="fixed"/>
+          ${wordTableBorders()}
         </w:tblPr>
+        <w:tblGrid>
+          <w:gridCol w:w="650"/>
+          <w:gridCol w:w="1800"/>
+          <w:gridCol w:w="1900"/>
+          <w:gridCol w:w="1350"/>
+          <w:gridCol w:w="2150"/>
+          <w:gridCol w:w="1850"/>
+        </w:tblGrid>
         <w:tr>
-          ${wordCell('Category', 'F4F7F3', { bold: true })}
-          ${wordCell(report.category || 'Not specified', 'FFFFFF')}
-          ${wordCell('Date Reported', 'F4F7F3', { bold: true })}
-          ${wordCell(formatExportDateTime(report.createdAt) || 'Not recorded', 'FFFFFF')}
+          ${wordCell('No.', '145C1E', { bold: true, color: 'FFFFFF', align: 'center', width: 650 })}
+          ${wordCell('Report ID', '145C1E', { bold: true, color: 'FFFFFF', width: 1650 })}
+          ${wordCell('Report', '145C1E', { bold: true, color: 'FFFFFF', width: 1900 })}
+          ${wordCell('Category', '145C1E', { bold: true, color: 'FFFFFF', width: 1350 })}
+          ${wordCell('Location', '145C1E', { bold: true, color: 'FFFFFF', width: 2300 })}
+          ${wordCell('Date Reported', '145C1E', { bold: true, color: 'FFFFFF', width: 1850 })}
         </w:tr>
-        <w:tr>
-          ${wordCell('Location', 'F4F7F3', { bold: true })}
-          ${wordCell(report.location || 'Not specified', 'FFFFFF')}
-          ${wordCell('Reported By', 'F4F7F3', { bold: true })}
-          ${wordCell(report.reportedByName || 'Unknown', 'FFFFFF')}
-        </w:tr>
-        <w:tr>
-          ${wordCell('Email', 'F4F7F3', { bold: true })}
-          ${wordCell(report.reportedByEmail || 'Not provided', 'FFFFFF')}
-        </w:tr>
+        ${rows}
       </w:tbl>
+      ${wordParagraph('', { after: 180 })}`;
+    })
+    .join('');
 
-      ${wordParagraph('Description', {
-        bold: true,
-        color: '145C1E',
-        size: 22,
-        after: 50,
-      })}
-      ${wordParagraph(report.description || 'No description provided.', {
-        color: '444444',
-        size: 20,
-        after: 180,
-      })}
+  const detailSections = groups
+    .map((group, groupIndex) => {
+      const reportsXml = group.reports
+        .map(
+          (report, reportIndex) => `
+          ${wordParagraph(`REPORT ${String(reportIndex + 1).padStart(2, '0')}`, {
+            bold: true,
+            color: '4A8C50',
+            size: 18,
+            before: 100,
+            after: 50,
+            keepNext: true,
+          })}
+          ${wordParagraph(report.title || 'Untitled report', {
+            bold: true,
+            color: '145C1E',
+            size: 30,
+            after: 35,
+            keepNext: true,
+          })}
+          ${wordParagraph(`Report ID: #${report.id.slice(0, 10).toUpperCase()}`, {
+            bold: true,
+            color: '647064',
+            size: 18,
+            after: 100,
+            keepNext: true,
+          })}
 
-      <w:p>
-        <w:pPr><w:spacing w:after="180"/></w:pPr>
-        <w:r><w:br w:type="page"/></w:r>
-      </w:p>`,
-    )
+          <w:tbl>
+            <w:tblPr>
+              <w:tblW w:w="0" w:type="auto"/>
+              <w:tblLayout w:type="fixed"/>
+              ${wordTableBorders('DDE3DB')}
+            </w:tblPr>
+            <w:tblGrid>
+              <w:gridCol w:w="1550"/>
+              <w:gridCol w:w="3000"/>
+              <w:gridCol w:w="1550"/>
+              <w:gridCol w:w="3000"/>
+            </w:tblGrid>
+            <w:tr>
+              ${wordCell('Category', 'F4F7F3', { bold: true, width: 1550 })}
+              ${wordCell(report.category || 'Not specified', 'FFFFFF', { width: 3000 })}
+              ${wordCell('Reported By', 'F4F7F3', { bold: true, width: 1550 })}
+              ${wordCell(report.reportedByName || 'Unknown', 'FFFFFF', { width: 3000 })}
+            </w:tr>
+            <w:tr>
+              ${wordCell('Date Reported', 'F4F7F3', { bold: true, width: 1550 })}
+              ${wordCell(formatExportDateTime(report.createdAt) || 'Not recorded', 'FFFFFF', {
+                width: 3000,
+              })}
+              ${wordCell('Email', 'F4F7F3', { bold: true, width: 1550 })}
+              ${wordCell(report.reportedByEmail || 'Not provided', 'FFFFFF', { width: 3000 })}
+            </w:tr>
+            <w:tr>
+              ${wordCell('Location', 'F4F7F3', { bold: true, width: 1550 })}
+              ${wordCell(report.location || 'Not specified', 'FFFFFF', {
+                gridSpan: 3,
+                width: 7550,
+              })}
+            </w:tr>
+          </w:tbl>
+
+          ${wordParagraph('Description', {
+            bold: true,
+            color: '145C1E',
+            size: 22,
+            before: 120,
+            after: 45,
+            keepNext: true,
+          })}
+          ${wordParagraph(report.description || 'No description provided.', {
+            color: '444444',
+            size: 20,
+            after: 130,
+          })}
+          ${
+            reportIndex < group.reports.length - 1
+              ? `<w:p><w:pPr><w:pBdr><w:bottom w:val="single" w:sz="6" w:space="8" w:color="DDE3DB"/></w:pBdr><w:spacing w:after="140"/></w:pPr></w:p>`
+              : ''
+          }`,
+        )
+        .join('');
+
+      return `
+      ${wordStatusBanner(group.status, group.reports.length)}
+      ${reportsXml}`;
+    })
     .join('');
 
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -1542,23 +2011,31 @@ async function reportsToStyledDocx(
       </w:tblPr>
       <w:tr>
         <w:tc>
-          <w:tcPr><w:shd w:fill="145C1E"/></w:tcPr>
+          <w:tcPr>
+            <w:shd w:fill="145C1E"/>
+            <w:tcMar>
+              <w:top w:w="180" w:type="dxa"/>
+              <w:left w:w="220" w:type="dxa"/>
+              <w:bottom w:w="180" w:type="dxa"/>
+              <w:right w:w="220" w:type="dxa"/>
+            </w:tcMar>
+          </w:tcPr>
           ${wordParagraph('ECOBANTAY', {
             bold: true,
             color: 'FFFFFF',
             size: 20,
-            after: 60,
+            after: 50,
           })}
           ${wordParagraph('Environmental Reports', {
             bold: true,
             color: 'FFFFFF',
             size: 38,
-            after: 40,
+            after: 35,
           })}
           ${wordParagraph('Environmental monitoring and community reporting export', {
             color: 'E7F2E1',
             size: 20,
-            after: 80,
+            after: 40,
           })}
         </w:tc>
       </w:tr>
@@ -1567,86 +2044,61 @@ async function reportsToStyledDocx(
     ${wordParagraph(`Generated: ${new Date().toLocaleString()}`, {
       color: '647064',
       size: 18,
+      before: 100,
       after: 20,
     })}
     ${wordParagraph(`Date Range: ${label}`, {
       color: '647064',
       size: 18,
-      after: 160,
+      after: 150,
     })}
 
     ${wordParagraph('Export Summary', {
       bold: true,
       color: '145C1E',
       size: 28,
-      after: 80,
+      after: 70,
+      keepNext: true,
     })}
 
     <w:tbl>
       <w:tblPr>
         <w:tblW w:w="0" w:type="auto"/>
-        <w:tblBorders>
-          <w:top w:val="single" w:sz="4" w:color="DDE3DB"/>
-          <w:left w:val="single" w:sz="4" w:color="DDE3DB"/>
-          <w:bottom w:val="single" w:sz="4" w:color="DDE3DB"/>
-          <w:right w:val="single" w:sz="4" w:color="DDE3DB"/>
-          <w:insideH w:val="single" w:sz="4" w:color="DDE3DB"/>
-          <w:insideV w:val="single" w:sz="4" w:color="DDE3DB"/>
-        </w:tblBorders>
+        ${wordTableBorders('DDE3DB')}
       </w:tblPr>
       <w:tr>
-        ${wordCell(`Total\n${summary.total}`, 'E7F2E1', { bold: true })}
-        ${wordCell(`In Review\n${summary.inReview}`, 'E4F1FC', { bold: true })}
-        ${wordCell(`Pending\n${summary.pending}`, 'FFF5D9', { bold: true })}
-        ${wordCell(`Resolved\n${summary.resolved}`, 'E2F3E4', { bold: true })}
-        ${wordCell(`Rejected\n${summary.rejected}`, 'FCE5E5', { bold: true })}
+        ${wordCell(`Total\n${summary.total}`, 'E7F2E1', { bold: true, align: 'center' })}
+        ${wordCell(`In Review\n${summary.inReview}`, 'E4F1FC', { bold: true, align: 'center' })}
+        ${wordCell(`Pending\n${summary.pending}`, 'FFF5D9', { bold: true, align: 'center' })}
+        ${wordCell(`Resolved\n${summary.resolved}`, 'E2F3E4', { bold: true, align: 'center' })}
+        ${wordCell(`Rejected\n${summary.rejected}`, 'FCE5E5', { bold: true, align: 'center' })}
       </w:tr>
     </w:tbl>
 
-    ${wordParagraph('Report Overview', {
+    ${wordParagraph('Reports by Status', {
       bold: true,
       color: '145C1E',
       size: 28,
+      before: 180,
       after: 80,
+      keepNext: true,
     })}
 
-    <w:tbl>
-      <w:tblPr>
-        <w:tblW w:w="0" w:type="auto"/>
-        <w:tblBorders>
-          <w:top w:val="single" w:sz="4" w:color="D9E0D6"/>
-          <w:left w:val="single" w:sz="4" w:color="D9E0D6"/>
-          <w:bottom w:val="single" w:sz="4" w:color="D9E0D6"/>
-          <w:right w:val="single" w:sz="4" w:color="D9E0D6"/>
-          <w:insideH w:val="single" w:sz="4" w:color="E5EAE3"/>
-          <w:insideV w:val="single" w:sz="4" w:color="E5EAE3"/>
-        </w:tblBorders>
-      </w:tblPr>
-      <w:tr>
-        ${wordCell('ID', '145C1E', { bold: true, color: 'FFFFFF' })}
-        ${wordCell('Report', '145C1E', { bold: true, color: 'FFFFFF' })}
-        ${wordCell('Category', '145C1E', { bold: true, color: 'FFFFFF' })}
-        ${wordCell('Status', '145C1E', { bold: true, color: 'FFFFFF' })}
-        ${wordCell('Location', '145C1E', { bold: true, color: 'FFFFFF' })}
-        ${wordCell('Date Reported', '145C1E', { bold: true, color: 'FFFFFF' })}
-      </w:tr>
-      ${overviewRows}
-    </w:tbl>
-
-    <w:p><w:r><w:br w:type="page"/></w:r></w:p>
+    ${overviewSections}
 
     ${wordParagraph('Report Details', {
       bold: true,
       color: '145C1E',
       size: 30,
-      after: 140,
+      after: 120,
+      keepNext: true,
     })}
 
     ${detailSections}
 
     <w:sectPr>
       <w:pgSz w:w="11906" w:h="16838"/>
-      <w:pgMar w:top="900" w:right="900" w:bottom="900" w:left="900" w:header="450" w:footer="450" w:gutter="0"/>
+      <w:pgMar w:top="850" w:right="700" w:bottom="850" w:left="700" w:header="450" w:footer="450" w:gutter="0"/>
     </w:sectPr>
   </w:body>
 </w:document>`;
@@ -1689,6 +2141,7 @@ async function reportsToStyledDocx(
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
     <w:name w:val="Normal"/>
+    <w:pPr><w:spacing w:after="60" w:line="240" w:lineRule="auto"/></w:pPr>
     <w:rPr>
       <w:rFonts w:ascii="Aptos" w:hAnsi="Aptos"/>
       <w:sz w:val="20"/>

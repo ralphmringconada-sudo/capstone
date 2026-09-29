@@ -90,6 +90,7 @@ type EventFormField =
   | "title"
   | "description"
   | "date"
+  | "endDate"
   | "time"
   | "endTime"
   | "location"
@@ -123,6 +124,18 @@ type ModeratedEventView = AdminEvent & {
   rejectedByUid?: string;
   rejectedByName?: string;
   rejectedAt?: string;
+};
+
+type EventDayEntry = {
+  day: number;
+  date: string;
+};
+
+type MultiDayEventView = AdminEvent & {
+  startDate?: string;
+  endDate?: string;
+  durationDays?: number;
+  eventDays?: EventDayEntry[];
 };
 
 type EventStatus = AdminEvent["status"];
@@ -247,32 +260,32 @@ function isEventWithinDateRange(
   fallbackCreatedAt: unknown,
   fromDate: string,
   toDate: string,
+  eventEndDate?: unknown,
 ): boolean {
   if (!fromDate && !toDate) {
     return true;
   }
 
-  const eventDateKey =
+  const eventStartKey =
     toLocalCalendarDateKey(eventDate) ||
     toLocalCalendarDateKey(fallbackCreatedAt);
 
-  if (!eventDateKey) {
+  if (!eventStartKey) {
     return false;
   }
 
-  // One selected date = exact event date only.
-  if (fromDate && !toDate) {
-    return eventDateKey === fromDate;
-  }
+  const eventEndKey =
+    toLocalCalendarDateKey(eventEndDate) ||
+    eventStartKey;
 
-  if (!fromDate && toDate) {
-    return eventDateKey === toDate;
-  }
+  const filterStart = fromDate || toDate;
+  const filterEnd = toDate || fromDate;
 
-  // Two selected dates = inclusive date range.
+  // Multi-day events match when any part of the event overlaps
+  // the selected date or date range.
   return (
-    eventDateKey >= fromDate &&
-    eventDateKey <= toDate
+    eventStartKey <= filterEnd &&
+    eventEndKey >= filterStart
   );
 }
 
@@ -311,6 +324,262 @@ function combineEventDateTime(
   return Number.isNaN(value.getTime())
     ? ""
     : value.toISOString();
+}
+
+function addDaysToIsoDate(
+  isoDate: string,
+  daysToAdd: number
+): string {
+  const [year, month, day] = isoDate
+    .split("-")
+    .map(Number);
+
+  if (
+    !Number.isFinite(year) ||
+    !Number.isFinite(month) ||
+    !Number.isFinite(day)
+  ) {
+    return isoDate;
+  }
+
+  const value = new Date(
+    year,
+    month - 1,
+    day + daysToAdd,
+    12,
+    0,
+    0,
+    0
+  );
+
+  return toIsoDate(value);
+}
+
+function buildEventDays(
+  startDate: string,
+  durationDays: number
+): EventDayEntry[] {
+  if (
+    !startDate ||
+    !Number.isInteger(durationDays) ||
+    durationDays < 1
+  ) {
+    return [];
+  }
+
+  return Array.from(
+    { length: durationDays },
+    (_, index) => ({
+      day: index + 1,
+      date: addDaysToIsoDate(
+        startDate,
+        index
+      ),
+    })
+  );
+}
+
+function buildEventDaysBetween(
+  startDate: string,
+  endDate: string
+): EventDayEntry[] {
+  if (!startDate || !endDate || endDate < startDate) {
+    return [];
+  }
+
+  const start = new Date(`${startDate}T12:00:00`);
+  const end = new Date(`${endDate}T12:00:00`);
+
+  if (
+    Number.isNaN(start.getTime()) ||
+    Number.isNaN(end.getTime())
+  ) {
+    return [];
+  }
+
+  const dayMs = 24 * 60 * 60 * 1000;
+  const totalDays =
+    Math.floor((end.getTime() - start.getTime()) / dayMs) + 1;
+
+  return Array.from(
+    { length: totalDays },
+    (_, index) => ({
+      day: index + 1,
+      date: addDaysToIsoDate(startDate, index),
+    })
+  );
+}
+
+function parseEventTimeToHhMm(value: unknown): string {
+  if (typeof value !== "string") return "";
+
+  const trimmed = value.trim();
+
+  const twentyFourHour = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+  if (twentyFourHour) {
+    const hours = Number(twentyFourHour[1]);
+    const minutes = Number(twentyFourHour[2]);
+
+    if (hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59) {
+      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+    }
+  }
+
+  const twelveHour = trimmed.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (!twelveHour) return "";
+
+  let hours = Number(twelveHour[1]);
+  const minutes = Number(twelveHour[2]);
+  const meridiem = twelveHour[3].toUpperCase();
+
+  if (
+    hours < 1 ||
+    hours > 12 ||
+    minutes < 0 ||
+    minutes > 59
+  ) {
+    return "";
+  }
+
+  if (meridiem === "AM") {
+    hours = hours === 12 ? 0 : hours;
+  } else {
+    hours = hours === 12 ? 12 : hours + 12;
+  }
+
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+function getEventScheduleMeta(
+  event: AdminEvent
+): {
+  durationDays: number;
+  startDate: string;
+  endDate: string;
+  days: EventDayEntry[];
+} {
+  const multiDayEvent =
+    event as MultiDayEventView;
+
+  const storedDays = Array.isArray(
+    multiDayEvent.eventDays
+  )
+    ? multiDayEvent.eventDays.filter(
+        (entry) =>
+          entry &&
+          Number.isInteger(entry.day) &&
+          Boolean(entry.date)
+      )
+    : [];
+
+  const startDate =
+    multiDayEvent.startDate ||
+    storedDays[0]?.date ||
+    (event.startAt
+      ? toLocalCalendarDateKey(event.startAt)
+      : toLocalCalendarDateKey(event.date));
+
+  const legacyDuration = Number(
+    multiDayEvent.durationDays
+  );
+
+  const legacyEndDate =
+    Number.isInteger(legacyDuration) &&
+    legacyDuration > 1 &&
+    startDate
+      ? addDaysToIsoDate(startDate, legacyDuration - 1)
+      : "";
+
+  const endDate =
+    multiDayEvent.endDate ||
+    storedDays[storedDays.length - 1]?.date ||
+    legacyEndDate ||
+    (event.endAt
+      ? toLocalCalendarDateKey(event.endAt)
+      : startDate);
+
+  const days =
+    storedDays.length
+      ? storedDays
+      : startDate && endDate
+        ? buildEventDaysBetween(startDate, endDate)
+        : startDate
+          ? buildEventDays(startDate, 1)
+          : [];
+
+  return {
+    durationDays: days.length || 1,
+    startDate,
+    endDate: endDate || startDate,
+    days,
+  };
+}
+
+function formatEventDateRange(
+  event: AdminEvent
+): string {
+  const schedule =
+    getEventScheduleMeta(event);
+
+  if (
+    !schedule.startDate ||
+    !schedule.endDate ||
+    schedule.startDate === schedule.endDate
+  ) {
+    return event.date;
+  }
+
+  return `${formatEventDate(
+    schedule.startDate
+  )} - ${formatEventDate(
+    schedule.endDate
+  )}`;
+}
+
+function getEventDateTimeBounds(
+  event: AdminEvent
+): {
+  startAt: string;
+  endAt: string;
+} {
+  const schedule = getEventScheduleMeta(event);
+
+  const storedStartAt = event.startAt
+    ? new Date(event.startAt)
+    : null;
+  const storedEndAt = event.endAt
+    ? new Date(event.endAt)
+    : null;
+
+  const validStoredStartAt =
+    storedStartAt && !Number.isNaN(storedStartAt.getTime())
+      ? storedStartAt.toISOString()
+      : "";
+
+  const validStoredEndAt =
+    storedEndAt && !Number.isNaN(storedEndAt.getTime())
+      ? storedEndAt.toISOString()
+      : "";
+
+  const startTime =
+    parseEventTimeToHhMm(event.time) || "00:00";
+  const endTime =
+    parseEventTimeToHhMm(event.endTime) || "23:59";
+
+  const fallbackStartAt =
+    schedule.startDate
+      ? combineEventDateTime(schedule.startDate, startTime)
+      : "";
+
+  const fallbackEndAt =
+    schedule.endDate
+      ? combineEventDateTime(schedule.endDate, endTime)
+      : "";
+
+  return {
+    startAt: validStoredStartAt || fallbackStartAt,
+    endAt: validStoredEndAt || fallbackEndAt,
+  };
 }
 
 function getEventImages(event: {
@@ -360,13 +629,14 @@ function resolveAutomaticEventStatus(
   }
 
   const nowMs = now.getTime();
+  const bounds = getEventDateTimeBounds(event);
 
-  const startMs = event.startAt
-    ? new Date(event.startAt).getTime()
+  const startMs = bounds.startAt
+    ? new Date(bounds.startAt).getTime()
     : Number.NaN;
 
-  const endMs = event.endAt
-    ? new Date(event.endAt).getTime()
+  const endMs = bounds.endAt
+    ? new Date(bounds.endAt).getTime()
     : Number.NaN;
 
   if (
@@ -390,13 +660,18 @@ function resolveAutomaticEventStatus(
   }
 
   if (
-    event.status === "Approved" ||
-    event.status === "Upcoming"
+    Number.isFinite(startMs) &&
+    nowMs < startMs
   ) {
     return {
       ...event,
-      // Legacy "Approved" events are shown as Upcoming.
-      // Upcoming remains Upcoming until the event start time.
+      status: "Upcoming",
+    };
+  }
+
+  if (event.status === "Approved") {
+    return {
+      ...event,
       status: "Upcoming",
     };
   }
@@ -689,6 +964,9 @@ export default function EventsScreen() {
   const [newEndTime, setNewEndTime] =
     useState("");
 
+  const [newEndDate, setNewEndDate] =
+    useState("");
+
   const [
     newLocation,
     setNewLocation,
@@ -779,14 +1057,75 @@ export default function EventsScreen() {
 
       const now = new Date();
 
-      setEvents(
-        loadedEvents.map(
-          (event) =>
-            resolveAutomaticEventStatus(
-              event,
-              now
-            )
-        )
+      const resolvedEvents = loadedEvents.map(
+        (event) =>
+          resolveAutomaticEventStatus(
+            event,
+            now
+          )
+      );
+
+      setEvents(resolvedEvents);
+
+      // Persist automatic status changes so Firestore does not stay
+      // stuck on Upcoming/Ongoing after the event dates have passed.
+      // This also backfills reliable startAt/endAt values for older events.
+      await Promise.allSettled(
+        loadedEvents.map(async (event, index) => {
+          if (
+            event.status === "Pending" ||
+            event.status === "Rejected"
+          ) {
+            return;
+          }
+
+          const resolved = resolvedEvents[index];
+          const schedule = getEventScheduleMeta(event);
+          const bounds = getEventDateTimeBounds(event);
+          const patch: Record<string, unknown> = {};
+
+          if (resolved.status !== event.status) {
+            patch.status = resolved.status;
+          }
+
+          const currentStartAt = event.startAt
+            ? new Date(event.startAt).getTime()
+            : Number.NaN;
+          const currentEndAt = event.endAt
+            ? new Date(event.endAt).getTime()
+            : Number.NaN;
+
+          if (
+            !Number.isFinite(currentStartAt) &&
+            bounds.startAt
+          ) {
+            patch.startAt = bounds.startAt;
+          }
+
+          if (
+            !Number.isFinite(currentEndAt) &&
+            bounds.endAt
+          ) {
+            patch.endAt = bounds.endAt;
+          }
+
+          const multiDayEvent = event as MultiDayEventView;
+
+          if (!multiDayEvent.startDate && schedule.startDate) {
+            patch.startDate = schedule.startDate;
+          }
+
+          if (!multiDayEvent.endDate && schedule.endDate) {
+            patch.endDate = schedule.endDate;
+          }
+
+          if (Object.keys(patch).length > 0) {
+            await updateDoc(
+              doc(db, "events", event.id),
+              patch
+            );
+          }
+        })
       );
     } catch (error) {
       Alert.alert(
@@ -906,12 +1245,16 @@ export default function EventsScreen() {
               event.status ===
                 status;
 
+            const schedule =
+              getEventScheduleMeta(event);
+
             const matchesDate =
               isEventWithinDateRange(
-                event.date,
+                schedule.startDate || event.date,
                 event.createdAt,
                 fromDate,
-                toDate
+                toDate,
+                schedule.endDate
               );
 
             return (
@@ -1173,6 +1516,17 @@ export default function EventsScreen() {
           "End time is required.";
       }
 
+      if (!newEndDate.trim()) {
+        validationErrors.endDate =
+          "End date is required.";
+      } else if (
+        newDate.trim() &&
+        newEndDate.trim() < newDate.trim()
+      ) {
+        validationErrors.endDate =
+          "End date cannot be before the start date.";
+      }
+
       if (!newLocation.trim()) {
         validationErrors.location =
           "Event location is required.";
@@ -1211,22 +1565,44 @@ export default function EventsScreen() {
         return;
       }
 
+      const eventDays =
+        buildEventDaysBetween(
+          newDate.trim(),
+          newEndDate.trim()
+        );
+
+      const durationDays =
+        eventDays.length || 1;
+
+      const finalEventDate =
+        newEndDate.trim() || newDate.trim();
+
       const startAt = combineEventDateTime(
         newDate.trim(),
         newTime.trim()
       );
 
+      const firstDayEndAt =
+        combineEventDateTime(
+          newDate.trim(),
+          newEndTime.trim()
+        );
+
       const endAt = combineEventDateTime(
-        newDate.trim(),
+        finalEventDate,
         newEndTime.trim()
       );
 
-      if (!startAt || !endAt) {
+      if (
+        !startAt ||
+        !firstDayEndAt ||
+        !endAt
+      ) {
         creatingRef.current = false;
 
         showEventFormAlert(
           "Invalid Event Time",
-          "Please select a valid event date, start time, and end time.",
+          "Please select valid start/end dates and start/end times.",
           "warning"
         );
 
@@ -1234,7 +1610,7 @@ export default function EventsScreen() {
       }
 
       if (
-        new Date(endAt).getTime() <=
+        new Date(firstDayEndAt).getTime() <=
         new Date(startAt).getTime()
       ) {
         setEventFormErrors({
@@ -1245,12 +1621,19 @@ export default function EventsScreen() {
 
         showEventFormAlert(
           "Invalid End Time",
-          "The event end time must be later than the start time.",
+          "The daily event end time must be later than the start time.",
           "warning"
         );
 
         return;
       }
+
+      const eventScheduleMetadata = {
+        startDate: newDate.trim(),
+        endDate: finalEventDate,
+        durationDays,
+        eventDays,
+      };
 
       setEventFormErrors({});
 
@@ -1305,6 +1688,7 @@ export default function EventsScreen() {
                 : newEndTime.trim(),
               startAt,
               endAt,
+              ...eventScheduleMetadata,
               location: newLocation.trim(),
               capacity,
               imageUrl: imageUrl || undefined,
@@ -1343,6 +1727,8 @@ export default function EventsScreen() {
 
               endAt,
 
+              ...eventScheduleMetadata,
+
               location:
                 newLocation.trim(),
 
@@ -1380,6 +1766,7 @@ export default function EventsScreen() {
         );
         setNewDescription("");
         setNewDate("");
+        setNewEndDate("");
         setNewTime("");
         setNewEndTime("");
         setNewLocation("");
@@ -2472,7 +2859,9 @@ const confirmRejectEvent = async () => {
                             }
                           >
                             {
-                              event.date
+                              formatEventDateRange(
+                                event
+                              )
                             }
                           </Text>
 
@@ -2481,9 +2870,15 @@ const confirmRejectEvent = async () => {
                               styles.smallText
                             }
                           >
-                            {event.endTime
-                              ? `${event.time} - ${event.endTime}`
-                              : event.time}
+                            {getEventScheduleMeta(event).durationDays > 1
+                              ? `${getEventScheduleMeta(event).durationDays} days · ${
+                                  event.endTime
+                                    ? `${event.time} - ${event.endTime}`
+                                    : event.time
+                                }`
+                              : event.endTime
+                                ? `${event.time} - ${event.endTime}`
+                                : event.time}
                           </Text>
                         </View>
 
@@ -3302,39 +3697,44 @@ const confirmRejectEvent = async () => {
                   error={eventFormErrors.description}
                 />
 
-                <View
-                  style={
-                    styles.inlineFields
-                  }
-                >
-                  <View
-                    style={
-                      styles.inlineField
-                    }
-                  >
+                <View style={styles.inlineFields}>
+                  <View style={styles.inlineField}>
                     <DatePickerField
-                      label="Date *"
-                      value={
-                        newDate
-                      }
+                      label="Start Date *"
+                      value={newDate}
                       onChange={(value) => {
                         setNewDate(value);
+
+                        if (!newEndDate || newEndDate < value) {
+                          setNewEndDate(value);
+                        }
+
                         clearEventFormError("date");
+                        clearEventFormError("endDate");
                       }}
                       error={eventFormErrors.date}
                     />
                   </View>
 
-                  <View
-                    style={
-                      styles.inlineField
-                    }
-                  >
+                  <View style={styles.inlineField}>
+                    <DatePickerField
+                      label="End Date *"
+                      value={newEndDate}
+                      minimumDate={newDate || undefined}
+                      onChange={(value) => {
+                        setNewEndDate(value);
+                        clearEventFormError("endDate");
+                      }}
+                      error={eventFormErrors.endDate}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.inlineFields}>
+                  <View style={styles.inlineField}>
                     <TimePickerField
                       label="Start Time *"
-                      value={
-                        newTime
-                      }
+                      value={newTime}
                       onChange={(value) => {
                         setNewTime(value);
                         clearEventFormError("time");
@@ -3343,16 +3743,10 @@ const confirmRejectEvent = async () => {
                     />
                   </View>
 
-                  <View
-                    style={
-                      styles.inlineField
-                    }
-                  >
+                  <View style={styles.inlineField}>
                     <TimePickerField
                       label="End Time *"
-                      value={
-                        newEndTime
-                      }
+                      value={newEndTime}
                       onChange={(value) => {
                         setNewEndTime(value);
                         clearEventFormError("endTime");
@@ -3361,6 +3755,57 @@ const confirmRejectEvent = async () => {
                     />
                   </View>
                 </View>
+
+                {newDate &&
+                newEndDate &&
+                newEndDate >= newDate ? (
+                  <View style={styles.eventDaysPreview}>
+                    <View style={styles.eventDaysPreviewHeader}>
+                      <Text style={styles.eventDaysPreviewTitle}>
+                        Event Schedule
+                      </Text>
+
+                      <Text style={styles.eventDaysPreviewCount}>
+                        {buildEventDaysBetween(
+                          newDate,
+                          newEndDate
+                        ).length} day
+                        {buildEventDaysBetween(
+                          newDate,
+                          newEndDate
+                        ).length === 1
+                          ? ""
+                          : "s"}
+                      </Text>
+                    </View>
+
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={
+                        styles.eventDaysPreviewList
+                      }
+                    >
+                      {buildEventDaysBetween(
+                        newDate,
+                        newEndDate
+                      ).map((entry) => (
+                        <View
+                          key={`${entry.day}-${entry.date}`}
+                          style={styles.eventDayChip}
+                        >
+                          <Text style={styles.eventDayChipTitle}>
+                            Day {entry.day}
+                          </Text>
+
+                          <Text style={styles.eventDayChipDate}>
+                            {formatEventDate(entry.date)}
+                          </Text>
+                        </View>
+                      ))}
+                    </ScrollView>
+                  </View>
+                ) : null}
 
                 <FormField
                   label="Maximum Participants *"
@@ -3708,8 +4153,16 @@ const confirmRejectEvent = async () => {
                       </Text>
 
                       <Text style={styles.eventInfoValue}>
-                        {selectedEvent.date}
+                        {formatEventDateRange(
+                          selectedEvent
+                        )}
                       </Text>
+
+                      {getEventScheduleMeta(selectedEvent).durationDays > 1 ? (
+                        <Text style={styles.eventInfoSubValue}>
+                          {getEventScheduleMeta(selectedEvent).durationDays} days
+                        </Text>
+                      ) : null}
                     </View>
                   </View>
 
@@ -3796,6 +4249,58 @@ const confirmRejectEvent = async () => {
                     </Text>
                   </View>
                 </View>
+
+                {getEventScheduleMeta(selectedEvent).durationDays > 1 ? (
+                  <View style={styles.eventScheduleCard}>
+                    <View style={styles.eventScheduleHeader}>
+                      <View>
+                        <Text style={styles.eventScheduleTitle}>
+                          Event Schedule
+                        </Text>
+
+                        <Text style={styles.eventScheduleSubtitle}>
+                          {getEventScheduleMeta(selectedEvent).durationDays} consecutive days
+                        </Text>
+                      </View>
+
+                      <CalendarDays
+                        size={19}
+                        color="#34733B"
+                      />
+                    </View>
+
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={
+                        styles.eventScheduleDays
+                      }
+                    >
+                      {getEventScheduleMeta(selectedEvent).days.map(
+                        (entry) => (
+                          <View
+                            key={`${entry.day}-${entry.date}`}
+                            style={styles.eventScheduleDay}
+                          >
+                            <Text style={styles.eventScheduleDayNumber}>
+                              Day {entry.day}
+                            </Text>
+
+                            <Text style={styles.eventScheduleDayDate}>
+                              {formatEventDate(entry.date)}
+                            </Text>
+
+                            <Text style={styles.eventScheduleDayTime}>
+                              {selectedEvent.endTime
+                                ? `${selectedEvent.time} - ${selectedEvent.endTime}`
+                                : selectedEvent.time}
+                            </Text>
+                          </View>
+                        )
+                      )}
+                    </ScrollView>
+                  </View>
+                ) : null}
 
                 {(() => {
                   const moderationInfo =
@@ -4249,7 +4754,7 @@ function PendingEventDetailsPage({
                       styles.pendingInfoValue
                     }
                   >
-                    {event.date}
+                    {formatEventDateRange(event)}
                   </Text>
 
                   <Text
@@ -4257,12 +4762,64 @@ function PendingEventDetailsPage({
                       styles.pendingInfoSubValue
                     }
                   >
-                    {event.endTime
-                      ? `${event.time} - ${event.endTime}`
-                      : event.time}
+                    {getEventScheduleMeta(event).durationDays > 1
+                      ? `${getEventScheduleMeta(event).durationDays} days · ${
+                          event.endTime
+                            ? `${event.time} - ${event.endTime}`
+                            : event.time
+                        }`
+                      : event.endTime
+                        ? `${event.time} - ${event.endTime}`
+                        : event.time}
                   </Text>
                 </View>
               </View>
+
+              {getEventScheduleMeta(event).durationDays > 1 ? (
+                <View style={styles.pendingScheduleBlock}>
+                  <View style={styles.pendingScheduleHeading}>
+                    <CalendarDays
+                      size={18}
+                      color="#111"
+                    />
+
+                    <View>
+                      <Text style={styles.pendingScheduleTitle}>
+                        Event Schedule
+                      </Text>
+
+                      <Text style={styles.pendingScheduleSubtitle}>
+                        {getEventScheduleMeta(event).durationDays} consecutive days
+                      </Text>
+                    </View>
+                  </View>
+
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={
+                      styles.pendingScheduleDays
+                    }
+                  >
+                    {getEventScheduleMeta(event).days.map(
+                      (entry) => (
+                        <View
+                          key={`${entry.day}-${entry.date}`}
+                          style={styles.pendingScheduleDay}
+                        >
+                          <Text style={styles.pendingScheduleDayTitle}>
+                            Day {entry.day}
+                          </Text>
+
+                          <Text style={styles.pendingScheduleDayDate}>
+                            {formatEventDate(entry.date)}
+                          </Text>
+                        </View>
+                      )
+                    )}
+                  </ScrollView>
+                </View>
+              ) : null}
 
               {/* LOCATION */}
 
@@ -4971,6 +5528,7 @@ function DatePickerField({
   value,
   onChange,
   error,
+  minimumDate,
 }: {
   label: string;
   value: string;
@@ -4978,6 +5536,7 @@ function DatePickerField({
     value: string
   ) => void;
   error?: string;
+  minimumDate?: string;
 }) {
   const [
     showPicker,
@@ -5013,9 +5572,11 @@ function DatePickerField({
           {
             type: "date",
             value,
-            min: toIsoDate(
-              new Date()
-            ),
+            min:
+              minimumDate &&
+              minimumDate > toIsoDate(new Date())
+                ? minimumDate
+                : toIsoDate(new Date()),
 
             onChange: (
               event: {
@@ -5107,7 +5668,9 @@ function DatePickerField({
           mode="date"
           display="default"
           minimumDate={
-            new Date()
+            minimumDate
+              ? new Date(`${minimumDate}T00:00:00`)
+              : new Date()
           }
           onChange={(
             _,
@@ -6781,15 +7344,75 @@ rejectConfirmText: {
     },
 
     inlineFields: {
-      flexDirection:
-        "row",
+      width: "100%",
+      flexDirection: "row",
       flexWrap: "wrap",
       gap: 10,
     },
 
     inlineField: {
-      flex: 1,
-      minWidth: 120,
+      flexGrow: 1,
+      flexShrink: 1,
+      flexBasis: 0,
+      minWidth: 150,
+    },
+
+    eventDaysPreview: {
+      width: "100%",
+      marginTop: -2,
+      marginBottom: 14,
+      padding: 10,
+      borderWidth: 1,
+      borderColor: "#DDE6DB",
+      borderRadius: 9,
+      backgroundColor: "#F7FAF6",
+    },
+
+    eventDaysPreviewHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      marginBottom: 8,
+    },
+
+    eventDaysPreviewTitle: {
+      fontSize: 11,
+      color: "#2A4B30",
+      fontFamily: MONTSERRAT_FONT,
+    },
+
+    eventDaysPreviewCount: {
+      fontSize: 10,
+      color: "#6D786E",
+      fontFamily: MONTSERRAT_FONT,
+    },
+
+    eventDaysPreviewList: {
+      gap: 8,
+      paddingRight: 4,
+    },
+
+    eventDayChip: {
+      minWidth: 104,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      borderRadius: 7,
+      borderWidth: 1,
+      borderColor: "#CFE0CC",
+      backgroundColor: "#FFFFFF",
+    },
+
+    eventDayChipTitle: {
+      fontSize: 10,
+      color: "#34733B",
+      fontFamily: MONTSERRAT_FONT,
+    },
+
+    eventDayChipDate: {
+      marginTop: 3,
+      fontSize: 9,
+      color: "#525C53",
+      fontFamily: MONTSERRAT_FONT,
     },
 
     mapPreview: {
@@ -7488,6 +8111,64 @@ rejectConfirmText: {
         MONTSERRAT_FONT,
     },
 
+    pendingScheduleBlock: {
+      marginTop: 2,
+      marginBottom: 4,
+      marginLeft: 30,
+      paddingLeft: 8,
+      paddingVertical: 8,
+      borderLeftWidth: 2,
+      borderLeftColor: "#D9E7D7",
+    },
+
+    pendingScheduleHeading: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 9,
+      marginBottom: 8,
+    },
+
+    pendingScheduleTitle: {
+      fontSize: 11,
+      color: "#2B4D31",
+      fontFamily: MONTSERRAT_FONT,
+    },
+
+    pendingScheduleSubtitle: {
+      marginTop: 1,
+      fontSize: 9,
+      color: "#777777",
+      fontFamily: MONTSERRAT_FONT,
+    },
+
+    pendingScheduleDays: {
+      gap: 8,
+      paddingRight: 6,
+    },
+
+    pendingScheduleDay: {
+      minWidth: 105,
+      paddingHorizontal: 9,
+      paddingVertical: 7,
+      borderWidth: 1,
+      borderColor: "#D8E4D6",
+      borderRadius: 7,
+      backgroundColor: "#F8FBF7",
+    },
+
+    pendingScheduleDayTitle: {
+      fontSize: 9,
+      color: "#34733B",
+      fontFamily: MONTSERRAT_FONT,
+    },
+
+    pendingScheduleDayDate: {
+      marginTop: 2,
+      fontSize: 8,
+      color: "#555555",
+      fontFamily: MONTSERRAT_FONT,
+    },
+
     // ACTIONS
 
     pendingActions: {
@@ -7763,6 +8444,71 @@ eventLocationRow: {
   paddingVertical: 11,
   flexDirection: "row",
   alignItems: "flex-start",
+},
+
+eventScheduleCard: {
+  marginTop: 12,
+  borderWidth: 1,
+  borderColor: "#DCE5D9",
+  borderRadius: 9,
+  backgroundColor: "#FAFCF9",
+  padding: 12,
+},
+
+eventScheduleHeader: {
+  flexDirection: "row",
+  alignItems: "center",
+  justifyContent: "space-between",
+  marginBottom: 10,
+},
+
+eventScheduleTitle: {
+  fontSize: 11,
+  color: "#24572D",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventScheduleSubtitle: {
+  marginTop: 2,
+  fontSize: 9,
+  color: "#7A837B",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventScheduleDays: {
+  gap: 8,
+  paddingRight: 4,
+},
+
+eventScheduleDay: {
+  minWidth: 125,
+  paddingHorizontal: 10,
+  paddingVertical: 9,
+  borderWidth: 1,
+  borderColor: "#DCE5D9",
+  borderRadius: 8,
+  backgroundColor: "#FFFFFF",
+},
+
+eventScheduleDayNumber: {
+  fontSize: 10,
+  color: "#34733B",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventScheduleDayDate: {
+  marginTop: 3,
+  fontSize: 10,
+  color: "#2F3830",
+  fontFamily: MONTSERRAT_FONT,
+},
+
+eventScheduleDayTime: {
+  marginTop: 3,
+  fontSize: 8,
+  lineHeight: 12,
+  color: "#788079",
+  fontFamily: MONTSERRAT_FONT,
 },
 
 eventModerationRow: {
